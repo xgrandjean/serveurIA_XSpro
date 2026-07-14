@@ -1,0 +1,1119 @@
+/**
+ * AI Worker — views/listeQuestions.js  (contextName : "formulaireListeQuestions")
+ * Hook spécifique à la vue "formulaireListeQuestions".
+ *
+ * ── MANIFEST DE SURCHARGE ──────────────────────────────────────────────────────
+ * null sur un champ = garder la valeur fournie par XSpro dans workerConfig.
+ *
+ * ── CONTRAT D'ÉDITION : PAR ACTIONS (editionParActions: true) ─────────────────
+ * Cette vue n'utilise PAS le contrat historique positionnel (tableau plat complet).
+ * Le LLM reçoit une colonne _id en tête du CSV "DONNÉES ACTUELLES" et répond avec
+ * un tableau JSON d'actions, résolues par applyRowActions() dans llmClient.js :
+ *
+ *   { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
+ *   { "_action": "delete", "_id": <id> }
+ *   { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs> }
+ *
+ * Toute ligne existante non référencée par une action reste inchangée (conservée
+ * par défaut). _id est un identifiant interne à la session (sessionManager.js),
+ * jamais transmis à XSpro (retiré par snapshotRows avant tout envoi externe).
+ *
+ * ── CONTRAT DE SORTIE PAR LIGNE (rows → XSpro, une fois les actions résolues) ─
+ * Chaque ligne finale (update/insert résolus) a ces clés :
+ *
+ *   type              string    "qcm" | "courte" | "ouverte" | "selection" | "cours"
+ *   contenu           string    Sauts de ligne → <br>
+ *   regle             string    "unique" | "multiple" | "texte" | "texte(10)" | "nombre" | ""
+ *   correction        string    "auto" | "manuel" | "semi" | ""
+ *   points            string    "1" | "2" | "3" | "" (vide pour cours)
+ *   choix             array     ["A","B","C","D"] — vide [] pour courte/ouverte/cours
+ *   ordre_choix       string    "aleatoire" | "fixe" | ""
+ *   choixCorrect      array     qcm/selection → indices [0,2] ; courte → strings ["réponse"] ; ouverte/cours → []
+ *   indication        string    "" si inutile
+ *   explicationCorrection string "" si inutile
+ *   commentaire       string    "" par défaut
+ *   consigneIA        string    "" par défaut
+ *   ordreQuestion     string    "" par défaut
+ *
+ * Ces rows passent ensuite dans parse() de promptBuilder_listeQuestions.js côté
+ * XSpro (mode 'json') qui gère la normalisation finale (_normaliserLigne,
+ * _convertChoixCorrectIndices, _decodeField).
+ *
+ * ── reglesPostProcess ─────────────────────────────────────────────────────────
+ * defaults : appliqué après applyPlaceholderDefaults
+ * merge    : appliqué après applyRowActions (résolution des actions en tableau plat)
+ *            — corrige les incohérences LLM, opère sur le résultat déjà aplati,
+ *            aucune adaptation nécessaire pour le contrat par actions.
+ *
+ * LEXIQUE DES OPÉRATEURS (op) :
+ *   empty  | vide ou 0            | { champ: 'points', op: 'empty' }
+ *   eq     | égal à               | { champ: 'type', op: 'eq', valeur: 'cours' }
+ *   neq    | différent de         | { champ: 'type', op: 'neq', valeur: 'cours' }
+ *   gt/lt  | > / <                | { champ: 'points', op: 'gt', valeur: 3 }
+ *   gte/lte| >= / <=              | { champ: 'points', op: 'gte', valeur: 1 }
+ *
+ * VALEURS DANS set :
+ *   Fixe        | set: { points: 1 }
+ *   Conditionnel| set: { champ: { si: { champ, op }, alors, sinon } }
+ *   abs         | set: { champ: { abs: true } }      (rend positif)
+ * ──────────────────────────────────────────────────────────────────────────────
+ */
+
+'use strict';
+
+// ── MANIFEST ──────────────────────────────────────────────────────────────────
+const MANIFEST = {
+
+  /**
+   * Active le contrat d'édition par actions (update/delete/insert via _id) au lieu
+   * du contrat historique positionnel. Permet au LLM d'insérer, corriger ou supprimer
+   * des lignes individuellement, sans avoir à retranscrire l'intégralité du tableau —
+   * cf. llmClient.js (applyRowActions) et sessionManager.js (_id, consumeNextId).
+   */
+  editionParActions: true,
+
+  /**
+   * Surcharges visuelles par colonne (UI Worker).
+   * Aucune surcharge structurelle globale ici — chaque MODE définit les siennes.
+   */
+  surchargesColonnes: {},
+
+  /**
+   * Colonnes éditées en multiligne (textarea, Entrée = saut de ligne).
+   * Propagé à grid.js via effectiveWorkerConfig pour brancher TextareaCellEditor.
+   * Aucun hardcode dans grid.js : la liste est fournie par le hook vue.
+   */
+  champsMultiligne: ['contenu', 'choix', 'choixCorrect', 'indication', 'explicationCorrection', 'consigneIA', 'commentaire'],
+
+  /**
+   * Colonnes de type array (tableaux JavaScript).
+   * Propagé à grid.js via effectiveWorkerConfig pour gérer valueFormatter/valueParser.
+   * Ces champs contiennent des arrays JSON qui doivent être affichés/convertis.
+   */
+  champsArray: ['choix', 'choixCorrect'],
+
+  /**
+   * Styles de ligne selon le type de question.
+   * Appliqué dans public/grid.js via getRowStyle.
+   */
+  // Indices type (manifest_parcours.js) : 1=qcm, 2=courte, 3=ouverte, 4=selection, 5=cours
+  rowStyles: [
+    // Cours — fond bleu clair, gras
+    { si: { champ: 'type', op: 'eq', valeur: 5 },
+      style: { background: '#EEF4FB', fontWeight: 'bold', color: '#1E3A5F' } },
+    // qcm et sélection — fond légèrement coloré
+    { si: { champ: 'type', op: 'eq', valeur: 1 },
+      style: { background: '#F0FAF0' } },
+    { si: { champ: 'type', op: 'eq', valeur: 4 },
+      style: { background: '#F0FAF0' } },
+    // Réponse courte — fond neutre
+    { si: { champ: 'type', op: 'eq', valeur: 2 },
+      style: { background: '#F9F9F9' } },
+    // Ouverte — fond légèrement chaud
+    { si: { champ: 'type', op: 'eq', valeur: 3 },
+      style: { background: '#FEF9EC' } },
+  ],
+
+  // ── Prompt système de base (commun aux deux modes, peut être surchargé par MODE) ─
+  systemPrompt: `Tu es un assistant pédagogique expert en création de contenu de formation.
+Tu génères ou modifies des questions et cours structurés pour un système e-learning.
+Respecte scrupuleusement les règles métier définies et le format de sortie attendu.
+Ne produis que des lignes utiles — n'ajoute pas de lignes vides ni de doublons.
+Langue : UNIQUEMENT du français correct et technique.`,
+
+  promptsSuggeres: null, // surchargé par les MODES
+  prompt:          null,
+  modele:          null,
+  export:          null,
+
+  // ── Configuration d'export : conversion indices → labels ───────────────────────────
+  // Utilisé par excelExport.js quand XSpro est absent pour produire un fichier lisible
+  // Les libellés correspondent aux valeursPossibles définies ci-dessous
+  exportFormat: {
+    type: {
+      convert: 'label',
+      labels: [' ', 'qcm', 'courte', 'ouverte', 'selection', 'cours']
+    },
+    regle: {
+      convert: 'label',
+      labels: [' ', 'validation', 'unique', 'multiple', 'texte', 'texte(10)', 'nombre']
+    },
+    correction: {
+      convert: 'label',
+      labels: [' ', 'auto', 'manuel', 'semi']
+    },
+    ordre_choix: {
+      convert: 'label',
+      labels: [' ', 'aleatoire', 'fixe']
+    }
+  },
+
+  // ── Règles métier — sérialisées en JSON dans le prompt par buildSystemPrompt ─
+  regles: {
+
+    /**
+     * Contrat par type de question.
+     * Ces règles sont absolues — toute ligne non conforme sera rejetée côté XSpro.
+     */
+    typesEtRegles: {
+      qcm: {
+        description:   'Question à choix multiples',
+        regle:         ['unique', 'multiple'],
+        correction:    ['auto'],
+        choix:         'Requis. 4 propositions par défaut (sauf mention contraire). Array de strings.',
+        choixCorrect:  'Requis. Indices 0-based des bonnes réponses. Ex: [1] ou [0,2]. Pour regle="multiple" : au moins 1 indice, toutes les combinaisons acceptées (1, 2, 3 ou 4 réponses possibles).',
+        ordre_choix:   '"aleatoire" | "fixe" | ""',
+        points:        'Entier 1-3 selon difficulté.',
+      },
+      selection: {
+        description:   'Liste déroulante (un seul choix visible à la fois)',
+        regle:         ['unique'],
+        correction:    ['auto'],
+        choix:         'Requis. 4 propositions par défaut (sauf mention contraire). Array de strings.',
+        choixCorrect:  'Requis. Indice 0-based de la bonne réponse. Ex: [1].',
+        ordre_choix:   '"aleatoire" | "fixe" | ""',
+        points:        'Entier 1-3 selon difficulté.',
+      },
+      courte: {
+        description:   'Réponse courte saisie libre',
+        regle:         ['texte', 'nombre'],
+        correction:    ['auto', 'semi', 'manuel'],
+        choix:         'Vide — laisser [].',
+        choixCorrect:  'Array de strings : toutes les réponses acceptables. Ex: ["herbivore", "végétarien"]. Respecte la casse exacte.',
+        ordre_choix:   'Vide — non applicable.',
+        points:        'Entier 1-3 selon difficulté.',
+      },
+      ouverte: {
+        description:   'Texte long — réponse libre',
+        regle:         ['texte', 'texte(10)'],
+        correction:    ['manuel', 'semi'],
+        choix:         'Vide — laisser [].',
+        choixCorrect:  'Vide — laisser [].',
+        ordre_choix:   'Vide — non applicable.',
+        points:        'Entier 1-3 selon difficulté.',
+      },
+      cours: {
+        description:   'Bloc de contenu pédagogique (pas une question)',
+        regle:         [' ', 'validation'],
+        correction:    [' ', 'auto'],
+        choix:         'Vide — laisser [].',
+        choixCorrect:  'Vide — laisser [].',
+        ordre_choix:   'Vide — non applicable.',
+        points:        'Vide — les cours ne sont pas notés.',
+        contenu:       'Markdown enrichi : ## titres, **gras**, *italique*, - listes, | tableaux, ```blocs code```. HTML simple accepté (entités encodés).',
+      },
+    },
+
+    /**
+     * Format des champs communs à tous les types.
+     */
+    formatChamps: {
+      contenu:              'Énoncé de la question ou corps du cours. Sauts de ligne → <br>. Markdown pour les cours, texte simple pour les questions.',
+      choix:                'Array de strings. Ex: ["Les félidés", "Les équidés", "Les bovidés", "Les canidés"].',
+      choixCorrect:         'Array — format dépend du type (voir typesEtRegles).',
+      indication:           'Indice optionnel affiché à la demande de l\'apprenant. "" si inutile.',
+      explicationCorrection:'Explication affichée après correction. "" si inutile.',
+      commentaire:          '"" par défaut — laisser vide sauf demande explicite.',
+      // consigneIA et ordreQuestion ne sont PAS documentés ici : ils sont dans
+      // colonnesLlmHidden des DEUX modes (analyse et creation), donc jamais vus par
+      // le LLM. Les documenter ici ajouterait des instructions mortes dans le prompt
+      // système si buildSystemPrompt sérialise formatChamps sans filtrage par
+      // colonnesLlmHidden. Si ces champs doivent un jour être exposés au LLM dans
+      // un mode donné, réintroduire l'entrée à ce moment-là.
+    },
+
+    /**
+     * Valeurs autorisées par champ (pour validation LLM).
+     */
+    valeursPossibles: {
+      type:        ['qcm', 'courte', 'ouverte', 'selection', 'cours'],
+      regle:       [' ', 'validation', 'unique', 'multiple', 'texte', 'texte(10)', 'nombre'],
+      correction:  [' ', 'auto', 'manuel', 'semi'],
+      ordre_choix: [' ', 'aleatoire', 'fixe'],
+    },
+
+    /**
+     * Consignes de qualité transversales.
+     */
+    qualite: [
+      'Les réponses doivent être 100 % exactes — particulièrement pour les sujets techniques.',
+      'Pour les qcm : les distracteurs (mauvaises réponses) doivent être plausibles.',
+      'Ne pas créer deux questions identiques ou trop similaires dans la même session.',
+      'La difficulté doit être progressive (points 1 → 3).',
+      'Aucun charabia, aucun mot étranger non justifié.',
+    ],
+  },
+
+  // ── Règles de post-traitement déclaratives ───────────────────────────────────
+  reglesPostProcess: {
+
+    defaults: [
+      // points par défaut à 1 pour les non-cours si absent
+      // (géré dans postProcessMerge custom — le moteur déclaratif ne supporte
+      //  pas facilement la double condition neq + empty sur deux champs différents)
+    ],
+
+    // Indices type (manifest_parcours.js) : 1=qcm, 2=courte, 3=ouverte, 4=selection, 5=cours
+    merge: [
+      // ── type 5 (cours) : effacer ce qui ne s'applique pas, sauf regle="validation" ──
+      {
+        si:  { champ: 'type', op: 'eq', valeur: 5 },
+        et:  { champ: 'regle', op: 'neq', valeur: 1 },
+        set: { choix: ' ', choixCorrect: ' ', points: ' ', regle: ' ', correction: ' ', ordre_choix: ' ' },
+      },
+
+      // ── type 3 (ouverte) : pas de choix, pas de choixCorrect ────────────────
+      {
+        si:  { champ: 'type', op: 'eq', valeur: 3 },
+        set: { choix: ' ', choixCorrect: ' ', ordre_choix: ' ' },
+      },
+
+      // ── type 2 (courte) : pas de propositions à choisir ─────────────────────
+      {
+        si:  { champ: 'type', op: 'eq', valeur: 2 },
+        set: { choix: ' ', ordre_choix: ' ' },
+      },
+
+      // ── points hors plage → 1 (pour questions non-cours) ────────────────────
+      {
+        si:  { champ: 'type', op: 'neq', valeur: 5 },
+        et:  { champ: 'points', op: 'gt', valeur: 3 },
+        set: { points: 3 },
+      },
+      {
+        si:  { champ: 'type', op: 'neq', valeur: 5 },
+        et:  { champ: 'points', op: 'lt', valeur: 1 },
+        set: { points: 1 },
+      },
+    ],
+  },
+};
+
+// ── MODES ─────────────────────────────────────────────────────────────────────
+/**
+ * Deux modes de travail.
+ *
+ * analyse  : l'utilisateur consulte et améliore des questions existantes.
+ *            Le LLM voit l'intégralité des données — il modifie, corrige,
+ *            complète ou restructure ce qui lui est soumis.
+ *
+ * creation : l'utilisateur génère de nouvelles questions depuis le contenu
+ *            des cours du chapitre ou depuis des documents joints (PDF, ZIP).
+ *            Le LLM ne retranscrit pas les lignes existantes — il crée uniquement
+ *            le complément demandé.
+ */
+const MODES = {
+
+  analyse: {
+    label: 'Analyse / Modification',
+
+    surchargesColonnes: {
+      type:                  { width: 90 ,pinned:     'left'},
+      contenu:               { width: 380 },
+      regle:                 { width: 90 },
+      correction:            { width: 90 },
+      points:                { width: 75 },
+      choix:                 { width: 220 },
+      ordre_choix:           { width: 90 },
+      choixCorrect:          { width: 180 },
+      indication:            null,
+      explicationCorrection: null,
+      commentaire:           { width: 150 },
+      consigneIA:            null,
+      ordreQuestion:         { width: 70 },
+    },
+
+    colonnesUiHidden:  ['consigneIA','ordreQuestion'],
+    colonnesLlmHidden: ['consigneIA', 'ordreQuestion'],
+
+    systemPrompt: `Tu es un assistant pédagogique expert.
+Tu analyses et améliores des questions de formation existantes.
+Tu peux : corriger le contenu, améliorer la formulation, ajuster la difficulté,
+  compléter les champs manquants, corriger les incohérences type/regle/correction,
+  ajouter de nouvelles questions, ou supprimer une question devenue inutile.
+
+Les lignes existantes dans "DONNÉES ACTUELLES" ne sont pas une simple référence :
+elles font partie intégrante de la solution finale, comme une base déjà écrite que
+tu complètes. Tu dois :
+- t'aligner sur leur niveau de difficulté, leur style de formulation et la progression déjà engagée
+- éviter toute redondance ou répétition avec les questions déjà présentes
+- ne jamais contredire leur contenu pédagogique
+- les conserver telles quelles par défaut ; tu ne les modifies ou supprimes que si elles
+  sont explicitement incohérentes (type/regle/correction) ou si la demande le précise.`,
+
+    regles: null,  // hérite du MANIFEST
+
+    // Liste plate — chaque MODE expose ses propres suggestions, pas de sous-imbrication
+    // par sous-mode (cf. architecture formulairePromptDialog : une liste par mode actif).
+    promptsSuggeres: [
+      'Vérifie la cohérence de toutes les questions (type, règle, réponses correctes)',
+      'Améliore la formulation des questions trop ambiguës',
+      'Complète les champs "indication" et "explicationCorrection" manquants',
+      'Augmente progressivement la difficulté des questions (points 1 → 3)',
+      'Identifie et corrige les erreurs factuelles dans les qcm',
+    ],
+
+    modele: null,
+
+    // Contrat d'actions (editionParActions actif au niveau MANIFEST) : le LLM référence
+    // les lignes existantes par leur _id (colonne ajoutée en tête du CSV), et ne renvoie
+    // que ce qui change — pas besoin de retranscrire les lignes non concernées.
+    formatReponse: `
+== FORMAT DE RÉPONSE ==
+Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :
+  { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
+  { "_action": "delete", "_id": <id> }
+  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
+- "_id" référence la colonne _id du CSV "DONNÉES ACTUELLES" — jamais un numéro de ligne.
+- "update" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.
+- "insert" : "_apres" = _id de la ligne après laquelle insérer ; null = en tête ; "fin" = en dernier.
+- Ne renvoie AUCUNE action pour une ligne existante que tu ne modifies pas.
+- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_id"/"_apres").
+- Si une valeur est inconnue, utiliser "" (chaîne vide).
+- Pas de texte avant ni après. Pas de balises markdown.
+
+Exemple : corriger la ligne _id=3, supprimer la ligne _id=7, ajouter une question après _id=3 :
+[
+  { "_action": "update", "_id": 3, "points": 2, "correction": "semi" },
+  { "_action": "delete", "_id": 7 },
+  { "_action": "insert", "_apres": 3, "type": "qcm", "contenu": "...", "regle": "unique",
+    "correction": "auto", "points": "1", "choix": ["A","B","C","D"], "ordre_choix": "aleatoire",
+    "choixCorrect": [0], "indication": "", "explicationCorrection": "", "commentaire": "" }
+]
+`,
+  },
+
+  creation: {
+    label: 'Création',
+
+    surchargesColonnes: {
+      type:                  { width: 90, pinned:     'left'},
+      contenu:               { width: 380 },
+      regle:                 { width: 90 },
+      correction:            { width: 90 },
+      points:                { width: 60 },
+      choix:                 { width: 220 },
+      ordre_choix:           { width: 90 },
+      choixCorrect:          { width: 180 },
+      // indication:            null,
+      // explicationCorrection: null,
+      // commentaire:           { width: 150 },
+      // consigneIA:            null,
+      // ordreQuestion:         { width: 70 },
+    },
+
+    colonnesUiHidden:  ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
+    colonnesLlmHidden: ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
+
+    systemPrompt: `Tu es un assistant pédagogique expert en ingénierie pédagogique.
+Tu crées des questions de formation originales à partir du contenu des cours fournis
+et/ou des documents joints (PDF, ZIP, texte).
+
+Règles de création :
+- Génère UNIQUEMENT les nouvelles lignes demandées — ne retranscris pas les questions déjà présentes.
+  Techniquement, cela signifie : n'utilise que des actions "insert" (jamais "update"/"delete"
+  sauf demande explicite de corriger une ligne existante incohérente).
+- Base-toi sur le contenu des cours (section "COURS") comme source de vérité thématique.
+- Les lignes existantes dans "DONNÉES ACTUELLES" te servent de contexte : thème, niveau de
+  langue et de difficulté déjà engagés, à respecter pour que tes nouvelles questions s'insèrent
+  naturellement dans la continuité — sans jamais les répéter ou les paraphraser.
+- Si un document est joint, extrais-en les notions clés avant de générer les questions.
+- Varie les types (qcm, courte, ouverte, selection) selon la nature de la notion à évaluer.
+  ("cours" n'est volontairement pas listé ici : ce n'est pas un type de question
+  évaluative mais un bloc de contenu pédagogique — à ne générer que sur demande explicite.)
+- Respecte une progression de difficulté : points 1 (mémorisation) → 2 (compréhension) → 3 (application).
+- Pour les qcm : 4 propositions exactement (sauf mention contraire), distracteurs plausibles.
+- Valide techniquement chaque question avant de l'écrire.`,
+
+    regles: null,  // hérite du MANIFEST
+
+    promptsSuggeres: [
+      'Génère 10 questions qcm variées à partir du cours',
+      'Crée un mix de 5 qcm, 3 réponses courtes et 2 questions ouvertes',
+      'Génère des questions de niveau avancé (points 3) sur les notions complexes',
+      'Crée des questions avec indication et explication de correction',
+      'Extrait les notions clés du document joint et génère une question par notion',
+      'Génère uniquement des questions de type "réponse courte" sur les définitions',
+      'Analyse le document joint et génère des questions adaptées au niveau',
+      'Compare ce document avec le cours existant et complète les notions manquantes',
+    ],
+
+    modele: null,
+
+    // Contrat d'actions (editionParActions actif au niveau MANIFEST) : en création,
+    // le LLM n'utilise quasiment que "insert" — cohérent avec systemPrompt
+    // ("ne retranscris pas les questions déjà présentes").
+    formatReponse: `
+== FORMAT DE RÉPONSE ==
+Réponds UNIQUEMENT avec un tableau JSON valide d'actions "insert" — une par nouvelle question :
+  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
+- "_apres" = _id de la ligne du CSV "DONNÉES ACTUELLES" après laquelle insérer ; "fin" = à la suite
+  de toutes les lignes existantes (cas le plus courant en création) ; null = en tête.
+- N'utilise "update"/"delete" que si la demande te demande explicitement de corriger ou retirer
+  une ligne existante incohérente — sinon ces actions sont hors sujet en mode création.
+- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_apres").
+- Si une valeur est inconnue, utiliser "" (chaîne vide).
+- Pas de texte avant ni après. Pas de balises markdown.
+
+Exemple : ajouter 2 nouvelles questions à la suite des lignes existantes :
+[
+  { "_action": "insert", "_apres": "fin", "type": "qcm", "contenu": "...", "regle": "unique",
+    "correction": "auto", "points": "1", "choix": ["A","B","C","D"], "ordre_choix": "aleatoire",
+    "choixCorrect": [0] },
+  { "_action": "insert", "_apres": "fin", "type": "courte", "contenu": "...", "regle": "texte",
+    "correction": "auto", "points": "1", "choixCorrect": ["réponse"] }
+]
+`,
+  },
+};
+
+// ── SELECT CHOIX ──────────────────────────────────────────────────────────────
+/**
+ * Pour formulaireListeQuestions, les valeurs de type/regle/correction/ordre_choix
+ * sont des STRINGS en base XSpro (pas des entiers).
+ *
+ * SELECT_CHOIX est donc minimal ici : il sert principalement à l'UI du Worker
+ * pour afficher des dropdowns et contrôler les libellés vus par le LLM.
+ *
+ * Pas de surcharge dynamique depuis le payload (contrairement à detailsDevis
+ * qui charge listeTauxHoraires/listeTauxRemise).
+ *
+ * Note : XSpro normalise le retour LLM via _normaliserLigne() dans parse(),
+ * ce qui couvre la correction automatique des valeurs hors plage.
+ */
+function buildSelectChoix(workerConfig, data, xsproPayload) {
+  // Valeurs entières alignées sur l'encodage XSpro (manifest_parcours.js) :
+  //   PARCOURS_TYPE        = [' ', 'qcm', 'courte', 'ouverte', 'selection', 'cours']       → 0..5
+  //   PARCOURS_REGLE       = [' ', 'validation', 'unique', 'multiple', 'texte', 'texte(10)', 'nombre'] → 0..6
+  //   PARCOURS_CORRECTION  = [' ', 'auto', 'manuel', 'semi']                                → 0..3
+  //   PARCOURS_ORDRE_CHOIX = [' ', 'aleatoire', 'fixe']                                     → 0..2
+  // Le LLM voit le libellé (sendLabel:true) ; le retour est normalisé en indice entier
+  // (identique au comportement de niveauListe dans detailsDevis.js).
+  return {
+
+    type: {
+      sendLabel: true,
+      choix: [
+        { valeur: 0, label: ' ' },
+        { valeur: 1, label: 'qcm' },
+        { valeur: 2, label: 'Réponse courte' },
+        { valeur: 3, label: 'Texte long' },
+        { valeur: 4, label: 'Liste de choix' },
+        { valeur: 5, label: 'Cours' },
+      ],
+      fallback: {
+        siCondition: { champ: 'type', op: 'empty' },
+        alors: 0,
+        sinon: 1,
+      },
+    },
+
+    regle: {
+      sendLabel: true,
+      choix: [
+        { valeur: 0, label: ' ' },
+        { valeur: 1, label: 'validation' },
+        { valeur: 2, label: 'unique' },
+        { valeur: 3, label: 'multiple' },
+        { valeur: 4, label: 'texte' },
+        { valeur: 5, label: 'texte(10)' },
+        { valeur: 6, label: 'nombre' },
+      ],
+      fallback: {
+        siCondition: { champ: 'regle', op: 'empty' },
+        alors: 0,
+        // sinon: 0 (et non une valeur "devinée" comme 'unique') — 'unique' n'est pas
+        // une valeur autorisée pour courte/ouverte/cours (voir typesEtRegles) ; ce
+        // fallback n'a pas connaissance du type de la ligne, donc on reste neutre
+        // et on laisse postProcessMerge/validateFieldAgainstType imposer la vraie
+        // valeur par type.
+        sinon: 0,
+      },
+    },
+
+    correction: {
+      sendLabel: true,
+      choix: [
+        { valeur: 0, label: ' ' },
+        { valeur: 1, label: 'auto' },
+        { valeur: 2, label: 'manuel' },
+        { valeur: 3, label: 'semi' },
+      ],
+      fallback: {
+        siCondition: { champ: 'correction', op: 'empty' },
+        alors: 0,
+        // sinon: 0 (et non 'auto') — 'auto' n'est pas autorisé pour "ouverte"
+        // (manuel/semi uniquement) ; même raison de neutralité que pour "regle" ci-dessus.
+        sinon: 0,
+      },
+    },
+
+    ordre_choix: {
+      sendLabel: true,
+      choix: [ 
+        { valeur: 0, label: ' ' },
+        { valeur: 1, label: 'aleatoire' },
+        { valeur: 2, label: 'fixe' },
+      ],
+      fallback: {
+        siCondition: { champ: 'ordre_choix', op: 'empty' },
+        alors: 0,
+        sinon: 0,
+      },
+    },
+
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── INTERPRÉTEUR DE RÈGLES DÉCLARATIVES ──────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Copie locale — identique à detailsDevis.js.
+// Séparer dans un module partagé si d'autres vues en ont besoin.
+
+function evalCondition(row, cond) {
+  if (!cond) return true;
+  const { champ, op, valeur } = cond;
+  const val = row[champ];
+  const isEmpty = val === ' ' || val === null || val === undefined || Number(val) === 0;
+
+  switch (op) {
+    case 'empty': return isEmpty;
+    case 'eq':    return String(val) === String(valeur);
+    case 'neq':   return String(val) !== String(valeur);
+    case 'gt':    return Number(val) > Number(valeur);
+    case 'lt':    return Number(val) < Number(valeur);
+    case 'gte':   return Number(val) >= Number(valeur);
+    case 'lte':   return Number(val) <= Number(valeur);
+    default:      return false;
+  }
+}
+
+function applyRegle(row, regle) {
+  if (!evalCondition(row, regle.si)) return false;
+  if (regle.et && !evalCondition(row, regle.et)) return false;
+
+  for (const [champ, valeur] of Object.entries(regle.set)) {
+    if (typeof valeur === 'object' && valeur !== null) {
+      if (valeur.abs === true) {
+        const n = Number(row[champ]);
+        row[champ] = isNaN(n) ? ' ' : Math.abs(n);
+      } else if (valeur.si) {
+        row[champ] = evalCondition(row, valeur.si) ? valeur.alors : valeur.sinon;
+      } else {
+        row[champ] = valeur;
+      }
+    } else {
+      row[champ] = valeur;
+    }
+  }
+  return true;
+}
+
+function applyRegles(regles, rows) {
+  if (!regles || !regles.length) return rows;
+  return rows.map(row => {
+    const r = { ...row };
+    for (const regle of regles) applyRegle(r, regle);
+    return r;
+  });
+}
+
+// ── Construction automatique depuis reglesPostProcess ─────────────────────────
+const rpp = MANIFEST.reglesPostProcess || {};
+
+/**
+ * Appliqué après applyPlaceholderDefaults.
+ * Généré depuis MANIFEST.reglesPostProcess.defaults.
+ */
+function postProcessDefaults(rows, colonnes, regles) {
+  return applyRegles(rpp.defaults, rows);
+}
+
+/**
+ * Appliqué après parseAndMergeRows.
+ * Étend le moteur déclaratif avec la logique non-déclarative spécifique
+ * à formulaireListeQuestions :
+ *
+ *   1. Appliquer les règles déclaratives (nettoyage par type)
+ *   2. Valeur par défaut de points (1) pour les lignes non-cours sans points
+ *   3. Normalisation de choix/choixCorrect en array si le LLM a retourné des strings
+ *
+ * Note : _normaliserLigne() et _convertChoixCorrectIndices() côté XSpro (parse())
+ * font une seconde passe complète — ce postProcess est surtout utile pour
+ * l'affichage cohérent dans l'UI Worker avant validation.
+ */
+function postProcessMerge(mergedRows, originalRows, colonnes) {
+  // 1. Règles déclaratives
+  let rows = applyRegles(rpp.merge, mergedRows);
+
+  // 2. Compléments non-déclaratifs
+  // Indices type (manifest_parcours.js) : 1=qcm, 2=courte, 3=ouverte, 4=selection, 5=cours
+  rows = rows.map(row => {
+    const r = { ...row };
+    const type = Number(r.type);
+
+    // points par défaut → 1 si absent sur une ligne non-cours (type !== 5)
+    if (type !== 5) {
+      const pts = Number(r.points);
+      if (!r.points || isNaN(pts) || pts < 1) r.points = 1;
+    }
+
+    // Normaliser choix en array si string <br>-séparé
+    if (typeof r.choix === 'string' && r.choix !== ' ') {
+      r.choix = r.choix.split(/<br\s*\/?>|\n/i).map(v => v.trim()).filter(Boolean);
+    }
+    if (!Array.isArray(r.choix)) r.choix = [];
+
+    // Normaliser choixCorrect :
+    //   - qcm(1)/selection(4) → array d'indices numériques (ou strings d'indices)
+    //   - courte(2)           → array de strings
+    //   - ouverte(3)/cours(5) → array vide (déjà géré déclarativement, sécurité)
+    if (type === 3 || type === 5) {
+      r.choixCorrect = [];
+    } else if (typeof r.choixCorrect === 'string' && r.choixCorrect !== ' ') {
+      if (type === 1 || type === 4) {
+        // "0,2" → [0, 2]
+        r.choixCorrect = r.choixCorrect.split(',')
+          .map(v => v.trim())
+          .filter(Boolean)
+          .map(v => (isNaN(Number(v)) ? v : Number(v)));
+      } else {
+        // courte : "herbivore<br>végétarien" ou "herbivore,végétarien"
+        r.choixCorrect = r.choixCorrect.split(/<br\s*\/?>|,|\n/i)
+          .map(v => v.trim())
+          .filter(Boolean);
+      }
+    }
+    if (!Array.isArray(r.choixCorrect)) r.choixCorrect = [];
+
+    // Gestion des incohérences spécifiques Réponse courte (2) :
+    // correction dépend de choixCorrect (même règle conditionnelle que dans
+    // validateFieldAgainstType — appliquée ici aussi pour corriger dès la génération
+    // IA et pas seulement lors d'une édition manuelle ultérieure).
+    //   choixCorrect vide   → correction forcée à "manuel" (indice 2)
+    //   choixCorrect rempli → correction "manuel" invalide → repli sur "semi" (indice 3)
+    if (type === 2) {
+      const correctionLabel = valueToLabel('correction', r.correction) || r.correction;
+      const ccEmpty = r.choixCorrect.length === 0;
+      if (ccEmpty && (correctionLabel === 'auto' || correctionLabel === 'semi')) {
+        r.correction = 2; // manuel
+      } else if (!ccEmpty && correctionLabel === 'manuel') {
+        r.correction = 3; // semi (défaut XSpro quand choixCorrect est rempli)
+      }
+    }
+
+    // Gestion des incohérences spécifiques Texte long (3) :
+    // correction dépend de regle (contrainte métier) :
+    //   regle = 'texte' (sans paramètre)         → correction forcée à "manuel" (indice 2)
+    //   regle = 'texte(N)' (texte avec paramètre) → correction forcée à "semi" (indice 3)
+    if (type === 3) {
+      const regleLabel = valueToLabel('regle', r.regle) || r.regle;
+      const regleStr = String(regleLabel || ' ');
+      if (regleStr === 'texte') {
+        r.correction = 2; // manuel
+      } else if (regleStr.startsWith('texte(')) {
+        r.correction = 3; // semi
+      }
+    }
+
+    // Gestion des incohérences spécifiques qcm (1) et Liste de choix (4)
+    if (type === 1 || type === 4) {
+      // Normaliser les indices en nombres
+      r.choixCorrect = r.choixCorrect.map(v => Number(v)).filter(v => !isNaN(v));
+
+      // Cohérence présence choix/choixCorrect
+      if (r.choix.length === 0 && r.choixCorrect.length > 0) {
+        // Choix vide mais choixCorrect rempli → vider choixCorrect
+        r.choixCorrect = [];
+      } else if (r.choix.length > 0 && r.choixCorrect.length === 0) {
+        // Choix rempli mais choixCorrect vide → vider choix
+        r.choix = [];
+        r.choixCorrect = [];
+      }
+
+      // Si les deux sont remplis, vérifier la cohérence
+      if (r.choix.length > 0 && r.choixCorrect.length > 0) {
+        // Filtrer les indices hors limites
+        r.choixCorrect = r.choixCorrect.filter(idx => idx >= 0 && idx < r.choix.length);
+
+        // Vérifier la règle
+        const currentRegleLabel = valueToLabel('regle', r.regle) || r.regle;
+        if (currentRegleLabel === 'unique' && r.choixCorrect.length !== 1) {
+          // RÈGLE "unique" : exactement 1 réponse correcte requise
+          // Si plus d'une réponse → garder la première (comportement volontaire)
+          // Si aucune réponse → vider la ligne (choix et choixCorrect)
+          if (r.choixCorrect.length > 1) {
+            r.choixCorrect = [r.choixCorrect[0]];
+          } else {
+            r.choixCorrect = [];
+            r.choix = [];
+          }
+        } else if (currentRegleLabel === 'multiple' && r.choixCorrect.length < 1) {
+          // RÈGLE "multiple" : au moins 1 réponse correcte requise
+          // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses)
+          // — aligné sur typesEtRegles.qcm.choixCorrect, validateFieldAgainstType et
+          //   validateCellEdit, qui acceptent tous les trois >= 1 réponse pour "multiple".
+          // Si 0 réponse → vider la ligne (aucune correction possible)
+          r.choixCorrect = [];
+          r.choix = [];
+        }
+      }
+
+      // Pour Liste de choix (selection), forcer regle à "unique"
+      if (type === 4) {
+        const currentRegleLabel = valueToLabel('regle', r.regle) || r.regle;
+        if (currentRegleLabel !== 'unique') {
+          r.regle = 2; // 2 = indice pour 'unique'
+        }
+      }
+    }
+
+    return r;
+  });
+
+  return rows;
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────────
+// ── Validation manuelle d'édition (côté serveur) ───────────────────────────
+// Appelée par server.js (case 'cell:edit'). Retourne un objet :
+//   { ok: true }                  → accepter
+//   { ok: false, rowInvalid: true } → garder valeur, mettre ligne en rouge
+//   { ok: false, message: '…' }   → revert + message
+const TYPE_INT_TO_KEY = { 1:'qcm', 2:'courte', 3:'ouverte', 4:'selection', 5:'cours' };
+const FIELD_LABELS = { type:'Type', regle:'Règle', correction:'Correction', ordre_choix:'Ordre des choix', points:'Points', choix:'Choix', choixCorrect:'Réponses correctes', designation:'Désignation' };
+// Champs qui autorisent toujours l'édition (type + désignation)
+const ALWAYS_ALLOWED = new Set(['type', 'designation']);
+
+// Conversion valeur (indice entier ou valeur brute) → label (string) pour validation
+// pour que getInvalidFields compare toujours des labels avec les règles.
+function valueToLabel(cle, val) {
+  // type a sa propre table (indice → string)
+  if (cle === 'type') {
+    if (TYPE_INT_TO_KEY[val]) return TYPE_INT_TO_KEY[val];
+    // déjà un label (string)
+    if (typeof val === 'string') return val;
+    return null;
+  }
+  // regle / correction / ordre_choix : valeursPossibles alignées sur les indices selectChoix
+  const vp = MANIFEST.regles?.valeursPossibles?.[cle];
+  if (vp && typeof val === 'number' && vp[val] !== undefined) return vp[val];
+  // déjà un label (string)
+  if (typeof val === 'string') return val;
+  return null;
+}
+
+function isEmptyVal(v) {
+  // Array vide [] → considéré comme vide
+  if (Array.isArray(v) && v.length === 0) return true;
+  return v === '' || v === ' ' || v === null || v === undefined || Number(v) === 0;
+}
+
+function allowedLabels(typeKey, field) {
+  const t = MANIFEST.regles?.typesEtRegles?.[typeKey];
+  if (!t) return null;
+  const v = t[field];
+  if (v === undefined) return null;
+  if (v === ' ') return [' '];
+  return Array.isArray(v) ? v : null;
+}
+
+function validateFieldAgainstType(cle, val, typeKey, row) {
+  // Normaliser la valeur : si c'est un indice entier → label string
+  const label = valueToLabel(cle, val);
+  const checkVal = label !== null ? label : val;
+  // choix/ordre_choix doivent être vides pour courte/ouverte/cours
+  // choixCorrect ne doit être vide que pour ouverte/cours (pour "courte" il est libre,
+  // c'est lui qui pilote la règle conditionnelle sur "correction" — cf. plus bas)
+    if (cle === 'choix' || cle === 'choixCorrect' || cle === 'ordre_choix') {
+      const mustBeEmpty = cle === 'choixCorrect'
+        ? ['ouverte', 'cours'].includes(typeKey)
+        : ['courte', 'ouverte', 'cours'].includes(typeKey);
+      if (mustBeEmpty && !isEmptyVal(checkVal)) {
+        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » doit être vide pour le type « ${typeKey} ».` };
+      }
+      // Vérification de compatibilité type/réponse pour les questions courtes
+      if (typeKey === 'courte' && cle === 'choixCorrect' && row && !isEmptyVal(checkVal)) {
+        const regle = row.regle;
+        const choixCorrectArray = Array.isArray(checkVal) ? checkVal : (typeof checkVal === 'string' ? checkVal.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+
+        if (regle === 'nombre' || regle === 6) { // 6 = indice pour 'nombre'
+          // Tous les éléments doivent être numériques
+          const hasNonNumeric = choixCorrectArray.some(item => {
+            return typeof item !== 'number' && (typeof item === 'string' && isNaN(Number(item)));
+          });
+          if (hasNonNumeric) {
+            return { ok: false, message: `Pour « courte » avec règle « nombre », les réponses correctes doivent être numériques.` };
+          }
+        }
+        // Note: Pour règle "texte", nous acceptons tout type de réponse (texte ou nombres)
+        // car une réponse texte peut très bien contenir des chiffres (ex: "2023", "Page 42")
+      }
+      return { ok: true };
+    }
+  // points : vide pour cours, sinon 1-3
+  if (cle === 'points') {
+    if (typeKey === 'cours' && !isEmptyVal(checkVal)) return { ok: false, message: 'Le champ « Points » doit être vide pour le type cours.' };
+    const n = Number(checkVal);
+    if (!isEmptyVal(checkVal) && (isNaN(n) || n < 1 || n > 3)) return { ok: false, message: `Le champ « Points » doit être un entier de 1 à 3 (type « ${typeKey} »).` };
+    return { ok: true };
+  }
+  
+  // courte : correction dépend de choixCorrect (règle conditionnelle XSpro)
+  if (typeKey === 'courte' && cle === 'correction' && row) {
+    const cc = row.choixCorrect;
+    const ccEmpty = Array.isArray(cc) ? cc.length === 0 : isEmptyVal(cc);
+    if (!ccEmpty && checkVal === 'manuel') {
+      return { ok: false, message: `Pour « courte » avec une réponse correcte renseignée, la correction ne peut pas être « manuel » (utilisez auto ou semi).` };
+    }
+    if (ccEmpty && (checkVal === 'auto' || checkVal === 'semi')) {
+      return { ok: false, message: `Pour « courte » sans réponse correcte, la correction doit être « manuel ».` };
+    }
+  }
+
+  // ouverte : correction dépend de regle (contrainte métier)
+  //   regle = 'texte' (sans paramètre)         → correction doit être "manuel"
+  //   regle = 'texte(N)' (texte avec paramètre) → correction doit être "semi"
+  if (typeKey === 'ouverte' && cle === 'correction' && row) {
+    const regleLabel = valueToLabel('regle', row.regle) || row.regle;
+    const regleStr = String(regleLabel || ' ');
+    if (regleStr === 'texte' && checkVal !== 'manuel') {
+      return { ok: false, message: `Pour « ouverte » avec règle « texte », la correction doit être « manuel ».` };
+    }
+    if (regleStr.startsWith('texte(') && checkVal !== 'semi') {
+      return { ok: false, message: `Pour « ouverte » avec règle « ${regleStr} », la correction doit être « semi ».` };
+    }
+  }
+  // regle / correction : valeurs autorisées
+  const allowed = allowedLabels(typeKey, cle);
+  if (allowed && allowed.length) {
+    if (isEmptyVal(checkVal)) {
+      if (!allowed.includes(' ') && !allowed.includes('')) return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est requis pour le type « ${typeKey} ».` };
+    } else if (!allowed.includes(String(checkVal))) {
+      return { ok: false, message: `« ${checkVal} » n'est pas une valeur autorisée pour « ${FIELD_LABELS[cle]||cle} » avec le type « ${typeKey} ».` };
+    }
+  }
+
+  // Validation spécifique pour qcm (1) et Liste de choix (4)
+  if ((typeKey === 'qcm' || typeKey === 'selection') && row) {
+    // Normaliser les valeurs pour la validation
+    const choixArray = Array.isArray(row.choix) ? row.choix : (typeof row.choix === 'string' ? row.choix.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+    const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : (typeof row.choixCorrect === 'string' ? row.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+
+    // Vérification de cohérence choix/choixCorrect
+    if (cle === 'choix' || cle === 'choixCorrect') {
+      if (choixArray.length === 0 && choixCorrectArray.length > 0) {
+        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » est vide mais « choixCorrect » contient des valeurs.` };
+      }
+      if (choixArray.length > 0 && choixCorrectArray.length === 0) {
+        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » contient des valeurs mais « choixCorrect » est vide.` };
+      }
+    }
+
+    // Vérification des indices hors limites (si choixCorrect est rempli)
+    if (cle === 'choixCorrect' && choixCorrectArray.length > 0 && choixArray.length > 0) {
+      const numericChoixCorrect = choixCorrectArray.map(v => Number(v)).filter(v => !isNaN(v));
+      const hasOutOfBounds = numericChoixCorrect.some(idx => idx < 0 || idx >= choixArray.length);
+      if (hasOutOfBounds) {
+        return { ok: false, message: `Le champ « choixCorrect » contient des indices hors limites (valeurs : ${numericChoixCorrect.join(', ')}, mais « choix » n'a que ${choixArray.length} élément(s)).` };
+      }
+    }
+
+    // Vérification de la règle
+    if (cle === 'regle' || cle === 'choixCorrect') {
+      const regleLabel = valueToLabel('regle', row.regle) || row.regle;
+      // RÈGLE "unique" : exactement 1 réponse correcte requise
+      if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
+        return { ok: false, message: `Incohérence règle/réponses : la règle « unique » nécessite exactement 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
+      }
+      // RÈGLE "multiple" : au moins 1 réponse correcte requise
+      // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses possibles)
+      if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
+        return { ok: false, message: `Incohérence règle/réponses : la règle « multiple » nécessite au moins 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
+      }
+    }
+
+    // Pour Liste de choix (selection), forcer regle à "unique"
+    if (typeKey === 'selection' && cle === 'regle') {
+      const currentRegleLabel = valueToLabel('regle', row.regle) || row.regle;
+      if (currentRegleLabel !== 'unique') {
+        return { ok: false, message: `Pour le type « Liste de choix », la règle doit être « unique ».` };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+function getInvalidFields(row) {
+  const typeKey = TYPE_INT_TO_KEY[row.type];
+  if (!typeKey) return [];
+  const invalid = [];
+  for (const f of ['regle', 'correction', 'ordre_choix', 'points', 'choix', 'choixCorrect']) {
+    const res = validateFieldAgainstType(f, row[f], typeKey, row);
+    if (!res.ok) invalid.push(f);
+  }
+  return invalid;
+}
+
+function validateCellEdit(row, cle, newValue) {
+  const regles = MANIFEST.regles?.typesEtRegles;
+  if (!regles) return { ok: true, invalidFields: [] };
+
+  // Construire la ligne simulée avec la nouvelle valeur
+  const sim = { ...row, [cle]: newValue };
+
+  if (ALWAYS_ALLOWED.has(cle)) {
+    if (cle === 'type') {
+      const newTypeKey = TYPE_INT_TO_KEY[newValue];
+      if (!newTypeKey) return { ok: true, invalidFields: [] };
+    }
+    const invalidFields = getInvalidFields(sim);
+    if (invalidFields.length) {
+      const label = TYPE_INT_TO_KEY[newValue] || TYPE_INT_TO_KEY[row.type] || '?';
+      return { ok: false, rowInvalid: true, invalidFields, message: `Ligne non conforme pour le type « ${label} » : ${invalidFields.join(', ')}.` };
+    }
+    return { ok: true, invalidFields: [] };
+  }
+
+  const typeKey = TYPE_INT_TO_KEY[row.type];
+  if (!typeKey) return { ok: true, invalidFields: [] };
+
+  // Validation spécifique pour les changements de règle sur les questions courtes
+  if (typeKey === 'courte' && cle === 'regle') {
+    const regleLabel = valueToLabel('regle', newValue) || newValue;
+    const choixCorrect = sim.choixCorrect;
+    const choixCorrectArray = Array.isArray(choixCorrect) ? choixCorrect : (typeof choixCorrect === 'string' ? choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+
+    // Vérification d'incohérence entre la nouvelle règle et les réponses existantes
+    if ((regleLabel === 'nombre' || newValue === 6) && !isEmptyVal(choixCorrect)) {
+      // Nouvelle règle est "nombre" mais les réponses ne sont pas numériques
+      const hasNonNumeric = choixCorrectArray.some(item => {
+        return typeof item !== 'number' && (typeof item === 'string' && isNaN(Number(item)));
+      });
+      if (hasNonNumeric) {
+        return {
+          ok: false,
+          rowInvalid: true,
+          invalidFields: ['regle', 'choixCorrect'],
+          message: `Incohérence : la règle « nombre » nécessite des réponses numériques, mais « choixCorrect » contient des valeurs non numériques.`
+        };
+      }
+    }
+
+    // Validation normale du champ modifié
+    const res = validateFieldAgainstType(cle, newValue, typeKey, row);
+    if (!res.ok) {
+      const invalidFields = getInvalidFields(sim);
+      return { ok: false, message: res.message, invalidFields };
+    }
+    // Revalidation complète de la ligne : retourner tous les champs invalides
+    const allInvalid = getInvalidFields(sim);
+    if (allInvalid.length > 0) {
+      return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
+    }
+    return { ok: true, invalidFields: [] };
+  }
+
+  // Validation spécifique pour qcm (1) et Liste de choix (4)
+  if ((typeKey === 'qcm' || typeKey === 'selection') && (cle === 'choix' || cle === 'choixCorrect' || cle === 'regle')) {
+    const choixArray = Array.isArray(sim.choix) ? sim.choix : (typeof sim.choix === 'string' ? sim.choix.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+    const choixCorrectArray = Array.isArray(sim.choixCorrect) ? sim.choixCorrect : (typeof sim.choixCorrect === 'string' ? sim.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+    const regleLabel = valueToLabel('regle', sim.regle) || sim.regle;
+
+    // Vérification d'incohérence entre choix et choixCorrect
+    if (choixArray.length === 0 && choixCorrectArray.length > 0) {
+      return {
+        ok: false,
+        rowInvalid: true,
+        invalidFields: ['choix', 'choixCorrect'],
+        message: `Incohérence : « choix » est vide mais « choixCorrect » contient des valeurs.`
+      };
+    }
+    if (choixArray.length > 0 && choixCorrectArray.length === 0) {
+      return {
+        ok: false,
+        rowInvalid: true,
+        invalidFields: ['choix', 'choixCorrect'],
+        message: `Incohérence : « choix » contient des valeurs mais « choixCorrect » est vide.`
+      };
+    }
+
+    // Vérification des indices hors limites
+    if (choixCorrectArray.length > 0 && choixArray.length > 0) {
+      const numericChoixCorrect = choixCorrectArray.map(v => Number(v)).filter(v => !isNaN(v));
+      const hasOutOfBounds = numericChoixCorrect.some(idx => idx < 0 || idx >= choixArray.length);
+      if (hasOutOfBounds) {
+        return {
+          ok: false,
+          rowInvalid: true,
+          invalidFields: ['choixCorrect'],
+          message: `Incohérence : « choixCorrect » contient des indices hors limites (valeurs : ${numericChoixCorrect.join(', ')}, mais « choix » n'a que ${choixArray.length} élément(s)).`
+        };
+      }
+    }
+
+    // Vérification de la règle
+    // RÈGLE "unique" : exactement 1 réponse correcte requise
+    if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
+      return {
+        ok: false,
+        rowInvalid: true,
+        invalidFields: ['regle', 'choixCorrect'],
+        message: `Incohérence : la règle « unique » nécessite exactement 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.`
+      };
+    }
+    // RÈGLE "multiple" : au moins 1 réponse correcte requise
+    // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses possibles)
+    if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
+      return {
+        ok: false,
+        rowInvalid: true,
+        invalidFields: ['regle', 'choixCorrect'],
+        message: `Incohérence : la règle « multiple » nécessite au moins 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.`
+      };
+    }
+
+    // Pour Liste de choix (selection), forcer regle à "unique"
+    if (typeKey === 'selection' && regleLabel !== 'unique') {
+      return {
+        ok: false,
+        rowInvalid: true,
+        invalidFields: ['regle'],
+        message: `Pour le type « Liste de choix », la règle doit être « unique ».`
+      };
+    }
+
+    // Revalidation complète de la ligne : retourner tous les champs invalides
+    const allInvalid = getInvalidFields(sim);
+    if (allInvalid.length > 0) {
+      return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
+    }
+    return { ok: true, invalidFields: [] };
+  }
+
+  // Validation du champ modifié
+  const res = validateFieldAgainstType(cle, newValue, typeKey, row);
+  if (!res.ok) {
+    const invalidFields = getInvalidFields(sim);
+    return { ok: false, message: res.message, invalidFields };
+  }
+
+  // Revalidation complète de la ligne : retourner tous les champs invalides
+  const allInvalid = getInvalidFields(sim);
+  if (allInvalid.length > 0) {
+    return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
+  }
+  return { ok: true, invalidFields: [] };
+}
+
+module.exports = {
+  MANIFEST,
+  MODES,
+  SELECT_CHOIX: buildSelectChoix,
+  postProcessDefaults,
+  postProcessMerge,
+  validateCellEdit,
+  getInvalidFields,
+};

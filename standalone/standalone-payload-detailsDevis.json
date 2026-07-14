@@ -1,0 +1,133 @@
+{
+  "_comment": "Fichier de simulation standalone — remplace une requête XSpro réelle. callbackUrl=null => fallback export Excel automatique.",
+  "ia": {
+    "apiKey": "sk-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMzM0MSwidG9rZW5faWQiOjMwNjk2LCJleHBpcmVzIjoxODExODg3MjAwfQ.M-x1tI8lrDRMzCj2Qpo_hOd3W5Ie0NKp2IoU_41CeTc",
+    "endpoint": "https://albert.api.etalab.gouv.fr/v1/chat/completions",
+    "provider": "albert",
+    "model": "mistralai/Ministral-3-8B-Instruct-2512",
+    "timeoutMs": 30000,
+    "maxPromptLength": 25000,
+    "maxContenu": 50000
+  },
+  "sessionId": "standalone_detailsDevis_001",
+  "contextName": "detailsDevis",
+  "callbackUrl": null,
+  "data": {
+    "infosParent": {
+      "noDevis": "DEV-2026-001",
+      "date": "2026-06-15",
+      "responsableDuDevis": "Martin Dupont",
+      "nom du client": "BTP Martinique",
+      "entreprise cliente": "SARL BTPM"
+    },
+    "infosVue": {
+      "parametresDevis": {
+        "listeTauxHoraires": ["T", 35, 30, 28]
+      },
+      "nomOnglet": "Devis IA"
+    },
+    "modele": [
+      { "reference": "", "niveauListe": 1, "designation": "CHAPITRE EXEMPLE - Travaux de maçonnerie", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "MAC-001", "niveauListe": 2, "designation": "Fourniture et pose de parpaings creux 20x20x50", "unite": "m²", "quantiteTotale": 50, "prixAchatUnitaire": 12.5, "remiseAchat": "", "heuresUnitaire": 2.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "MAC-002", "niveauListe": 3, "designation": "Mortier colle pour parpaings", "unite": "forfait", "quantiteTotale": 1, "prixAchatUnitaire": 85, "remiseAchat": "", "heuresUnitaire": 0, "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "MAC-003", "niveauListe": 2, "designation": "Ferraillage des chaînages verticaux", "unite": "ml", "quantiteTotale": 30, "prixAchatUnitaire": 8.2, "remiseAchat": "", "heuresUnitaire": 1.0, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 1, "designation": "CHAPITRE EXEMPLE - Électricité", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-001", "niveauListe": 2, "designation": "Fourniture et pose de câble U1000R2V 3G2.5", "unite": "ml", "quantiteTotale": 100, "prixAchatUnitaire": 3.4, "remiseAchat": "", "heuresUnitaire": 0.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-002", "niveauListe": 3, "designation": "Pose de 3 prises de courant 2P+T étanches", "unite": "u", "quantiteTotale": 3, "prixAchatUnitaire": 12.0, "remiseAchat": "", "heuresUnitaire": 0.75, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" }
+    ],
+    "lignes": [
+      { "reference": "", "niveauListe": 1, "designation": "GROS ŒUVRE", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Terrassement et fouilles", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-001", "niveauListe": 3, "designation": "Terrassement général en terrain ordinaire", "unite": "m³", "quantiteTotale": 120, "prixAchatUnitaire": 8.5, "remiseAchat": "", "heuresUnitaire": 0.15, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-002", "niveauListe": 3, "designation": "Évacuation des déblais — prestation sous-traitée", "unite": "forfait", "quantiteTotale": 1, "prixAchatUnitaire": 1800, "remiseAchat": "", "heuresUnitaire": 0, "tauxHoraire": 0, "sousTraitance": 1, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Fondations", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-003", "niveauListe": 3, "designation": "Béton de propreté dosé à 150 kg/m³", "unite": "m³", "quantiteTotale": 8, "prixAchatUnitaire": 95, "remiseAchat": "", "heuresUnitaire": 0.8, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-004", "niveauListe": 3, "designation": "Béton armé pour semelles filantes", "unite": "m³", "quantiteTotale": 18, "prixAchatUnitaire": 145, "remiseAchat": "", "heuresUnitaire": 2.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-005", "niveauListe": 3, "designation": "Ferraillage semelles — acier HA", "unite": "kg", "quantiteTotale": 420, "prixAchatUnitaire": 1.2, "remiseAchat": "", "heuresUnitaire": 0.06, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Maçonnerie élévation", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-006", "niveauListe": 3, "designation": "Fourniture et pose de parpaings creux 20x20x50", "unite": "m²", "quantiteTotale": 180, "prixAchatUnitaire": 12.5, "remiseAchat": "", "heuresUnitaire": 2.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "GO-007", "niveauListe": 3, "designation": "Enduit de façade monocouche", "unite": "m²", "quantiteTotale": 160, "prixAchatUnitaire": 6.8, "remiseAchat": "", "heuresUnitaire": 0.6, "tauxHoraire": 2, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 1, "designation": "ÉLECTRICITÉ", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Distribution générale", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-001", "niveauListe": 3, "designation": "Fourniture et pose câble U1000R2V 3G2.5", "unite": "ml", "quantiteTotale": 120, "prixAchatUnitaire": 3.4, "remiseAchat": "", "heuresUnitaire": 0.08, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-002", "niveauListe": 3, "designation": "Fourniture et pose câble U1000R2V 5G6", "unite": "ml", "quantiteTotale": 45, "prixAchatUnitaire": 7.2, "remiseAchat": "", "heuresUnitaire": 0.1, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-003", "niveauListe": 3, "designation": "Tableau divisionnaire TD1 — 13 modules", "unite": "u", "quantiteTotale": 1, "prixAchatUnitaire": 185, "remiseAchat": "", "heuresUnitaire": 3.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Prises et éclairage", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-004", "niveauListe": 3, "designation": "Fourniture et pose prises de courant 2P+T encastrées", "unite": "u", "quantiteTotale": 24, "prixAchatUnitaire": 8.5, "remiseAchat": "", "heuresUnitaire": 0.75, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-005", "niveauListe": 3, "designation": "Fourniture et pose interrupteurs va-et-vient", "unite": "u", "quantiteTotale": 8, "prixAchatUnitaire": 12.0, "remiseAchat": "", "heuresUnitaire": 0.5, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-006", "niveauListe": 3, "designation": "Fourniture et pose luminaires LED encastrés 18W", "unite": "u", "quantiteTotale": 16, "prixAchatUnitaire": 42.0, "remiseAchat": "", "heuresUnitaire": 0.6, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "", "niveauListe": 2, "designation": "Courants faibles", "unite": "", "quantiteTotale": "", "prixAchatUnitaire": "", "remiseAchat": "", "heuresUnitaire": "", "tauxHoraire": 0, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-007", "niveauListe": 3, "designation": "Câblage réseau RJ45 cat 6 — fourniture et pose", "unite": "ml", "quantiteTotale": 80, "prixAchatUnitaire": 2.1, "remiseAchat": "", "heuresUnitaire": 0.06, "tauxHoraire": 1, "sousTraitance": 0, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" },
+      { "reference": "ELEC-008", "niveauListe": 3, "designation": "Tests et certification câblage réseau — sous-traitée", "unite": "forfait", "quantiteTotale": 1, "prixAchatUnitaire": 650, "remiseAchat": "", "heuresUnitaire": 0, "tauxHoraire": 0, "sousTraitance": 1, "prixVenteForce": "", "margeForcee": "", "remiseClient": "", "commentaire": "" }
+    ]
+  },
+  "workerConfig": {
+    "viewModule": "detailsDevis",
+    "colonnes": [
+      { "champ": "niveauListe",       "cle": "niveauListe",       "libelle": "niveau hiérarchique : 0 = titre/vide, 1 = chapitre, 2 = sous-chapitre, 3 = ligne de détail — ne pas sauter de niveau", "type": "integer", "width": 70 },
+      { "champ": "designation",       "cle": "designation",       "libelle": "description de l'article, du poste ou de la tâche", "type": "string",  "width": 320},
+      { "champ": "unite",             "cle": "unite",             "libelle": "unité de mesure (m², m³, ml, u, forfait…)", "type": "string",  "width": 75 },
+      { "champ": "quantiteTotale",    "cle": "quantiteTotale",    "libelle": "quantité totale de la ligne — à déterminer si non fournie", "type": "decimal", "width": 75 },
+      { "champ": "reference",         "cle": "reference",         "libelle": "référence existante uniquement — laisser vide si inconnue, ne pas inventer", "type": "string",  "width": 120, "hide": true },
+      { "champ": "prixAchatUnitaire", "cle": "prixAchatUnitaire", "libelle": "coût unitaire d'achat fourniture — vide si pas de matériel", "type": "decimal", "round": 2, "width": 100 },
+      { "champ": "heuresUnitaire",    "cle": "heuresUnitaire",    "libelle": "nombre décimal d'heures de main d'œuvre PAR unité de quantiteTotale — vide si pas de pose", "type": "decimal", "round": 2, "width": 80 },
+      { "champ": "tauxHoraire",       "cle": "tauxHoraire",       "libelle": "indice du taux horaire : 0 si heuresUnitaire vide ou 0, 1 ou plus sinon — doit être cohérent avec heuresUnitaire", "type": "integer", "width": 80 },
+      { "champ": "sousTraitance",     "cle": "sousTraitance",     "libelle": "0 par défaut, 1 si la ligne est explicitement sous-traitée — si 1 : heuresUnitaire=0 et tauxHoraire=0 obligatoires", "type": "integer", "width": 60 },
+      { "champ": "remiseAchat",       "cle": "remiseAchat",      "libelle": "laisser vide — saisie manuelle uniquement", "type": "integer", "placeholder": true, "readOnly": true, "width": 75 },
+      { "champ": "prixVenteForce",    "cle": "prixVenteForce",   "libelle": "laisser vide — saisie manuelle uniquement", "type": "decimal", "placeholder": true, "readOnly": true, "width": 100 },
+      { "champ": "margeForcee",       "cle": "margeForcee",      "libelle": "laisser vide — saisie manuelle uniquement", "type": "decimal", "placeholder": true, "readOnly": true, "width": 90 },
+      { "champ": "remiseClient",      "cle": "remiseClient",     "libelle": "laisser vide — saisie manuelle uniquement", "type": "decimal", "placeholder": true, "readOnly": true, "width": 100 }
+    ],
+    "regles": {
+      "hierarchie": {
+        "champ": "niveauListe",
+        "niveaux": {
+          "0": "ligne vide ou de titre (désignation seule) — équivalent à <h1>",
+          "1": "chapitre — équivalent à <h2>",
+          "2": "sous-chapitre — équivalent à <h3>",
+          "3": "ligne de détail — équivalent à <h4>"
+        },
+        "contraintes": [
+          "Ne pas sauter de niveau (ex: passer de 1 à 3 directement est interdit)",
+          "Ne pas redescendre à un niveau déjà fermé",
+          "Les lignes niveauListe=1 suivies de niveauListe=2 n'ont en général pas de référence, pas de prix, pas d'heures"
+        ]
+      },
+      "valeursParDefaut": {
+        "remiseAchat":   "",
+        "remiseClient":  "",
+        "sousTraitance": 0,
+        "prixVenteForce": "",
+        "margeForcee":   "",
+        "tauxHoraire":   0
+      },
+      "interdictions": [
+        "Ne pas créer de codes de référence fictifs — laisser vide si inconnu",
+        "Ne pas renseigner prixVenteForce ni margeForcee — ce sont des champs réservés à la saisie manuelle",
+        "Ne pas inventer de sousTraitance=1 sans que ce soit explicitement demandé"
+      ],
+      "texteLibre": "- Les lignes niveauListe=0 ne reçoivent jamais de référence, prix, ni heures.\n- Les lignes niveauListe=1 ne reçoivent pas de référence, prix, ni heures si elles ont des sous-chapitres.\n- Pour les lignes sous-traitées (sousTraitance=1) : heuresUnitaire=0 et tauxHoraire=0 obligatoires.\n- tauxHoraire : 0 si heuresUnitaire vide ou 0, sinon utilise l'un des taux disponibles dans le modèle.\n- Une ligne peut cumuler matériel ET main d'œuvre — ex: 60 ml de câble à X €/ml avec 0.06 h/ml de pose.\n- Les prix et quantités sont toujours positifs ou vides — jamais négatifs.\n- Les références ne sont à renseigner que si elles existent réellement.\n- Les prix unitaires doivent refléter des tarifs réalistes du marché français BTP 2024-2025.\n- Si on te demande un bilan financier, rappelle que c'est un outil de création de lignes de devis."
+    },
+    "systemPrompt": "Tu es un assistant expert en devis et métré de chantier.\nTu peux créer, modifier ou compléter des lignes selon la demande.\nRespecte la hiérarchie existante et les règles métier définies.\nEn l'absence d'instruction explicite : ne modifie pas ce qui existe déjà, complète uniquement ce qui manque.",
+    "promptsSuggeres": {
+      "creation": [
+        "Complète les références et prix unitaires d'achat pour toutes les lignes",
+        "Remplis les heures unitaires de main d'œuvre manquantes",
+        "Ajoute un chapitre Plomberie avec sanitaires et alimentation eau froide/chaude",
+        "Vérifie la cohérence des niveaux hiérarchiques et propose des corrections"
+      ]
+    },
+    "export": {
+      "nomFichier": "devis_detailsDevis_standalone",
+      "nomOnglet": "Détail Devis IA",
+      "colonnesExport": [
+        "niveauListe", "designation", "unite", "quantiteTotale",
+        "reference", "prixAchatUnitaire", "heuresUnitaire",
+        "tauxHoraire", "sousTraitance", "remiseAchat",
+        "prixVenteForce", "margeForcee"
+      ]
+    },
+    "copyToClipBoard": false,
+    "exportExcel": true
+  }
+}

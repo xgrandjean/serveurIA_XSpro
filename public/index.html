@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Worker</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-grid.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/styles/ag-theme-alpine.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.3.2/dist/ag-grid-community.min.js"></script>
+</head>
+<body>
+
+  <!-- ── Bandeau supérieur ──────────────────────────────────────────────────── -->
+  <header id="header">
+    <div id="header-left">
+      <span id="app-title">⚡ AI Worker</span>
+      <span id="context-name" class="badge-context"></span>
+    </div>
+    <div id="header-center">
+      <span id="info-client"></span>
+      <span id="info-sep" class="hidden">·</span>
+      <span id="info-affaire"></span>
+    </div>
+    <div id="header-right">
+      <span id="status-badge" class="badge-status status-idle">En attente</span>
+    </div>
+  </header>
+
+  <!-- ── Corps : deux panneaux ──────────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- ════ PANNEAU GAUCHE — Agent / Conversation ════ -->
+    <aside id="panel-left">
+
+      <!-- Actions session — barre haute -->
+      <div id="session-actions">
+        <button id="btn-reset"    class="btn-secondary btn-sm">↺ Reset</button>
+        <button id="btn-cancel"   class="btn-danger btn-sm">✕ Annuler</button>
+        <div style="flex:1"></div>
+        <button id="btn-validate" class="btn-primary btn-sm">✓ Valider et exporter</button>
+      </div>
+
+      <!-- Historique de conversation -->
+      <div id="conversation">
+        <div id="conversation-inner">
+          <!-- Les messages s'ajoutent ici dynamiquement -->
+          <div class="conv-welcome">
+            <div class="conv-welcome-icon">⚡</div>
+            <div class="conv-welcome-text">
+              Décris ce que tu veux faire avec les données.<br/>
+              L'IA remplira la grille en temps réel.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Splitter vertical conversation / saisie -->
+      <div id="splitter-v" title="Glisser pour redimensionner la hauteur"></div>
+
+      <!-- Zone saisie -->
+      <div id="input-area">
+
+        <!-- Sélecteur de mode de conversation (Plan / Act) -->
+        <div id="mode-row">
+          <div id="mode-selector">
+            <button id="btn-mode-plan" class="btn-mode active" data-mode="plan" title="L'IA propose un plan avant d'agir">
+              📋 Plan
+            </button>
+            <button id="btn-mode-act" class="btn-mode" data-mode="act" title="L'IA agit directement">
+              ⚡ Act
+            </button>
+          </div>
+          <select id="prompt-suggestions" title="Prompts suggérés">
+            <option value="">— Suggestions —</option>
+          </select>
+          <button id="btn-copy-prompt" title="Copier la requête dans le presse-papier">📋</button>
+        </div>
+
+        <!-- Fichiers joints -->
+        <div id="attachments-bar" class="hidden">
+          <span id="attachments-label">📎</span>
+          <div id="attachments-chips"></div>
+        </div>
+
+        <!-- Saisie + envoi -->
+        <div id="prompt-row">
+          <button id="btn-attach" class="btn-attach" title="Joindre un fichier">📎</button>
+          <input type="file" id="file-input" multiple accept="*/*" style="display:none" />
+          <textarea
+            id="prompt-input"
+            placeholder="Décris ce que tu veux faire… (Ctrl+Entrée)"
+            rows="3"
+            spellcheck="false"
+          ></textarea>
+          <button id="btn-send" class="btn-send" title="Envoyer (Ctrl+Entrée)">
+            <span id="btn-send-label">↑</span>
+            <span id="btn-send-spinner" class="spinner hidden"></span>
+          </button>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Splitter horizontal panneaux gauche / droite -->
+    <div id="splitter" title="Glisser pour redimensionner"></div>
+
+    <!-- ════ PANNEAU DROIT — Grille ════ -->
+    <section id="panel-right">
+
+      <!-- Barre grille -->
+      <div id="grid-toolbar">
+        <button id="btn-add-row"     class="btn-grid-action" title="Ajouter une ligne après la sélection">+ Ligne</button>
+        <button id="btn-delete-rows" class="btn-grid-action btn-grid-danger" title="Supprimer les lignes sélectionnées" disabled>✂️</button>
+        <!-- Sélecteur de mode de travail (défini par le hook vue) — caché si aucun mode -->
+<select id="work-mode-selector" title="Mode de travail" style="display:none">
+         </select>
+        <span class="grid-toolbar-sep">|</span>
+        <span id="status-rows">—</span>
+        <span id="grid-toolbar-sep">·</span>
+        <span id="status-message">En attente…</span>
+        <div style="flex:1"></div>
+        <span id="status-progress" class="hidden">
+          <span class="progress-bar"><span id="progress-fill"></span></span>
+          <span id="progress-label"></span>
+        </span>
+      </div>
+
+      <!-- AG Grid -->
+      <div id="grid-wrapper">
+        <div id="grid-container" class="ag-theme-alpine"></div>
+      </div>
+
+      <!-- Barre de téléchargement -->
+      <div id="download-bar" class="hidden">
+        <span id="download-message"></span>
+        <a id="download-link" href="#" target="_blank" class="btn-primary btn-sm">⬇ Télécharger Excel</a>
+        <button id="btn-download-close" class="btn-secondary btn-sm">✕</button>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="grid.js"></script>
+</body>
+</html>

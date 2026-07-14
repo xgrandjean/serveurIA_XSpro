@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "Configuration du AI Worker.",
+    "Absent ou vide = comportement par défaut (tout accepter sur port 8888).",
+    "",
+    "contexts.listeNoire  : vues systématiquement refusées (priorité absolue).",
+    "contexts.listeBlanche: si vide ou absente = tout accepter.",
+    "                       si non vide = seules ces vues sont acceptées.",
+    "Si un contextName est dans les deux listes, listeNoire l'emporte.",
+    "",
+    "callbackUrl           : URL de callback vers XSpro (si non fourni par XSpro).",
+    "callbackUrlPriority   : si true, le callbackUrl local prime sur celui de XSpro."
+  ],
+
+  "port": 8888,
+
+  "callbackUrl": "http://localhost:3000/worker-response",
+  "callbackUrlPriority": false,
+
+  "autoOpenUI": true,
+
+  "contexts": {
+    "listeBlanche": ["detailsDevis","formulaireGetDetailsTravaux","formulaireGetDetailsFichesTechniques","formulaireListeQuestions","formulaireGetDetailsFacturationClient","formulaireGetDetailsAF"],
+    "listeNoire":   []
+  }
+}

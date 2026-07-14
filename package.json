@@ -1,0 +1,89 @@
+{
+  "name": "XSpro-ai-worker",
+  "version": "1.0.0",
+  "description": "XSPRO AI Worker — serveur autonome de remplissage IA en mode spreadsheet",
+  "main": "main.js",
+  "scripts": {
+    "start": "node server.js",
+    "standalone": "node server.js --standalone",
+    "electron": "electron .",
+    "electron:standalone": "electron . --standalone",
+    "standalone:detailsDevis": "node server.js --standalone --payload=detailsDevis",
+    "standalone:listeQuestions": "node server.js --standalone --payload=listeQuestions",
+    "standalone:formulaireGetDetailsFichesTechniques": "node server.js --standalone --payload=formulaireGetDetailsFichesTechniques",
+    "standalone:formulaireGetDetailsTravaux": "node server.js --standalone --payload=formulaireGetDetailsTravaux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "dist:all": "electron-builder --win --mac --linux"
+  },
+  "build": {
+    "appId": "com.worker.ai-worker",
+    "productName": "AI Worker",
+    "files": [
+      "main.js",
+      "server.js",
+      "package.json",
+      "public/**/*",
+      "views/**/*",
+      "sessionManager.js",
+      "llmClient.js",
+      "providers.js",
+      "fileTypes.js",
+      "fileHandlers.js",
+      "excelExport.js",
+      "viewResolver.js",
+      "worker-config.json",
+      "standalone/**/*",
+      "!node_modules/electron/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/",
+        "to": "build/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI Worker"
+    }
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "open": "^10.1.0",
+    "pdf-parse": "^2.4.5",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "electron": "^31.6.0",
+    "electron-builder": "^24.13.3"
+  }
+}

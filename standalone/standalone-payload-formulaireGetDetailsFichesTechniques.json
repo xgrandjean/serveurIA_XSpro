@@ -1,0 +1,342 @@
+{
+  "_comment": "Fichier de simulation standalone — carnet de liaisons câbles/tuyauteries. callbackUrl=null => fallback export Excel automatique.",
+  "ia": {
+    "apiKey": "sk-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMzM0MSwidG9rZW5faWQiOjMwNjk2LCJleHBpcmVzIjoxODExODg3MjAwfQ.M-x1tI8lrDRMzCj2Qpo_hOd3W5Ie0NKp2IoU_41CeTc",
+    "endpoint": "https://albert.api.etalab.gouv.fr/v1/chat/completions",
+    "provider": "albert",
+    "model": "mistralai/Ministral-3-8B-Instruct-2512",
+    "timeoutMs": 30000,
+    "maxPromptLength": 25000,
+    "maxContenu": 50000
+  },
+  "sessionId": "standalone_fichesTechniques_001",
+  "contextName": "formulaireGetDetailsFichesTechniques",
+  "callbackUrl": null,
+  "data": {
+    "lexique": {
+      "repere": "identifiant unique (ex. C-001)",
+      "typeLiaison": "type de câble/tuyauterie (ex. U1000R2V 3G6)",
+      "tenant": "équipement de départ (libellé complet)",
+      "repereTenant": "repère court de l'équipement de départ (armoire, vanne, capteur…)",
+      "typeConnectTenant": "connecteur côté départ (ex. QF1)",
+      "aboutissant": "équipement d'arrivée (libellé complet)",
+      "repereAboutissant": "repère court de l'équipement d'arrivée",
+      "typeConnectAboutissant": "connecteur côté arrivée (ex. QF1)",
+      "longueurLiaison": "longueur en mètres (nombre, peut être vide)",
+      "commentaire": "texte libre — peut être vide",
+      "fait": "vide si non réalisée — saisie manuelle uniquement",
+      "validation": "vide si non réalisée — saisie manuelle uniquement",
+      "nonValide": "non vide si rejetée — saisie manuelle uniquement"
+    },
+    "lignes": [
+      { "repere": "C-011", "typeLiaison": "U1000R2V 3G6", "longueurLiaison": 22, "tenant": "Tableau Général TGBT", "repereTenant": "TGBT", "typeConnectTenant": "QF1", "aboutissant": "Armoire Divisionnaire AD2", "repereAboutissant": "AD2", "typeConnectAboutissant": "QF1", "commentaire": "" },
+      { "repere": "C-012", "typeLiaison": "U1000R2V 3G6", "longueurLiaison": 18, "tenant": "Tableau Général TGBT", "repereTenant": "TGBT", "typeConnectTenant": "QF1", "aboutissant": "Armoire Divisionnaire AD3", "repereAboutissant": "AD3", "typeConnectAboutissant": "QF1", "commentaire": "" }
+    ],
+    "champs": [
+      { "champ": "repere", "cle": "repere", "libelle": "identifiant unique (ex. C-001)" },
+      { "champ": "typeLiaison", "cle": "typeLiaison", "libelle": "type de câble/tuyauterie (ex. U1000R2V 3G6)" },
+      { "champ": "tenant", "cle": "tenant", "libelle": "équipement de départ (libellé complet)" },
+      { "champ": "repereTenant", "cle": "repereTenant", "libelle": "repère court de l'équipement de départ (armoire, vanne, capteur…)" },
+      { "champ": "typeConnectTenant", "cle": "typeConnectTenant", "libelle": "connecteur côté départ (ex. QF1)" },
+      { "champ": "aboutissant", "cle": "aboutissant", "libelle": "équipement d'arrivée (libellé complet)" },
+      { "champ": "repereAboutissant", "cle": "repereAboutissant", "libelle": "repère court de l'équipement d'arrivée" },
+      { "champ": "typeConnectAboutissant", "cle": "typeConnectAboutissant", "libelle": "connecteur côté arrivée (ex. QF1)" },
+      { "champ": "longueurLiaison", "cle": "longueurLiaison", "libelle": "longueur en mètres (nombre, peut être vide)" },
+      { "champ": "commentaire", "cle": "commentaire", "libelle": "texte libre — peut être vide" },
+      { "champ": "fait", "cle": "fait", "libelle": "vide si non réalisée — saisie manuelle uniquement", "placeholder": true },
+      { "champ": "validation", "cle": "validation", "libelle": "vide si non réalisée — saisie manuelle uniquement", "placeholder": true },
+      { "champ": "nonValide", "cle": "nonValide", "libelle": "non vide si rejetée — saisie manuelle uniquement", "placeholder": true }
+    ],
+    "rowsBruts": [
+      {
+        "rowid": 17,
+        "idDetailsFT": "_1783370084731",
+        "idFicheTechnique": "_1777978589367",
+        "idLigne": 1,
+        "selection": null,
+        "validation": "",
+        "nonValide": "",
+        "repere": "C-011",
+        "typeLiaison": "U1000R2V 3G6",
+        "longueurLiaison": 22,
+        "tenant": "Tableau Général TGBT",
+        "repereTenant": "TGBT",
+        "typeConnectTenant": "QF1",
+        "aboutissant": "Armoire Divisionnaire AD2",
+        "repereAboutissant": "AD2",
+        "typeConnectAboutissant": "QF1",
+        "commentaire": "",
+        "iconeInfo": "enAttente",
+        "fait": ""
+      },
+      {
+        "rowid": 18,
+        "idDetailsFT": "_1783370084732",
+        "idFicheTechnique": "_1777978589367",
+        "idLigne": 2,
+        "selection": null,
+        "validation": "",
+        "nonValide": "",
+        "repere": "C-012",
+        "typeLiaison": "U1000R2V 3G6",
+        "longueurLiaison": 18,
+        "tenant": "Tableau Général TGBT",
+        "repereTenant": "TGBT",
+        "typeConnectTenant": "QF1",
+        "aboutissant": "Armoire Divisionnaire AD3",
+        "repereAboutissant": "AD3",
+        "typeConnectAboutissant": "QF1",
+        "commentaire": "",
+        "iconeInfo": "enAttente",
+        "fait": ""
+      }
+    ],
+    "infosParent": {
+      "noFiche": "$F0004",
+      "designation": "Carnet des câble bat 1"
+    },
+    "infosVue": {
+      "nomOnglet": "vueformulaireGetDetailsFichesTechniques"
+    },
+    "substitutionsImportExport": {},
+    "cleschampsForceAZeroSiVide": [],
+    "clesChampsDevantEtreForceAVide": [],
+    "maxContenu": 50000,
+    "colonnesExport": [
+      "repere",
+      "typeLiaison",
+      "tenant",
+      "repereTenant",
+      "typeConnectTenant",
+      "aboutissant",
+      "repereAboutissant",
+      "typeConnectAboutissant",
+      "longueurLiaison",
+      "commentaire",
+      "fait",
+      "validation",
+      "nonValide"
+    ],
+    "modele": [
+      {
+        "repere": "C-001",
+        "typeLiaison": "U1000R2V 3G2.5",
+        "tenant": "Tableau Général TGBT",
+        "repereTenant": "TGBT",
+        "typeConnectTenant": "QF1",
+        "aboutissant": "Armoire Divisionnaire AD1",
+        "repereAboutissant": "AD1",
+        "typeConnectAboutissant": "QF1",
+        "longueurLiaison": 15,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "C-002",
+        "typeLiaison": "U1000R2V 3G1.5",
+        "tenant": "Armoire Divisionnaire AD1",
+        "repereTenant": "AD1",
+        "typeConnectTenant": "J1",
+        "aboutissant": "Prise courant salon",
+        "repereAboutissant": "PC-SAL",
+        "typeConnectAboutissant": "XB1",
+        "longueurLiaison": 8,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "T-001",
+        "typeLiaison": "PER DN16",
+        "tenant": "Ballon d'eau chaude",
+        "repereTenant": "BEC",
+        "typeConnectTenant": "M20",
+        "aboutissant": "Lavabo SDB",
+        "repereAboutissant": "LVB-SDB",
+        "typeConnectAboutissant": "M20",
+        "longueurLiaison": 12,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "R-001",
+        "typeLiaison": "Câble RJ45 SFTP",
+        "tenant": "Baie de brassage principale",
+        "repereTenant": "BBP",
+        "typeConnectTenant": "P1",
+        "aboutissant": "Prise RJ45 bureau",
+        "repereAboutissant": "PRJ-BUR",
+        "typeConnectAboutissant": "P1",
+        "longueurLiaison": 20,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      }
+    ]
+  },
+  "workerConfig": {
+    "viewModule": "formulaireGetDetailsFichesTechniques",
+    "colonnes": [
+      {
+        "champ": "repere",
+        "cle": "repere",
+        "libelle": "identifiant unique (ex. C-001)"
+      },
+      {
+        "champ": "typeLiaison",
+        "cle": "typeLiaison",
+        "libelle": "type de câble/tuyauterie (ex. U1000R2V 3G6)"
+      },
+      {
+        "champ": "tenant",
+        "cle": "tenant",
+        "libelle": "équipement de départ (libellé complet)"
+      },
+      {
+        "champ": "repereTenant",
+        "cle": "repereTenant",
+        "libelle": "repère court de l'équipement de départ (armoire, vanne, capteur…)"
+      },
+      {
+        "champ": "typeConnectTenant",
+        "cle": "typeConnectTenant",
+        "libelle": "connecteur côté départ (ex. QF1)"
+      },
+      {
+        "champ": "aboutissant",
+        "cle": "aboutissant",
+        "libelle": "équipement d'arrivée (libellé complet)"
+      },
+      {
+        "champ": "repereAboutissant",
+        "cle": "repereAboutissant",
+        "libelle": "repère court de l'équipement d'arrivée"
+      },
+      {
+        "champ": "typeConnectAboutissant",
+        "cle": "typeConnectAboutissant",
+        "libelle": "connecteur côté arrivée (ex. QF1)"
+      },
+      {
+        "champ": "longueurLiaison",
+        "cle": "longueurLiaison",
+        "libelle": "longueur en mètres (nombre, peut être vide)"
+      },
+      {
+        "champ": "commentaire",
+        "cle": "commentaire",
+        "libelle": "texte libre — peut être vide"
+      },
+      {
+        "champ": "fait",
+        "cle": "fait",
+        "libelle": "vide si non réalisée — saisie manuelle uniquement",
+        "placeholder": true
+      },
+      {
+        "champ": "validation",
+        "cle": "validation",
+        "libelle": "vide si non réalisée — saisie manuelle uniquement",
+        "placeholder": true
+      },
+      {
+        "champ": "nonValide",
+        "cle": "nonValide",
+        "libelle": "non vide si rejetée — saisie manuelle uniquement",
+        "placeholder": true
+      }
+    ],
+    "regles": {
+      "clesChampsDevantEtreNonVides": [
+        "repere"
+      ],
+      "clesChampsSelectChoixDevantResterBrut": []
+    },
+    "systemPrompt": "Voici des données d'un carnet des liaisons (câbles, tuyauteries, raccordements entre équipements).\nRègles importantes :\nAnalyse l'état d'avancement de chaque liaison (fait, validation, nonValide).\nIdentifie les liaisons non réalisées ou non validées.\n    Utilise des chapitres clairs et des puces lisibles (- …) sauf demande contraire\nRappelle systématiquement le numéro de fiche et sa désignation s'ils sont renseignés",
+    "promptsSuggeres": {
+      "creation": [
+        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
+        "Exemple attendu : génère les liaisons électriques entre le TGBT et les armoires divisionnaires AD1, AD2 et AD3, en câble U1000R2V 3G6, avec des longueurs estimées à 15, 22 et 18 mètres."
+      ],
+      "synthese": [
+        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
+        "Exemple attendu : fais-moi un bilan détaillé de ce carnet des liaisons : total de mètres par type de liaison, avancement de chaque liaison, et liaisons non réalisées ou non validées."
+      ]
+    },
+    "prompt": "Génère les liaisons électriques entre le TGBT et les armoires divisionnaires AD1, AD2 et AD3, en câble U1000R2V 3G6, avec des longueurs estimées à 15, 22 et 18 mètres.",
+    "modele": [
+      {
+        "repere": "C-001",
+        "typeLiaison": "U1000R2V 3G2.5",
+        "tenant": "Tableau Général TGBT",
+        "repereTenant": "TGBT",
+        "typeConnectTenant": "QF1",
+        "aboutissant": "Armoire Divisionnaire AD1",
+        "repereAboutissant": "AD1",
+        "typeConnectAboutissant": "QF1",
+        "longueurLiaison": 15,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "C-002",
+        "typeLiaison": "U1000R2V 3G1.5",
+        "tenant": "Armoire Divisionnaire AD1",
+        "repereTenant": "AD1",
+        "typeConnectTenant": "J1",
+        "aboutissant": "Prise courant salon",
+        "repereAboutissant": "PC-SAL",
+        "typeConnectAboutissant": "XB1",
+        "longueurLiaison": 8,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "T-001",
+        "typeLiaison": "PER DN16",
+        "tenant": "Ballon d'eau chaude",
+        "repereTenant": "BEC",
+        "typeConnectTenant": "M20",
+        "aboutissant": "Lavabo SDB",
+        "repereAboutissant": "LVB-SDB",
+        "typeConnectAboutissant": "M20",
+        "longueurLiaison": 12,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      },
+      {
+        "repere": "R-001",
+        "typeLiaison": "Câble RJ45 SFTP",
+        "tenant": "Baie de brassage principale",
+        "repereTenant": "BBP",
+        "typeConnectTenant": "P1",
+        "aboutissant": "Prise RJ45 bureau",
+        "repereAboutissant": "PRJ-BUR",
+        "typeConnectAboutissant": "P1",
+        "longueurLiaison": 20,
+        "commentaire": "",
+        "fait": "",
+        "validation": "",
+        "nonValide": ""
+      }
+    ],
+    "export": {
+      "nomOnglet": "Export IA",
+      "colonnesExport": []
+    },
+    "copyToClipBoard": false,
+    "exportExcel": true
+  }
+}
