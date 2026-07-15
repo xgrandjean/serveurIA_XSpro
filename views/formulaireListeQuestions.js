@@ -120,6 +120,10 @@ const MANIFEST = {
    * Ces champs contiennent des arrays JSON qui doivent être affichés/convertis.
    */
   champsArray: ['choix', 'choixCorrect'],
+  // Déclare que les valeurs de 'choixCorrect' sont des indices numériques référençant
+  // le tableau 'choix' de la même ligne (stockage/LLM = indices, affichage/édition =
+  // texte résolu côté client — cf. grid.js, purement visuel, aucune donnée modifiée).
+  champsIndexRef: { choixCorrect: 'choix' },
 
   /**
    * Styles de ligne selon le type de question.
@@ -956,7 +960,7 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
   // Validation spécifique pour qcm (1) et Liste de choix (4)
   if ((typeKey === 'qcm' || typeKey === 'selection') && row) {
     // Normaliser les valeurs pour la validation
-    const choixArray = Array.isArray(row.choix) ? row.choix : (typeof row.choix === 'string' ? row.choix.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+    const choixArray = Array.isArray(row.choix) ? row.choix : (typeof row.choix === 'string' ? row.choix.split(/<br\s*\/?>|\n/i).map(v => v.trim()).filter(Boolean) : []);
     const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : (typeof row.choixCorrect === 'string' ? row.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
 
     // Vérification de cohérence choix/choixCorrect

@@ -16,6 +16,7 @@ const { app, Tray, Menu, nativeImage } = require('electron');
 const { spawn }                          = require('child_process');
 const path                               = require('path');
 const fs                                 = require('fs');
+const http                               = require('http');
 
 // ── Variables globales ─────────────────────────────────────────────────────────
 let tray           = null;
@@ -23,6 +24,7 @@ let serverProc     = null;
 let serverPort     = 8888;
 let isStandalone   = false;
 let currentPayload = null; // Chemin du fichier standalone actif (null = par défaut)
+let externallyManagedServer = false; // true si on s'est attaché à un serveur déjà lancé
 
 // ── Résolution des chemins ────────────────────────────────────────────────────
 const ROOT           = __dirname;
@@ -82,9 +84,52 @@ function detectPort() {
   return 8888;
 }
 
+// ── Vérification si un PID existe encore sur le système ───────────────────────
+function isProcessAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+// ── Probe HTTP : vérifie si un serveur répond déjà sur le port ────────────────
+function checkServerRunning(port) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${port}/view-config/`, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(1000, () => { req.destroy(); resolve(false); });
+  });
+}
+
 // ── Démarrage du serveur Node.js ──────────────────────────────────────────────
-function startServer() {
+async function startServer() {
   if (serverProc) return; // déjà lancé
+
+  // Vérifier si un serveur répond déjà sur ce port (ex: orphelin d'un crash précédent)
+  const alreadyRunning = await checkServerRunning(serverPort);
+  if (alreadyRunning) {
+    console.log('────────────────────────────────────────────');
+    console.log(`ℹ️  Un serveur répond déjà sur le port ${serverPort}.`);
+    console.log(`    L'instance Electron se raccroche à ce serveur existant.`);
+    console.log('────────────────────────────────────────────');
+    externallyManagedServer = true;
+    updateTrayTooltip();
+    return;
+  }
+
+  // Nettoyer un éventuel verrou obsolète (PID plus valide)
+  if (!alreadyRunning) {
+    const lockFile = path.join(ROOT, '.worker.lock');
+    if (fs.existsSync(lockFile)) {
+      try {
+        const lockPid = parseInt(fs.readFileSync(lockFile, 'utf-8').trim(), 10);
+        if (lockPid && !isProcessAlive(lockPid)) {
+          fs.unlinkSync(lockFile);
+          console.log(`[Electron] Verrou obsolète (PID ${lockPid}) nettoyé.`);
+        }
+      } catch (_) { /* ignore */ }
+    }
+  }
 
   const args = [];
   if (isStandalone) {
@@ -131,6 +176,12 @@ function startServer() {
 // ── Arrêt du serveur Node.js (asynchrone — attend la mort du processus) ──────
 function stopServer() {
   return new Promise((resolve) => {
+    // Serveur externe (non géré par ce process) : on ne fait rien
+    if (externallyManagedServer) {
+      externallyManagedServer = false;
+      return resolve();
+    }
+
     if (!serverProc) return resolve();
 
     console.log('[Electron] Arrêt du serveur...');
@@ -176,7 +227,7 @@ async function restartStandaloneWithPayload(payloadPath) {
   await stopServer();
   currentPayload = payloadPath;
   isStandalone = true;
-  startServer();
+  await startServer();
   tray.setContextMenu(buildContextMenu());
   updateTrayTooltip();
 }
@@ -186,7 +237,7 @@ async function restartStandalone() {
   await stopServer();
   currentPayload = null; // Reset au défaut
   isStandalone = true;
-  startServer();
+  await startServer();
   tray.setContextMenu(buildContextMenu());
   updateTrayTooltip();
 }
@@ -196,7 +247,7 @@ async function restartServer() {
   await stopServer();
   currentPayload = null; // Reset
   isStandalone = false;
-  startServer();
+  await startServer();
   tray.setContextMenu(buildContextMenu());
   updateTrayTooltip();
 }
@@ -351,7 +402,7 @@ function createTray() {
 }
 
 // ── Application Electron ─────────────────────────────────────────────────────
-app.on('ready', () => {
+app.on('ready', async () => {
   // Lire les arguments
   isStandalone = process.argv.includes('--standalone');
 
@@ -372,16 +423,24 @@ app.on('ready', () => {
   // Créer le tray
   createTray();
 
-  // Démarrer le serveur
-  startServer();
+  // Démarrer le serveur (maintenant async — probe HTTP en amont)
+  await startServer();
   updateTrayTooltip();
 
-  console.log(`[Electron] AI Worker pret - tray dans la barre systeme`);
-  console.log(`[Electron] UI : http://localhost:${serverPort}/index.html`);
+  if (externallyManagedServer) {
+    console.log(`[Electron] Raccroché au serveur existant → http://localhost:${serverPort}`);
+  } else {
+    console.log(`[Electron] AI Worker pret - tray dans la barre systeme`);
+    console.log(`[Electron] UI : http://localhost:${serverPort}/index.html`);
+  }
 });
 
 app.on('before-quit', () => {
-  stopServer();
+  if (!externallyManagedServer) {
+    stopServer();
+  } else {
+    console.log('[Electron] Serveur externe non géré — pas d\'arrêt.');
+  }
   if (tray) {
     tray.destroy();
     tray = null;

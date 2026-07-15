@@ -210,6 +210,11 @@ function resolveEffectiveWorkerConfig(session) {
     formatReponse:     effectiveFormatReponse,
     champsMultiligne: mf.champsMultiligne ?? workerConfig.champsMultiligne ?? [],
     champsArray:     mf.champsArray ?? workerConfig.champsArray ?? [],
+    // Déclare les champs array dont les valeurs sont des indices numériques référençant
+    // un autre champ array de la même ligne (ex: { choixCorrect: 'choix' }). Consommé
+    // côté client par grid.js (TextareaCellEditor + cellRenderer) pour afficher/éditer
+    // le texte résolu tout en stockant/envoyant les indices. Purement déclaratif ici.
+    champsIndexRef:  mf.champsIndexRef ?? workerConfig.champsIndexRef ?? {},
   };
 
   // Hook vue, modes et selectChoix exposés sur la session

@@ -25,6 +25,23 @@
  *    mais SANS saut de ligne réel, avec troncature "..." (CSS) si trop long.
  *    Affichage UNIQUEMENT — la donnée réelle (édition, envoi serveur, export)
  *    n'est jamais modifiée. Le tooltip (title) affiche le texte sans le symbole.
+ * 3. `champsIndexRef` (déclaré par la vue dans MANIFEST, ex: { choixCorrect: 'choix' })
+ *    signale qu'un champ array contient des INDICES numériques référençant un autre
+ *    champ array de la même ligne. Stockage/LLM = indices (inchangé, pour éviter
+ *    qu'un LLM ne propose un texte ne correspondant pas exactement à un choix) ;
+ *    édition/affichage = texte résolu, purement côté client (TextareaCellEditor +
+ *    cellRenderer). Générique : aucun nom de champ en dur ici, piloté par la
+ *    déclaration de la vue.
+ * 4. `TextareaCellEditor.getValue()` produit directement le type final stocké (tableau
+ *    pour les champs `champsArray`, indices pour `champsIndexRef`) — il ne délègue PAS
+ *    cette conversion à `colDef.valueParser`. Constaté empiriquement (traces console,
+ *    2026-07-15) : AG Grid n'invoque pas `valueParser` de façon fiable avec un
+ *    cellEditor personnalisé (l'éditeur de type texte/textarea) — `params.newValue`
+ *    dans `onCellValueChanged` restait la string brute de l'éditeur, jamais convertie
+ *    en tableau, cassant silencieusement tout ce qui dépend de la structure du champ
+ *    (ex: résolution d'indices de choixCorrect). `valueParser` reste défini en filet de
+ *    sécurité (il gère déjà le cas où la valeur est déjà un tableau) mais ne doit pas
+ *    être le seul mécanisme de conversion pour ces champs.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
@@ -307,6 +324,10 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
           // Plus besoin de recalcul de hauteur - hauteur fixe de 40px pour toutes les lignes
           // Forcer le redessin pour appliquer les modifications
           state.gridApi.redrawRows({ rowNodes: [params.node] });
+          // Filet de sécurité : force la ré-exécution du cellRenderer personnalisé
+          // (symbole ⏎, troncature array...) avec la valeur à jour, au cas où redrawRows
+          // seul ne suffise pas à rafraîchir l'affichage après une resaisie.
+          state.gridApi.refreshCells({ rowNodes: [params.node], columns: [cle], force: true });
         }
       } else {
         console.log(`[DEBUG-GRID] source="api" ignoré (programmatique)`);
@@ -378,9 +399,29 @@ function formatMultilineForDisplay(text) {
 function TextareaCellEditor() {}
 TextareaCellEditor.prototype.init = function(params) {
   this.textarea = document.createElement('textarea');
+
+  // Champ dont les valeurs sont des indices numériques référençant un autre champ array
+  // de la même ligne (ex: choixCorrect → choix, cf. MANIFEST.champsIndexRef côté vue).
+  // Édition = texte résolu (lisible) ; stockage/LLM = indices (cf. getValue ci-dessous).
+  const cle = params.colDef?.field;
+  const refField = state.workerConfig?.champsIndexRef?.[cle];
+  this.indexRefArray = refField ? (Array.isArray(params.data?.[refField]) ? params.data[refField] : []) : null;
+  // Champ array "simple" (choix...) : AG Grid n'invoque pas colDef.valueParser de façon
+  // fiable avec un cellEditor personnalisé (constaté : newValue reste une string brute
+  // dans onCellValueChanged). getValue() produit donc directement le tableau final —
+  // on ne dépend plus de valueParser pour la conversion.
+  this.isArrayField = !refField && !!state.workerConfig?.champsArray?.includes(cle);
+
   // Gestion spéciale pour les arrays (choix, choixCorrect) : convertir en string avec \n
   let initialValue;
-  if (params.value == null) {
+  if (this.indexRefArray) {
+    // Résoudre chaque indice en le texte correspondant de refField pour l'édition
+    const indices = Array.isArray(params.value) ? params.value : [];
+    initialValue = indices
+      .map(idx => this.indexRefArray[Number(idx)])
+      .filter(v => v !== undefined)
+      .join('\n');
+  } else if (params.value == null) {
     initialValue = '';
   } else if (Array.isArray(params.value)) {
     initialValue = params.value.join('\n');
@@ -426,7 +467,24 @@ TextareaCellEditor.prototype.autoGrow = function() {
   // Fonction conservée pour compatibilité mais non utilisée
 };
 TextareaCellEditor.prototype.getGui = function() { return this.textarea; };
-TextareaCellEditor.prototype.getValue = function() { return this.textarea.value; };
+TextareaCellEditor.prototype.getValue = function() {
+  if (this.indexRefArray) {
+    // Reconvertir chaque ligne de texte saisie en indice correspondant dans refField
+    // (recherche exacte, espaces ignorés). Une ligne sans correspondance est ignorée —
+    // l'incohérence sera de toute façon signalée en rouge par getInvalidFields côté vue.
+    return this.textarea.value
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(text => this.indexRefArray.findIndex(v => String(v).trim() === text))
+      .filter(idx => idx !== -1);
+  }
+  if (this.isArrayField) {
+    // Un élément par ligne — produit directement le tableau final stocké/envoyé.
+    return this.textarea.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  }
+  return this.textarea.value;
+};
 TextareaCellEditor.prototype.isPopup = function() { return true; };
 TextareaCellEditor.prototype.focusIn = function() { this.textarea.focus(); };
 TextareaCellEditor.prototype.destroy = function() { this.textarea = null; };
@@ -583,7 +641,11 @@ const dataCols = colonnes.map(col => {
       def.valueParser = (p) => {
         const newValue = p.newValue;
         if (typeof newValue === 'string') {
-          const lines = newValue.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+          // Un seul élément par ligne (convention de l'éditeur : Entrée = nouvelle ligne).
+          // Ne PAS découper sur la virgule : un élément de choix peut légitimement en
+          // contenir une (ex: "Chats, chiens et oiseaux") — la découper décalerait les
+          // positions du tableau et casserait la résolution d'indices de choixCorrect.
+          const lines = newValue.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
           return lines; // Retourne un array
         }
         // Si déjà un array, le garder tel quel
@@ -596,12 +658,33 @@ const dataCols = colonnes.map(col => {
       // CellRenderer : sépare chaque élément de l'array par le symbole de saut de ligne,
       // mais à PLAT sur une seule ligne (pas de <br>) — si trop long, on tronque avec des
       // "..." (overflow CSS) plutôt que de passer à la ligne comme les champs texte.
+      // Défensif : si un élément contient lui-même des \n bruts (ex: un tableau à 1 seul
+      // élément resté "collé" après une édition), on le re-découpe ici avant l'affichage,
+      // pour que le symbole apparaisse toujours, indépendamment de la façon dont la donnée
+      // a été structurée côté édition/serveur.
       def.cellRenderer = (params) => {
         const span = document.createElement('span');
         const value = params.value;
-        const items = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+
+        // Si ce champ référence un autre champ array de la même ligne (ex: choixCorrect
+        // → choix), résoudre chaque indice en texte pour l'affichage — la donnée réelle
+        // (params.value) reste des indices numériques, seul le rendu est concerné.
+        const refField = state.workerConfig?.champsIndexRef?.[col.cle];
+        let rawItems;
+        if (refField) {
+          const refArray = Array.isArray(params.data?.[refField]) ? params.data[refField] : [];
+          const indices = Array.isArray(value) ? value : [];
+          rawItems = indices.map(idx => refArray[Number(idx)]).filter(v => v !== undefined);
+        } else {
+          rawItems = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+        }
+
+        const items = rawItems
+          .flatMap(v => String(v).split(/\r?\n/))
+          .map(s => s.trim())
+          .filter(Boolean);
         if (items.length) {
-          span.textContent = items.map(v => String(v)).join(' ⏎ ');
+          span.textContent = items.join(' ⏎ ');
           span.title = items.join('\n');
           span.style.whiteSpace = 'nowrap';
           span.style.overflow = 'hidden';
@@ -859,6 +942,7 @@ function onCellUpdate(rowIndex, cle, value) {
     node.setDataValue(cle, value);
     state.gridApi.redrawRows({ rowNodes: [node] });
 state.gridApi.flashCells({ rowNodes: [node], columns: [cle], flashDuration: 150, fadeDuration: 400 });
+    state.gridApi.refreshCells({ rowNodes: [node], columns: [cle], force: true });
   }
   state.updatedCells++;
   updateProgress();
