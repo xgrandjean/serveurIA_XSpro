@@ -181,7 +181,9 @@ function evalRowStyleCondition(row, cond) {
   if (!cond) return true;
    const { champ, op, valeur } = cond;
    const val = row[champ];
-   const isEmpty = val === '' || val === ' ' || val === null || val === undefined || Number(val) === 0;
+   // Toute chaîne blanche ('', ' ', '  ', '\t'...) est considérée comme vide —
+   // les valeurs "non renseignées" peuvent arriver avec différentes variantes d'espaces.
+   const isEmpty = (typeof val === 'string' && val.trim() === '') || val === null || val === undefined || Number(val) === 0;
 
   switch (op) {
     case 'empty': return isEmpty;
@@ -458,6 +460,12 @@ const dataCols = colonnes.map(col => {
       // agSelectCellEditor - ouvre avec Entrée en mode clavier, affiche les labels, stocke les valeurs
       // permet la navigation gauche/droite même hors édition
       ...(hasSelectChoix ? {
+        // Désactive l'auto-détection AG Grid du cellDataType : les valeurs de ces colonnes
+        // sont gérées explicitement par getOptionValue/getOptionLabel ci-dessous, et une
+        // détection automatique (souvent 'text' si la 1ère valeur vue est vide/string) entre
+        // en conflit avec les valeurs numériques renvoyées par l'éditeur → rejet silencieux
+        // de la saisie ("Data type of the new value does not match...").
+        cellDataType: false,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: {
           values: sc.choix.map(entry => entry.valeur),
@@ -498,11 +506,13 @@ const dataCols = colonnes.map(col => {
     }
 
     // valueFormatter pour les colonnes numériques non selectChoix
-    if (!hasSelectChoix && (col.type === 'decimal' || col.type === 'number')) {
+    if (!hasSelectChoix && (col.type === 'decimal' || col.type === 'number' || col.type === 'integer')) {
       def.valueFormatter = (p) => {
-        if (p.value === null || p.value === undefined || p.value === '') return '';
+        if (p.value === null || p.value === undefined || String(p.value).trim() === '') return '';
         const n = parseFloat(p.value);
-        if (isNaN(n)) return p.value;
+        // Valeur non numérique (ex: reliquat de saisie invalide) → afficher vide plutôt
+        // que la valeur brute ou un texte d'erreur type "Invalid Number".
+        if (isNaN(n)) return '';
         return col.round
           ? n.toLocaleString('fr-FR', { minimumFractionDigits: col.round, maximumFractionDigits: col.round })
           : n.toLocaleString('fr-FR');
@@ -512,6 +522,11 @@ const dataCols = colonnes.map(col => {
     // cellEditor pour les colonnes numériques
     if (!hasSelectChoix && (col.type === 'decimal' || col.type === 'number' || col.type === 'integer')) {
       def.cellEditor = 'agNumberCellEditor';
+      // Comme pour selectChoix : on gère nous-mêmes le formatage/parsing (valueFormatter
+      // ci-dessus, agNumberCellEditor), donc on désactive l'auto-détection AG Grid du
+      // cellDataType — sinon une valeur vide/blanche ('', ' ') sur une colonne détectée
+      // 'number' s'affiche "Invalid Number" au lieu de rester simplement vide.
+      def.cellDataType = false;
     }
 
     // CellRenderer générique pour les colonnes dérivées
@@ -651,7 +666,13 @@ function addRowAfterSelected() {
       // Les champs array (choix, choixCorrect) doivent être initialisés avec []
       newRow[col.cle] = [];
     } else {
-      newRow[col.cle] = '';
+      // Utiliser la valeur de fallback si selectChoix en définit une
+      const sc = state.selectChoix[col.cle];
+      if (sc && sc.fallback && sc.fallback.alors !== undefined) {
+        newRow[col.cle] = sc.fallback.alors;
+      } else {
+        newRow[col.cle] = '';
+      }
     }
   }
 

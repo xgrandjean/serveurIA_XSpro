@@ -575,7 +575,7 @@ function evalCondition(row, cond) {
   if (!cond) return true;
   const { champ, op, valeur } = cond;
   const val = row[champ];
-  const isEmpty = val === ' ' || val === null || val === undefined || Number(val) === 0;
+  const isEmpty = isEmptyVal(val);
 
   switch (op) {
     case 'empty': return isEmpty;
@@ -782,6 +782,32 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
 //   { ok: false, rowInvalid: true } → garder valeur, mettre ligne en rouge
 //   { ok: false, message: '…' }   → revert + message
 const TYPE_INT_TO_KEY = { 1:'qcm', 2:'courte', 3:'ouverte', 4:'selection', 5:'cours' };
+
+// Champs requis (non vides) par type — sert uniquement à l'affichage visuel des
+// champs "à remplir" (rouge) pendant la saisie progressive, jamais à bloquer une
+// modification. Distinct de validateFieldAgainstType, qui lui rejette une VALEUR
+// incohérente une fois renseignée.
+const REQUIRED_FIELDS_BY_TYPE = {
+  qcm:       ['contenu', 'regle', 'correction', 'choix', 'choixCorrect', 'points'],
+  selection: ['contenu', 'regle', 'correction', 'choix', 'choixCorrect', 'points'],
+  courte:    ['contenu', 'regle', 'correction', 'choixCorrect', 'points'],
+  ouverte:   ['contenu', 'regle', 'correction', 'points'],
+  cours:     ['contenu'],
+};
+
+/**
+ * Champs requis pour le type courant de la ligne mais encore vides.
+ * Utilisé pour surligner en rouge les champs "à remplir" sans jamais rejeter
+ * la modification en cours (contrairement à getInvalidFields/validateCellEdit
+ * qui, eux, rejettent une valeur réellement incohérente).
+ */
+function getMissingFields(row) {
+  const typeKey = TYPE_INT_TO_KEY[row.type];
+  if (!typeKey) return [];
+  const required = REQUIRED_FIELDS_BY_TYPE[typeKey] || [];
+  return required.filter(f => isEmptyVal(row[f]));
+}
+
 const FIELD_LABELS = { type:'Type', regle:'Règle', correction:'Correction', ordre_choix:'Ordre des choix', points:'Points', choix:'Choix', choixCorrect:'Réponses correctes', designation:'Désignation' };
 // Champs qui autorisent toujours l'édition (type + désignation)
 const ALWAYS_ALLOWED = new Set(['type', 'designation']);
@@ -792,22 +818,25 @@ function valueToLabel(cle, val) {
   // type a sa propre table (indice → string)
   if (cle === 'type') {
     if (TYPE_INT_TO_KEY[val]) return TYPE_INT_TO_KEY[val];
-    // déjà un label (string)
-    if (typeof val === 'string') return val;
+    // déjà un label (string) — on normalise les variantes d'espaces ('  ', '\t'...) en ' '
+    if (typeof val === 'string') return val.trim() === '' ? ' ' : val;
     return null;
   }
   // regle / correction / ordre_choix : valeursPossibles alignées sur les indices selectChoix
   const vp = MANIFEST.regles?.valeursPossibles?.[cle];
   if (vp && typeof val === 'number' && vp[val] !== undefined) return vp[val];
-  // déjà un label (string)
-  if (typeof val === 'string') return val;
+  // déjà un label (string) — idem, normaliser les variantes d'espaces
+  if (typeof val === 'string') return val.trim() === '' ? ' ' : val;
   return null;
 }
 
 function isEmptyVal(v) {
   // Array vide [] → considéré comme vide
-  if (Array.isArray(v) && v.length === 0) return true;
-  return v === '' || v === ' ' || v === null || v === undefined || Number(v) === 0;
+  if (Array.isArray(v)) return v.length === 0;
+  // Toute chaîne blanche ('', ' ', '  ', '\t'...) est considérée comme vide —
+  // XSpro peut envoyer différentes variantes d'espaces pour une valeur "non renseignée".
+  if (typeof v === 'string' && v.trim() === '') return true;
+  return v === null || v === undefined || Number(v) === 0;
 }
 
 function allowedLabels(typeKey, field) {
@@ -950,6 +979,10 @@ function getInvalidFields(row) {
   const typeKey = TYPE_INT_TO_KEY[row.type];
   if (!typeKey) return [];
   const invalid = [];
+  // Si le type est vide (0) ou n'a pas de label significatif, ne pas valider les autres champs
+  // Cela permet de remplir progressivement une nouvelle ligne sans être bloqué
+  const typeLabel = valueToLabel('type', row.type) || row.type;
+  if (isEmptyVal(typeLabel)) return [];
   for (const f of ['regle', 'correction', 'ordre_choix', 'points', 'choix', 'choixCorrect']) {
     const res = validateFieldAgainstType(f, row[f], typeKey, row);
     if (!res.ok) invalid.push(f);
@@ -966,15 +999,18 @@ function validateCellEdit(row, cle, newValue) {
 
   if (ALWAYS_ALLOWED.has(cle)) {
     if (cle === 'type') {
-      const newTypeKey = TYPE_INT_TO_KEY[newValue];
-      if (!newTypeKey) return { ok: true, invalidFields: [] };
+      // Le type est le point d'entrée du remplissage progressif d'une ligne : il ne doit
+      // jamais être rejeté au prétexte que les autres champs (choix, points...) sont
+      // encore vides ou incohérents à ce stade. On l'accepte toujours, et on affiche en
+      // rouge (indicatif, non bloquant) les champs encore requis pour ce type.
+      return { ok: true, invalidFields: getMissingFields(sim) };
     }
     const invalidFields = getInvalidFields(sim);
     if (invalidFields.length) {
       const label = TYPE_INT_TO_KEY[newValue] || TYPE_INT_TO_KEY[row.type] || '?';
       return { ok: false, rowInvalid: true, invalidFields, message: `Ligne non conforme pour le type « ${label} » : ${invalidFields.join(', ')}.` };
     }
-    return { ok: true, invalidFields: [] };
+    return { ok: true, invalidFields: getMissingFields(sim) };
   }
 
   const typeKey = TYPE_INT_TO_KEY[row.type];
@@ -1013,7 +1049,7 @@ function validateCellEdit(row, cle, newValue) {
     if (allInvalid.length > 0) {
       return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
     }
-    return { ok: true, invalidFields: [] };
+    return { ok: true, invalidFields: getMissingFields(sim) };
   }
 
   // Validation spécifique pour qcm (1) et Liste de choix (4)
@@ -1090,7 +1126,7 @@ function validateCellEdit(row, cle, newValue) {
     if (allInvalid.length > 0) {
       return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
     }
-    return { ok: true, invalidFields: [] };
+    return { ok: true, invalidFields: getMissingFields(sim) };
   }
 
   // Validation du champ modifié
@@ -1105,7 +1141,7 @@ function validateCellEdit(row, cle, newValue) {
   if (allInvalid.length > 0) {
     return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
   }
-  return { ok: true, invalidFields: [] };
+  return { ok: true, invalidFields: getMissingFields(sim) };
 }
 
 module.exports = {
@@ -1116,4 +1152,5 @@ module.exports = {
   postProcessMerge,
   validateCellEdit,
   getInvalidFields,
+  getMissingFields,
 };

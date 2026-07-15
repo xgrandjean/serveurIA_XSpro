@@ -412,12 +412,16 @@ wss.on('connection', (ws, req) => {
     }));
 
     // Validation initiale des lignes (pour cohérence affichage ↔ édition)
-    // Une ligne invalide doit apparaître barrée comme après édition manuelle.
-    if (session.viewHook?.getInvalidFields && Array.isArray(session.rows)) {
+    // Une ligne invalide doit apparaître barrée comme après édition manuelle, et une
+    // ligne partiellement remplie doit afficher ses champs encore requis en rouge —
+    // même logique qu'après une édition manuelle acceptée (cf. cas 'cell:edit' plus bas).
+    if (Array.isArray(session.rows) && (session.viewHook?.getInvalidFields || session.viewHook?.getMissingFields)) {
       session.rows.forEach((row, rowIndex) => {
-        const invalidFields = session.viewHook.getInvalidFields(row) || [];
-        if (invalidFields.length > 0) {
-          wsSend(session, { type: 'cell:validate', rowIndex, invalidFields, message: null });
+        const invalidFields = session.viewHook.getInvalidFields?.(row) || [];
+        const missingFields = session.viewHook.getMissingFields?.(row) || [];
+        const combined = Array.from(new Set([...invalidFields, ...missingFields]));
+        if (combined.length > 0) {
+          wsSend(session, { type: 'cell:validate', rowIndex, invalidFields: combined, message: null });
         }
       });
     }
@@ -473,11 +477,14 @@ async function handleUIMessage(session, msg) {
             break; // ne pas setCellValue
           }
         } else {
-          // Ligne valide → effacer rouge/barres
+          // Ligne valide → effacer les incohérences bloquantes, mais conserver l'affichage
+          // des champs encore requis pour ce type (result.invalidFields = getMissingFields,
+          // purement indicatif — cf. viewHook.validateCellEdit), sans quoi le rouge
+          // "à remplir" disparaît dès que la modification est acceptée.
           wsSend(session, {
             type: 'cell:validate',
             rowIndex,
-            invalidFields: [],
+            invalidFields: result.invalidFields || [],
             message: null,
           });
         }
