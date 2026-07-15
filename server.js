@@ -452,40 +452,56 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur valide une cellule éditée manuellement
     case 'cell:edit': {
       const { rowIndex, cle, value } = msg;
-      console.log('[DEBUG] cell:edit', { rowIndex, cle, value: JSON.stringify(value) });
+      let sideEffects = null;
       // Validation métier via le hook vue
       if (session.viewHook?.validateCellEdit) {
         const row = { ...session.rows[rowIndex] };
         const result = session.viewHook.validateCellEdit(row, cle, value);
-        console.log('[DEBUG] validateCellEdit result:', JSON.stringify(result));
         if (!result.ok) {
           if (result.rowInvalid) {
+            // type/désignation → garder la valeur, envoyer validate avec champs fautifs
             wsSend(session, {
               type: 'cell:validate',
               rowIndex,
               invalidFields: result.invalidFields || [],
               message: result.message,
             });
+            // Ne pas break : on accepte la valeur
           } else {
-            console.log('[DEBUG] cell:edit → REVERT!');
+            // Autre champ → revert (pas de rouge : la valeur est restaurée)
             wsSend(session, {
               type: 'cell:revert',
               rowIndex, cle,
               value: session.rows[rowIndex]?.[cle],
               message: result.message,
             });
-            break;
+            break; // ne pas setCellValue
           }
         } else {
+          // Ligne valide → effacer les incohérences bloquantes, mais conserver l'affichage
+          // des champs encore requis pour ce type (result.invalidFields = getMissingFields,
+          // purement indicatif — cf. viewHook.validateCellEdit), sans quoi le rouge
+          // "à remplir" disparaît dès que la modification est acceptée.
           wsSend(session, {
             type: 'cell:validate',
             rowIndex,
             invalidFields: result.invalidFields || [],
             message: null,
           });
+          sideEffects = result.sideEffects || null;
         }
       }
       SM.setCellValue(session, rowIndex, cle, value);
+
+      // Effets de bord déclarés par le hook (ex: réconcilier un champ dont les valeurs
+      // référencent le champ qu'on vient d'éditer — cf. champsIndexRef). Générique : on
+      // applique et on notifie ce que le hook a calculé, sans connaître les noms de champs.
+      if (sideEffects) {
+        for (const [field, val] of Object.entries(sideEffects)) {
+          SM.setCellValue(session, rowIndex, field, val);
+          wsSend(session, { type: 'cell:update', rowIndex, cle: field, value: val });
+        }
+      }
       break;
     }
 

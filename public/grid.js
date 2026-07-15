@@ -42,6 +42,15 @@
  *    (ex: résolution d'indices de choixCorrect). `valueParser` reste défini en filet de
  *    sécurité (il gère déjà le cas où la valeur est déjà un tableau) mais ne doit pas
  *    être le seul mécanisme de conversion pour ces champs.
+ * 5. AUCUNE logique croisée entre deux champs métier (ex: réconcilier "choixCorrect"
+ *    quand "choix" change) ne doit vivre ici, même codée "juste pour ce cas" — grid.js
+ *    ne doit jamais connaître de nom de champ métier. Ce genre de règle est calculée
+ *    par le hook vue (validateCellEdit) et exposée via un champ générique `sideEffects`
+ *    dans sa réponse ; server.js l'applique et la notifie génériquement (cell:update)
+ *    sans connaître les noms de champs non plus. Si un besoin similaire apparaît pour
+ *    un autre champ, il se déclare dans le hook (ex: MANIFEST.champsIndexRef), jamais
+ *    par un `if (cle === '...')` ici. Un tel code a été introduit puis retiré le
+ *    2026-07-15 — ne pas le réintroduire sans passer par ce mécanisme.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
@@ -253,27 +262,14 @@ function initGrid(colonnes, rows) {
         // Intercepter Delete/Backspace pour gérer manuellement l'effacement
         // sans déplacement de focus (comme Excel)
         if (params.event.key === 'Delete' || params.event.key === 'Backspace') {
+          // Effacer la valeur de la cellule
           const rowIndex = params.node?.rowIndex;
           const colId = params.column?.getColId();
           if (rowIndex !== undefined && colId && state.rows[rowIndex]) {
-            // Si on efface "choix", convertir d'abord les indices de "choixCorrect" en texte
-            if (colId === 'choix') {
-              const choixCorrect = state.rows[rowIndex].choixCorrect;
-              const choix = state.rows[rowIndex].choix;
-              if (Array.isArray(choixCorrect) && choixCorrect.length > 0 && Array.isArray(choix)) {
-                const resolved = choixCorrect.map(idx => {
-                  const text = choix[Number(idx)];
-                  return text !== undefined ? text : String(idx);
-                });
-                state.rows[rowIndex].choixCorrect = resolved;
-                const node = params.node;
-                if (node) {
-                  node.setDataValue('choixCorrect', resolved);
-                }
-                sendWS({ type: 'cell:edit', rowIndex, cle: 'choixCorrect', value: resolved });
-              }
-            }
-            // Les champs array (choix, choixCorrect) doivent être réinitialisés avec [] et non ''
+            // Générique : un champ array se vide en [] et non '', sinon AG Grid re-détecte
+            // un type incohérent. Toute conséquence sur d'autres champs (ex: un champ qui
+            // référence celui-ci via champsIndexRef) est calculée et notifiée par le serveur
+            // (cell:update générique) — grid.js n'a pas à connaître cette relation.
             const champsArray = state.workerConfig?.champsArray || [];
             const emptyValue = champsArray.includes(colId) ? [] : '';
             state.rows[rowIndex][colId] = emptyValue;
@@ -336,38 +332,6 @@ function initGrid(colonnes, rows) {
         const rowIndex = params.node.rowIndex;
         const cle      = params.column.getColId();
         if (state.rows[rowIndex]) {
-          // Si "choix" a été modifié, réconcilier "choixCorrect" :
-          // les textes bruts dans choixCorrect qui correspondent à un élément du nouveau
-          // choix doivent être reconvertis en indices.
-          if (cle === 'choix') {
-            const oldChoix = Array.isArray(params.oldValue) ? params.oldValue : [];
-            const newChoix = Array.isArray(params.newValue) ? params.newValue : [];
-            const choixCorrect = state.rows[rowIndex].choixCorrect;
-            if (Array.isArray(choixCorrect) && choixCorrect.length > 0) {
-              const reconciled = choixCorrect.map(v => {
-                // Si c'est déjà un indice numérique valide dans le nouveau choix, le garder
-                if (typeof v === 'number' && v >= 0 && v < newChoix.length) return v;
-                // Si c'est une string, chercher si elle correspond à un élément du nouveau choix
-                if (typeof v === 'string') {
-                  const idx = newChoix.findIndex(c => String(c).trim() === v.trim());
-                  if (idx !== -1) return idx;
-                }
-                // Sinon garder la valeur brute (texte)
-                return v;
-              });
-              // Vérifier si la réconciliation a changé quelque chose
-              const changed = JSON.stringify(reconciled) !== JSON.stringify(choixCorrect);
-              if (changed) {
-                state.rows[rowIndex].choixCorrect = reconciled;
-                const node = params.node;
-                if (node) {
-                  node.setDataValue('choixCorrect', reconciled);
-                }
-                sendWS({ type: 'cell:edit', rowIndex, cle: 'choixCorrect', value: reconciled });
-              }
-            }
-          }
-
           console.log(`[DEBUG-GRID] envoie cell:edit rowIndex=${rowIndex} cle="${cle}" value="${JSON.stringify(params.newValue)}"`);
           sendWS({ type: 'cell:edit', rowIndex, cle, value: params.newValue });
 state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuration: 150, fadeDuration: 400 });
@@ -466,18 +430,17 @@ TextareaCellEditor.prototype.init = function(params) {
   // Gestion spéciale pour les arrays (choix, choixCorrect) : convertir en string avec \n
   let initialValue;
   if (this.indexRefArray) {
-    const indices = Array.isArray(params.value) ? params.value : [];
-    if (this.indexRefArray.length > 0) {
-      // Résoudre chaque indice en le texte correspondant de refField pour l'édition
-      initialValue = indices
-        .map(idx => this.indexRefArray[Number(idx)])
-        .filter(v => v !== undefined)
-        .join('\n');
-    } else {
-      // Si le tableau de référence (choix) est vide, afficher les valeurs brutes
-      // (textes ou indices) stockées dans le champ lui-même
-      initialValue = indices.map(v => String(v)).join('\n');
-    }
+    // Résoudre chaque valeur pour l'édition : un indice numérique valide se résout en
+    // texte via refField ; une valeur déjà en texte brut (non encore résolue — état
+    // transitoire normal, cf. computeIndexRefSideEffects) s'affiche telle quelle.
+    const values = Array.isArray(params.value) ? params.value : [];
+    initialValue = values
+      .map(v => {
+        const resolved = (typeof v === 'number') ? this.indexRefArray[v] : undefined;
+        return resolved !== undefined ? resolved : v;
+      })
+      .filter(v => v !== undefined && v !== null)
+      .join('\n');
   } else if (params.value == null) {
     initialValue = '';
   } else if (Array.isArray(params.value)) {
@@ -525,23 +488,20 @@ TextareaCellEditor.prototype.autoGrow = function() {
 };
 TextareaCellEditor.prototype.getGui = function() { return this.textarea; };
 TextareaCellEditor.prototype.getValue = function() {
-    if (this.indexRefArray) {
+  if (this.indexRefArray) {
     // Reconvertir chaque ligne de texte saisie en indice correspondant dans refField
-    // (recherche exacte, espaces ignorés).
-    // ATTENTION : Si un texte ne correspond à aucun choix EXISTANT, on le garde quand
-    // même comme valeur brute (string ou nombre). L'incohérence sera signalée en rouge
-    // par getInvalidFields côté vue — jamais de rejet silencieux.
+    // (recherche exacte, espaces ignorés). Une ligne sans correspondance est conservée
+    // en TEXTE BRUT (pas abandonnée) — état transitoire normal pendant la construction
+    // manuelle d'une question (ex: taper la bonne réponse avant que tous les choix ne
+    // soient saisis) ; l'incohérence est signalée en rouge par getInvalidFields côté vue,
+    // et la résolution finale texte → indice peut aussi être prise en charge par le LLM.
     return this.textarea.value
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(Boolean)
       .map(text => {
         const idx = this.indexRefArray.findIndex(v => String(v).trim() === text);
-        if (idx !== -1) return idx;
-        // Texte ne correspondant à aucun choix existant → garder comme valeur potentielle
-        // Si c'est un nombre, le garder comme nombre (indice); sinon garder comme string
-        const n = Number(text);
-        return isNaN(n) ? text : n;
+        return idx !== -1 ? idx : text;
       });
   }
   if (this.isArrayField) {
@@ -732,22 +692,19 @@ const dataCols = colonnes.map(col => {
         const value = params.value;
 
         // Si ce champ référence un autre champ array de la même ligne (ex: choixCorrect
-        // → choix), résoudre chaque indice en texte pour l'affichage — la donnée réelle
-        // (params.value) reste des indices numériques, seul le rendu est concerné.
+        // → choix), résoudre chaque valeur pour l'affichage : un indice numérique valide
+        // se résout en texte via refArray ; une valeur déjà en texte brut (non encore
+        // résolue en indice — état transitoire normal, cf. computeIndexRefSideEffects)
+        // s'affiche telle quelle. La donnée réelle (params.value) n'est jamais modifiée.
         const refField = state.workerConfig?.champsIndexRef?.[col.cle];
         let rawItems;
         if (refField) {
           const refArray = Array.isArray(params.data?.[refField]) ? params.data[refField] : [];
           const indices = Array.isArray(value) ? value : [];
           rawItems = indices.map(v => {
-            // Si c'est déjà une string (texte brut, ex: après effacement de choix), l'afficher directement
-            if (typeof v === 'string' && isNaN(Number(v))) return v;
-            // Si c'est un nombre ou une string numérique, tenter la résolution d'indice
-            const idx = Number(v);
-            if (!isNaN(idx) && refArray[idx] !== undefined) return refArray[idx];
-            // Fallback : afficher la valeur brute
-            return String(v);
-          });
+            const resolved = (typeof v === 'number') ? refArray[v] : undefined;
+            return resolved !== undefined ? resolved : v; // indice résolu → texte ; sinon → valeur brute telle quelle
+          }).filter(v => v !== undefined && v !== null);
         } else {
           rawItems = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
         }
