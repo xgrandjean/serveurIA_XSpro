@@ -253,10 +253,26 @@ function initGrid(colonnes, rows) {
         // Intercepter Delete/Backspace pour gérer manuellement l'effacement
         // sans déplacement de focus (comme Excel)
         if (params.event.key === 'Delete' || params.event.key === 'Backspace') {
-          // Effacer la valeur de la cellule
           const rowIndex = params.node?.rowIndex;
           const colId = params.column?.getColId();
           if (rowIndex !== undefined && colId && state.rows[rowIndex]) {
+            // Si on efface "choix", convertir d'abord les indices de "choixCorrect" en texte
+            if (colId === 'choix') {
+              const choixCorrect = state.rows[rowIndex].choixCorrect;
+              const choix = state.rows[rowIndex].choix;
+              if (Array.isArray(choixCorrect) && choixCorrect.length > 0 && Array.isArray(choix)) {
+                const resolved = choixCorrect.map(idx => {
+                  const text = choix[Number(idx)];
+                  return text !== undefined ? text : String(idx);
+                });
+                state.rows[rowIndex].choixCorrect = resolved;
+                const node = params.node;
+                if (node) {
+                  node.setDataValue('choixCorrect', resolved);
+                }
+                sendWS({ type: 'cell:edit', rowIndex, cle: 'choixCorrect', value: resolved });
+              }
+            }
             // Les champs array (choix, choixCorrect) doivent être réinitialisés avec [] et non ''
             const champsArray = state.workerConfig?.champsArray || [];
             const emptyValue = champsArray.includes(colId) ? [] : '';
@@ -320,6 +336,38 @@ function initGrid(colonnes, rows) {
         const rowIndex = params.node.rowIndex;
         const cle      = params.column.getColId();
         if (state.rows[rowIndex]) {
+          // Si "choix" a été modifié, réconcilier "choixCorrect" :
+          // les textes bruts dans choixCorrect qui correspondent à un élément du nouveau
+          // choix doivent être reconvertis en indices.
+          if (cle === 'choix') {
+            const oldChoix = Array.isArray(params.oldValue) ? params.oldValue : [];
+            const newChoix = Array.isArray(params.newValue) ? params.newValue : [];
+            const choixCorrect = state.rows[rowIndex].choixCorrect;
+            if (Array.isArray(choixCorrect) && choixCorrect.length > 0) {
+              const reconciled = choixCorrect.map(v => {
+                // Si c'est déjà un indice numérique valide dans le nouveau choix, le garder
+                if (typeof v === 'number' && v >= 0 && v < newChoix.length) return v;
+                // Si c'est une string, chercher si elle correspond à un élément du nouveau choix
+                if (typeof v === 'string') {
+                  const idx = newChoix.findIndex(c => String(c).trim() === v.trim());
+                  if (idx !== -1) return idx;
+                }
+                // Sinon garder la valeur brute (texte)
+                return v;
+              });
+              // Vérifier si la réconciliation a changé quelque chose
+              const changed = JSON.stringify(reconciled) !== JSON.stringify(choixCorrect);
+              if (changed) {
+                state.rows[rowIndex].choixCorrect = reconciled;
+                const node = params.node;
+                if (node) {
+                  node.setDataValue('choixCorrect', reconciled);
+                }
+                sendWS({ type: 'cell:edit', rowIndex, cle: 'choixCorrect', value: reconciled });
+              }
+            }
+          }
+
           console.log(`[DEBUG-GRID] envoie cell:edit rowIndex=${rowIndex} cle="${cle}" value="${JSON.stringify(params.newValue)}"`);
           sendWS({ type: 'cell:edit', rowIndex, cle, value: params.newValue });
 state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuration: 150, fadeDuration: 400 });
@@ -418,12 +466,18 @@ TextareaCellEditor.prototype.init = function(params) {
   // Gestion spéciale pour les arrays (choix, choixCorrect) : convertir en string avec \n
   let initialValue;
   if (this.indexRefArray) {
-    // Résoudre chaque indice en le texte correspondant de refField pour l'édition
     const indices = Array.isArray(params.value) ? params.value : [];
-    initialValue = indices
-      .map(idx => this.indexRefArray[Number(idx)])
-      .filter(v => v !== undefined)
-      .join('\n');
+    if (this.indexRefArray.length > 0) {
+      // Résoudre chaque indice en le texte correspondant de refField pour l'édition
+      initialValue = indices
+        .map(idx => this.indexRefArray[Number(idx)])
+        .filter(v => v !== undefined)
+        .join('\n');
+    } else {
+      // Si le tableau de référence (choix) est vide, afficher les valeurs brutes
+      // (textes ou indices) stockées dans le champ lui-même
+      initialValue = indices.map(v => String(v)).join('\n');
+    }
   } else if (params.value == null) {
     initialValue = '';
   } else if (Array.isArray(params.value)) {
@@ -685,14 +739,15 @@ const dataCols = colonnes.map(col => {
         if (refField) {
           const refArray = Array.isArray(params.data?.[refField]) ? params.data[refField] : [];
           const indices = Array.isArray(value) ? value : [];
-          // Si le tableau de référence est vide, afficher les indices bruts (pour que
-          // l'utilisateur voie que les données existent encore, même si la résolution
-          // échoue). Ex: [0, 1] → "0 ⏎ 1"
-          if (refArray.length === 0 && indices.length > 0) {
-            rawItems = indices.map(String);
-          } else {
-            rawItems = indices.map(idx => refArray[Number(idx)]).filter(v => v !== undefined);
-          }
+          rawItems = indices.map(v => {
+            // Si c'est déjà une string (texte brut, ex: après effacement de choix), l'afficher directement
+            if (typeof v === 'string' && isNaN(Number(v))) return v;
+            // Si c'est un nombre ou une string numérique, tenter la résolution d'indice
+            const idx = Number(v);
+            if (!isNaN(idx) && refArray[idx] !== undefined) return refArray[idx];
+            // Fallback : afficher la valeur brute
+            return String(v);
+          });
         } else {
           rawItems = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
         }
