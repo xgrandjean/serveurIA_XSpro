@@ -247,6 +247,22 @@ function resolveEffectiveWorkerConfig(session) {
      session.selectChoix = rawSC || {};
    }
 
+   // CHAMPS_RESTREINTS (optionnel, même schéma que SELECT_CHOIX) : { [champ]: { [valeurType]:
+   // [valeursAutorisees] } } — permet au client de ne proposer, dans chaque dropdown, que les
+   // valeurs non interdites pour le type de la ligne. Purement une restriction du MENU affiché,
+   // jamais de la validation (qui reste gérée par validateCellEdit/getInvalidFields).
+   const rawCR = viewHook?.CHAMPS_RESTREINTS;
+   if (typeof rawCR === 'function') {
+     try {
+       session.champsRestreints = rawCR(workerConfig, data, session.xsproPayload) || {};
+     } catch (e) {
+       console.warn(`[ViewResolver] Erreur dans CHAMPS_RESTREINTS() : ${e.message} — fallback {}`);
+       session.champsRestreints = {};
+     }
+   } else {
+     session.champsRestreints = rawCR || {};
+   }
+
    const nbModes = Object.keys(session.modes).length;
    const nbSC    = Object.keys(session.selectChoix).length;
    console.log(

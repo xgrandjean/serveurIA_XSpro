@@ -66,6 +66,7 @@
    workerConfig:  null,
    rows:          [],
    selectChoix:   {},
+   champsRestreints: {},       // { [champ]: { [valeurType]: [valeursAutorisees] } } — restreint les dropdowns selon le type de la ligne (jamais 'type' lui-même)
    modes:         {},          // modes de travail (définis par le hook vue)
    activeWorkMode: null,       // ID du mode de travail actif (ex: 'decomposition')
    basePromptsSuggeres: null,  // promptsSuggeres originaux (XSpro ou MANIFEST) pour restauration
@@ -168,6 +169,8 @@ function onInit(msg) {
 
   // SelectChoix pour les dropdowns
   state.selectChoix = msg.selectChoix || {};
+  // Restriction des dropdowns selon le type de la ligne (jamais 'type' lui-même)
+  state.champsRestreints = msg.champsRestreints || {};
 
   // Styles de ligne définis par le hook vue
   state.rowStyles = msg.rowStyles || [];
@@ -578,13 +581,22 @@ const dataCols = colonnes.map(col => {
       // permet la navigation gauche/droite même hors édition
       ...(hasSelectChoix ? {
         cellEditor: 'agSelectCellEditor',
-        cellEditorParams: {
-          values: sc.choix.map(entry => entry.valeur),
-          getOptionValue: (value) => value,
-          getOptionLabel: (value) => {
-            const entry = sc.choix.find(c => c.valeur === value);
-            return entry ? entry.label : value;
-          }
+        cellEditorParams: (params) => {
+          // Restreint les valeurs proposées selon le type de la ligne courante, si le
+          // hook a déclaré une restriction pour ce champ (state.champsRestreints) —
+          // sinon (ex: colonne 'type' elle-même, jamais restreinte) liste complète.
+          // Restriction du MENU affiché uniquement ; la validation reste inchangée.
+          const restrictMap = state.champsRestreints?.[col.cle];
+          const allowedValeurs = restrictMap?.[params.data?.type];
+          const values = Array.isArray(allowedValeurs) ? allowedValeurs : sc.choix.map(entry => entry.valeur);
+          return {
+            values,
+            getOptionValue: (value) => value,
+            getOptionLabel: (value) => {
+              const entry = sc.choix.find(c => c.valeur === value);
+              return entry ? entry.label : value;
+            },
+          };
         },
         suppressKeyboardEvent: (params) => {
           const currentRowIndex = params.node?.rowIndex ?? params.api.getFocusedCell()?.rowIndex;
@@ -719,10 +731,22 @@ const dataCols = colonnes.map(col => {
           span.style.whiteSpace = 'nowrap';
           span.style.overflow = 'hidden';
           span.style.textOverflow = 'ellipsis';
+          // display: inline-block est nécessaire pour que maxWidth + text-overflow:ellipsis
+          // fonctionnent ici. Effet de bord ASSUMÉ (pas accidentel) : ça empêche le
+          // text-decoration:line-through posé par cellStyle sur la cellule parente de se
+          // propager à ce span — un champ array "incohérent" (rouge) n'apparaît donc jamais
+          // barré, contrairement à un champ "interdit" ailleurs dans la grille. C'est une
+          // distinction visuelle voulue entre les deux cas (cf. échanges du 2026-07-15) :
+          // ne pas "corriger" en supprimant l'inline-block sans en rediscuter.
           span.style.display = 'inline-block';
           span.style.maxWidth = '100%';
           span.style.verticalAlign = 'middle';
           span.style.cursor = 'pointer';
+          // Fixer explicitement la taille de police : sans ça, l'héritage depuis la cellule
+          // parente (cellStyle: fontSize 12px) n'est pas garanti selon comment AG Grid
+          // empile ses éléments internes — on l'aligne ici pour rester cohérent avec le
+          // reste de la grille.
+          span.style.fontSize = '12px';
         }
         return span;
       };

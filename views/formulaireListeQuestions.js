@@ -957,62 +957,66 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
     }
   }
 
-  // Validation spécifique pour qcm (1) et Liste de choix (4)
-  if ((typeKey === 'qcm' || typeKey === 'selection') && row) {
-    // Normaliser les valeurs pour la validation
-    const choixArray = Array.isArray(row.choix) ? row.choix : (typeof row.choix === 'string' ? row.choix.split(/<br\s*\/?>|\n/i).map(v => v.trim()).filter(Boolean) : []);
-    const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : (typeof row.choixCorrect === 'string' ? row.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
+  return { ok: true };
+}
 
-    // Vérification de cohérence choix/choixCorrect
-    if (cle === 'choix' || cle === 'choixCorrect') {
-      if (choixArray.length === 0 && choixCorrectArray.length > 0) {
-        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » est vide mais « choixCorrect » contient des valeurs.` };
-      }
-      if (choixArray.length > 0 && choixCorrectArray.length === 0) {
-        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » contient des valeurs mais « choixCorrect » est vide.` };
-      }
-    }
+/**
+ * Vérifications croisées qcm/selection — recalculées ENTIÈREMENT à chaque appel,
+ * sur l'état complet de la ligne, indépendamment du champ qui vient d'être édité.
+ * Principe demandé : "tout changement dans une ligne refait un check complet de
+ * la ligne". Retourne directement la liste des champs à marquer en rouge —
+ * jamais de blocage, purement indicatif (cf. politique de validation permissive
+ * en tête de fichier).
+ *
+ * Règles couvertes (qcm ET selection, selection étant qcm à choix unique forcé) :
+ *   - choix/choixCorrect doivent être remplis ou vides ENSEMBLE
+ *   - choixCorrect ne doit contenir que des indices dans les bornes de choix
+ *   - choixCorrect ne doit pas contenir de texte non résolu (aucune correspondance)
+ *   - regle "unique"   → exactement 1 choixCorrect
+ *   - regle "multiple" → au moins 1 choixCorrect (qcm uniquement)
+ *   - selection        → regle forcée à "unique"
+ */
+function getQcmSelectionInvalidFields(row, typeKey) {
+  if (typeKey !== 'qcm' && typeKey !== 'selection') return [];
 
-    // Vérification des indices hors limites (si choixCorrect est rempli)
-    if (cle === 'choixCorrect' && choixCorrectArray.length > 0 && choixArray.length > 0) {
-      const numericChoixCorrect = choixCorrectArray.map(v => Number(v)).filter(v => !isNaN(v));
-      const hasOutOfBounds = numericChoixCorrect.some(idx => idx < 0 || idx >= choixArray.length);
-      if (hasOutOfBounds) {
-        return { ok: false, message: `Le champ « choixCorrect » contient des indices hors limites (valeurs : ${numericChoixCorrect.join(', ')}, mais « choix » n'a que ${choixArray.length} élément(s)).` };
-      }
-      // Texte non encore résolu en indice (état transitoire normal pendant la construction
-      // manuelle — cf. computeIndexRefSideEffects) : signalé en rouge pour rappeler qu'il
-      // reste à finaliser, mais jamais bloquant (le LLM peut aussi s'en charger ensuite).
-      const hasUnresolvedText = choixCorrectArray.some(v => typeof v !== 'number' && isNaN(Number(v)));
-      if (hasUnresolvedText) {
-        return { ok: false, message: `Le champ « choixCorrect » contient encore du texte non résolu en indice (à faire correspondre à un élément de « choix », ou laissé au LLM).` };
-      }
-    }
+  const choixArray = Array.isArray(row.choix) ? row.choix : [];
+  const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : [];
+  const regleLabel = valueToLabel('regle', row.regle) || row.regle;
+  const invalid = new Set();
 
-    // Vérification de la règle
-    if (cle === 'regle' || cle === 'choixCorrect') {
-      const regleLabel = valueToLabel('regle', row.regle) || row.regle;
-      // RÈGLE "unique" : exactement 1 réponse correcte requise
-      if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
-        return { ok: false, message: `Incohérence règle/réponses : la règle « unique » nécessite exactement 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
-      }
-      // RÈGLE "multiple" : au moins 1 réponse correcte requise
-      // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses possibles)
-      if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
-        return { ok: false, message: `Incohérence règle/réponses : la règle « multiple » nécessite au moins 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
-      }
-    }
-
-    // Pour Liste de choix (selection), forcer regle à "unique"
-    if (typeKey === 'selection' && cle === 'regle') {
-      const currentRegleLabel = valueToLabel('regle', row.regle) || row.regle;
-      if (currentRegleLabel !== 'unique') {
-        return { ok: false, message: `Pour le type « Liste de choix », la règle doit être « unique ».` };
-      }
-    }
+  // Cohérence de présence : remplis ou vides ENSEMBLE
+  if (choixArray.length === 0 && choixCorrectArray.length > 0) {
+    invalid.add('choix'); invalid.add('choixCorrect');
+  }
+  if (choixArray.length > 0 && choixCorrectArray.length === 0) {
+    invalid.add('choix'); invalid.add('choixCorrect');
   }
 
-  return { ok: true };
+  if (choixCorrectArray.length > 0) {
+    // Indices hors bornes
+    const numericEntries = choixCorrectArray.filter(v => typeof v === 'number');
+    const hasOutOfBounds = numericEntries.some(idx => idx < 0 || idx >= choixArray.length);
+    if (hasOutOfBounds) { invalid.add('choix'); invalid.add('choixCorrect'); }
+
+    // Texte non résolu en indice — aucune correspondance dans choix
+    const hasUnresolvedText = choixCorrectArray.some(v => typeof v !== 'number');
+    if (hasUnresolvedText) { invalid.add('choix'); invalid.add('choixCorrect'); }
+  }
+
+  // Règle "unique" : exactement 1 réponse correcte requise
+  if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
+    invalid.add('regle'); invalid.add('choix'); invalid.add('choixCorrect');
+  }
+  // Règle "multiple" : au moins 1 réponse correcte requise (qcm uniquement)
+  if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
+    invalid.add('regle'); invalid.add('choix'); invalid.add('choixCorrect');
+  }
+  // Liste de choix (selection) : la règle doit toujours être "unique"
+  if (typeKey === 'selection' && regleLabel !== 'unique') {
+    invalid.add('regle');
+  }
+
+  return Array.from(invalid);
 }
 
 function getInvalidFields(row) {
@@ -1020,12 +1024,15 @@ function getInvalidFields(row) {
   // Si le type est vide (0) ou n'a pas de label significatif, ne pas valider les autres champs
   // Cela permet de remplir progressivement une nouvelle ligne sans être bloqué
   if (isEmptyVal(typeKey)) return [];
-  const invalid = [];
+  const invalid = new Set();
   for (const f of ['regle', 'correction', 'ordre_choix', 'points', 'choix', 'choixCorrect']) {
     const res = validateFieldAgainstType(f, row[f], typeKey, row);
-    if (!res.ok) invalid.push(f);
+    if (!res.ok) invalid.add(f);
   }
-  return invalid;
+  // Check complet qcm/selection, indépendant du champ édité (cf. principe : tout
+  // changement dans une ligne refait un check complet de la ligne).
+  for (const f of getQcmSelectionInvalidFields(row, typeKey)) invalid.add(f);
+  return Array.from(invalid);
 }
 
 /**
@@ -1107,10 +1114,49 @@ function validateCellEdit(row, cle, newValue) {
   return { ok: true, invalidFields, ...(sideEffects ? { sideEffects } : {}) };
 }
 
+/**
+ * Calcule, pour chaque champ selectChoix (hors 'type', qui n'est jamais restreint),
+ * les valeurs numériques autorisées SELON LE TYPE de la ligne — réutilise la même
+ * source de vérité que allowedLabels() (MANIFEST.regles.typesEtRegles), traduite en
+ * valeurs numériques via les paires {valeur,label} déjà définies dans selectChoix.
+ *
+ * Résultat transmis tel quel au client (cf. viewResolver.js, server.js) pour ne
+ * proposer, dans chaque dropdown, que les options non interdites pour le type
+ * courant de la ligne — sans jamais bloquer une valeur déjà présente en donnée
+ * (cf. politique de validation permissive : ceci ne fait que restreindre le MENU,
+ * jamais la validation elle-même).
+ *
+ * @returns {Object} — { [champ]: { [valeurType]: [valeursAutorisees] } }
+ */
+function computeChampsRestreints(selectChoix) {
+  const typesEtRegles = MANIFEST.regles?.typesEtRegles;
+  if (!typesEtRegles) return {};
+  const restreints = {};
+
+  for (const [field, sc] of Object.entries(selectChoix || {})) {
+    if (field === 'type') continue; // type n'est jamais restreint (décision explicite)
+    if (!Array.isArray(sc?.choix)) continue;
+
+    const byType = {};
+    for (const [typeValeurStr, typeLabel] of Object.entries(TYPE_INT_TO_KEY)) {
+      const allowed = typesEtRegles[typeLabel]?.[field];
+      if (!Array.isArray(allowed)) continue; // pas de restriction déclarée (description libre, ou absent)
+      const valeurs = allowed
+        .map(label => sc.choix.find(c => c.label === label)?.valeur)
+        .filter(v => v !== undefined);
+      if (valeurs.length) byType[Number(typeValeurStr)] = valeurs;
+    }
+    if (Object.keys(byType).length) restreints[field] = byType;
+  }
+  return restreints;
+}
+
 module.exports = {
   MANIFEST,
   MODES,
   SELECT_CHOIX: buildSelectChoix,
+  CHAMPS_RESTREINTS: (workerConfig, data, xsproPayload) =>
+    computeChampsRestreints(buildSelectChoix(workerConfig, data, xsproPayload)),
   postProcessDefaults,
   postProcessMerge,
   validateCellEdit,
