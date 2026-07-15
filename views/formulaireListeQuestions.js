@@ -677,7 +677,7 @@ function postProcessDefaults(rows, colonnes, regles) {
  * l'affichage cohérent dans l'UI Worker avant validation.
  */
 function postProcessMerge(mergedRows, originalRows, colonnes) {
-  // 1. Règles déclaratives
+  // 1. Règles déclaratives (nettoyage de base par type — déclaré dans reglesPostProcess.merge)
   let rows = applyRegles(rpp.merge, mergedRows);
 
   // 2. Compléments non-déclaratifs
@@ -720,87 +720,19 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
     }
     if (!Array.isArray(r.choixCorrect)) r.choixCorrect = [];
 
-    // Gestion des incohérences spécifiques Réponse courte (2) :
-    // correction dépend de choixCorrect (même règle conditionnelle que dans
-    // validateFieldAgainstType — appliquée ici aussi pour corriger dès la génération
-    // IA et pas seulement lors d'une édition manuelle ultérieure).
-    //   choixCorrect vide   → correction forcée à "manuel" (indice 2)
-    //   choixCorrect rempli → correction "manuel" invalide → repli sur "semi" (indice 3)
-    if (type === 2) {
-      const correctionLabel = valueToLabel('correction', r.correction) || r.correction;
-      const ccEmpty = r.choixCorrect.length === 0;
-      if (ccEmpty && (correctionLabel === 'auto' || correctionLabel === 'semi')) {
-        r.correction = 2; // manuel
-      } else if (!ccEmpty && correctionLabel === 'manuel') {
-        r.correction = 3; // semi (défaut XSpro quand choixCorrect est rempli)
-      }
-    }
-
-    // Gestion des incohérences spécifiques Texte long (3) :
-    // correction dépend de regle (contrainte métier) :
-    //   regle = 'texte' (sans paramètre)         → correction forcée à "manuel" (indice 2)
-    //   regle = 'texte(N)' (texte avec paramètre) → correction forcée à "semi" (indice 3)
-    if (type === 3) {
-      const regleLabel = valueToLabel('regle', r.regle) || r.regle;
-      const regleStr = String(regleLabel || ' ');
-      if (regleStr === 'texte') {
-        r.correction = 2; // manuel
-      } else if (regleStr.startsWith('texte(')) {
-        r.correction = 3; // semi
-      }
-    }
-
-    // Gestion des incohérences spécifiques qcm (1) et Liste de choix (4)
-    if (type === 1 || type === 4) {
-      // Normaliser les indices en nombres
-      r.choixCorrect = r.choixCorrect.map(v => Number(v)).filter(v => !isNaN(v));
-
-      // Cohérence présence choix/choixCorrect
-      if (r.choix.length === 0 && r.choixCorrect.length > 0) {
-        // Choix vide mais choixCorrect rempli → vider choixCorrect
-        r.choixCorrect = [];
-      } else if (r.choix.length > 0 && r.choixCorrect.length === 0) {
-        // Choix rempli mais choixCorrect vide → vider choix
-        r.choix = [];
-        r.choixCorrect = [];
-      }
-
-      // Si les deux sont remplis, vérifier la cohérence
-      if (r.choix.length > 0 && r.choixCorrect.length > 0) {
-        // Filtrer les indices hors limites
-        r.choixCorrect = r.choixCorrect.filter(idx => idx >= 0 && idx < r.choix.length);
-
-        // Vérifier la règle
-        const currentRegleLabel = valueToLabel('regle', r.regle) || r.regle;
-        if (currentRegleLabel === 'unique' && r.choixCorrect.length !== 1) {
-          // RÈGLE "unique" : exactement 1 réponse correcte requise
-          // Si plus d'une réponse → garder la première (comportement volontaire)
-          // Si aucune réponse → vider la ligne (choix et choixCorrect)
-          if (r.choixCorrect.length > 1) {
-            r.choixCorrect = [r.choixCorrect[0]];
-          } else {
-            r.choixCorrect = [];
-            r.choix = [];
-          }
-        } else if (currentRegleLabel === 'multiple' && r.choixCorrect.length < 1) {
-          // RÈGLE "multiple" : au moins 1 réponse correcte requise
-          // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses)
-          // — aligné sur typesEtRegles.qcm.choixCorrect, validateFieldAgainstType et
-          //   validateCellEdit, qui acceptent tous les trois >= 1 réponse pour "multiple".
-          // Si 0 réponse → vider la ligne (aucune correction possible)
-          r.choixCorrect = [];
-          r.choix = [];
-        }
-      }
-
-      // Pour Liste de choix (selection), forcer regle à "unique"
-      if (type === 4) {
-        const currentRegleLabel = valueToLabel('regle', r.regle) || r.regle;
-        if (currentRegleLabel !== 'unique') {
-          r.regle = 2; // 2 = indice pour 'unique'
-        }
-      }
-    }
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // ATTENTION — DÉCISION VOLONTAIRE :
+    // Aucune correction d'incohérence n'est appliquée ici pour les champs liés
+    // (choix/choixCorrect/regle/correction). Les données douteuses sont conservées
+    // telles quelles pour QUE :
+    //   1. L'utilisateur voie TOUJOURS ce qu'il a saisi (visible, pas effacé)
+    //   2. L'utilisateur reçoive un signal visuel rouge via getInvalidFields s'il y a
+    //      une incohérence, mais JAMAIS une correction silencieuse de ses données
+    //   3. Le LLM puisse interpréter et corriger l'incohérence lui-même s'il le souhaite
+    //   4. XSpro côté serveur fasse la validation finale stricte à l'enregistrement
+    //
+    // Les validations croisées sont UNIQUEMENT dans getInvalidFields (affichage rouge).
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     return r;
   });
@@ -835,7 +767,7 @@ const REQUIRED_FIELDS_BY_TYPE = {
  * qui, eux, rejettent une valeur réellement incohérente).
  */
 function getMissingFields(row) {
-  const typeKey = TYPE_INT_TO_KEY[row.type];
+  const typeKey = valueToLabel('type', row.type);
   if (!typeKey) return [];
   const required = REQUIRED_FIELDS_BY_TYPE[typeKey] || [];
   return required.filter(f => isEmptyVal(row[f]));
@@ -922,104 +854,137 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
     return { ok: true };
   }
   
-  // courte : correction dépend de choixCorrect (règle conditionnelle XSpro)
+      // courte : correction dépend de choixCorrect (règle conditionnelle XSpro)
+  // Règle conservée pour affichage rouge (via getInvalidFields) mais n'empêche PLUS
+  // la validation d'édition — toute modification manuelle est acceptée.
   if (typeKey === 'courte' && cle === 'correction' && row) {
-    const cc = row.choixCorrect;
-    const ccEmpty = Array.isArray(cc) ? cc.length === 0 : isEmptyVal(cc);
-    if (!ccEmpty && checkVal === 'manuel') {
-      return { ok: false, message: `Pour « courte » avec une réponse correcte renseignée, la correction ne peut pas être « manuel » (utilisez auto ou semi).` };
-    }
-    if (ccEmpty && (checkVal === 'auto' || checkVal === 'semi')) {
-      return { ok: false, message: `Pour « courte » sans réponse correcte, la correction doit être « manuel ».` };
-    }
+    // Vérification purement informative, ne bloque pas l'édition
   }
 
   // ouverte : correction dépend de regle (contrainte métier)
-  //   regle = 'texte' (sans paramètre)         → correction doit être "manuel"
-  //   regle = 'texte(N)' (texte avec paramètre) → correction doit être "semi"
+  // Règle conservée pour affichage rouge (via getInvalidFields) mais n'empêche PLUS
+  // la validation d'édition — toute modification manuelle est acceptée.
   if (typeKey === 'ouverte' && cle === 'correction' && row) {
     const regleLabel = valueToLabel('regle', row.regle) || row.regle;
     const regleStr = String(regleLabel || ' ');
     if (regleStr === 'texte' && checkVal !== 'manuel') {
-      return { ok: false, message: `Pour « ouverte » avec règle « texte », la correction doit être « manuel ».` };
+      // okay — accepté, affiché en rouge par getInvalidFields
     }
     if (regleStr.startsWith('texte(') && checkVal !== 'semi') {
-      return { ok: false, message: `Pour « ouverte » avec règle « ${regleStr} », la correction doit être « semi ».` };
+      // okay — accepté, affiché en rouge par getInvalidFields
     }
   }
-  // regle / correction : valeurs autorisées
-  const allowed = allowedLabels(typeKey, cle);
-  if (allowed && allowed.length) {
-    if (isEmptyVal(checkVal)) {
-      if (!allowed.includes(' ') && !allowed.includes('')) return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est requis pour le type « ${typeKey} ».` };
-    } else if (!allowed.includes(String(checkVal))) {
-      return { ok: false, message: `« ${checkVal} » n'est pas une valeur autorisée pour « ${FIELD_LABELS[cle]||cle} » avec le type « ${typeKey} ».` };
-    }
-  }
-
-  // Validation spécifique pour qcm (1) et Liste de choix (4)
-  if ((typeKey === 'qcm' || typeKey === 'selection') && row) {
-    // Normaliser les valeurs pour la validation
-    const choixArray = Array.isArray(row.choix) ? row.choix : (typeof row.choix === 'string' ? row.choix.split(/<br\s*\/?>|\n/i).map(v => v.trim()).filter(Boolean) : []);
-    const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : (typeof row.choixCorrect === 'string' ? row.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
-
-    // Vérification de cohérence choix/choixCorrect
-    if (cle === 'choix' || cle === 'choixCorrect') {
-      if (choixArray.length === 0 && choixCorrectArray.length > 0) {
-        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » est vide mais « choixCorrect » contient des valeurs.` };
-      }
-      if (choixArray.length > 0 && choixCorrectArray.length === 0) {
-        return { ok: false, message: `Le champ « ${FIELD_LABELS[cle]||cle} » est incohérent : « choix » contient des valeurs mais « choixCorrect » est vide.` };
-      }
-    }
-
-    // Vérification des indices hors limites (si choixCorrect est rempli)
-    if (cle === 'choixCorrect' && choixCorrectArray.length > 0 && choixArray.length > 0) {
-      const numericChoixCorrect = choixCorrectArray.map(v => Number(v)).filter(v => !isNaN(v));
-      const hasOutOfBounds = numericChoixCorrect.some(idx => idx < 0 || idx >= choixArray.length);
-      if (hasOutOfBounds) {
-        return { ok: false, message: `Le champ « choixCorrect » contient des indices hors limites (valeurs : ${numericChoixCorrect.join(', ')}, mais « choix » n'a que ${choixArray.length} élément(s)).` };
-      }
-    }
-
-    // Vérification de la règle
-    if (cle === 'regle' || cle === 'choixCorrect') {
-      const regleLabel = valueToLabel('regle', row.regle) || row.regle;
-      // RÈGLE "unique" : exactement 1 réponse correcte requise
-      if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
-        return { ok: false, message: `Incohérence règle/réponses : la règle « unique » nécessite exactement 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
-      }
-      // RÈGLE "multiple" : au moins 1 réponse correcte requise
-      // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses possibles)
-      if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
-        return { ok: false, message: `Incohérence règle/réponses : la règle « multiple » nécessite au moins 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.` };
-      }
-    }
-
-    // Pour Liste de choix (selection), forcer regle à "unique"
-    if (typeKey === 'selection' && cle === 'regle') {
-      const currentRegleLabel = valueToLabel('regle', row.regle) || row.regle;
-      if (currentRegleLabel !== 'unique') {
-        return { ok: false, message: `Pour le type « Liste de choix », la règle doit être « unique ».` };
-      }
-    }
-  }
-
+  // Les validations de valeurs autorisées (allowedLabels) et les validations
+  // croisées entre champs ne sont PAS traitées ici : elles ne doivent jamais
+  // rejeter une édition manuelle. Elles sont déportées dans getInvalidFields()
+  // pour le seul affichage rouge (cf. contrat de validation manuelle, lignes 60-88).
   return { ok: true };
 }
 
 function getInvalidFields(row) {
-  const typeKey = TYPE_INT_TO_KEY[row.type];
-  if (!typeKey) return [];
+  console.log('[DEBUG-getInvalidFields-START] row.type:', row.type, 'typeKey:', TYPE_INT_TO_KEY[row.type], 'choix:', JSON.stringify(row.choix), 'choixCorrect:', JSON.stringify(row.choixCorrect));
+  const typeKey = valueToLabel('type', row.type);
+  if (!typeKey) { console.log('[DEBUG-getInvalidFields] typeKey null, skip'); return []; }
   const invalid = [];
-  // Si le type est vide (0) ou n'a pas de label significatif, ne pas valider les autres champs
-  // Cela permet de remplir progressivement une nouvelle ligne sans être bloqué
-  const typeLabel = valueToLabel('type', row.type) || row.type;
-  if (isEmptyVal(typeLabel)) return [];
   for (const f of ['regle', 'correction', 'ordre_choix', 'points', 'choix', 'choixCorrect']) {
     const res = validateFieldAgainstType(f, row[f], typeKey, row);
     if (!res.ok) invalid.push(f);
   }
+
+  // ── Validations des valeurs autorisées par type (affichage rouge uniquement) ─
+  // Ces règles étaient dans validateFieldAgainstType mais y ont été retirées car
+  // elles ne doivent JAMAIS rejeter une édition manuelle (cf. contrat lignes 60-88).
+  for (const f of ['regle', 'correction', 'ordre_choix']) {
+    const allowed = allowedLabels(typeKey, f);
+    if (allowed && allowed.length) {
+      const val = row[f];
+      const label = valueToLabel(f, val) || val;
+      if (!isEmptyVal(label) && !allowed.includes(String(label))) {
+        invalid.push(f);
+      }
+    }
+  }
+
+  // ── Validations croisées (affichage rouge uniquement, jamais de rejet) ──────
+  // Ces règles sont volontairement séparées de validateFieldAgainstType :
+  // elles ne doivent pas bloquer l'édition manuelle — seulement la signaler.
+
+  // courte : correction dépend de choixCorrect
+  if (typeKey === 'courte') {
+    const correctionLabel = valueToLabel('correction', row.correction) || row.correction;
+    const cc = row.choixCorrect;
+    const ccEmpty = Array.isArray(cc) ? cc.length === 0 : isEmptyVal(cc);
+    if (!isEmptyVal(correctionLabel)) {
+      if (ccEmpty && (correctionLabel === 'auto' || correctionLabel === 'semi')) {
+        invalid.push('correction');
+      } else if (!ccEmpty && correctionLabel === 'manuel') {
+        invalid.push('correction');
+      }
+    }
+  }
+
+  // ouverte : correction dépend de regle
+  if (typeKey === 'ouverte') {
+    const correctionLabel = valueToLabel('correction', row.correction) || row.correction;
+    const regleLabel = valueToLabel('regle', row.regle) || row.regle;
+    const regleStr = String(regleLabel || ' ');
+    if (!isEmptyVal(correctionLabel) && !isEmptyVal(regleLabel)) {
+      if (regleStr === 'texte' && correctionLabel !== 'manuel') {
+        invalid.push('correction');
+      } else if (regleStr.startsWith('texte(') && correctionLabel !== 'semi') {
+        invalid.push('correction');
+      }
+    }
+  }
+
+  // qcm (1) et Liste de choix (4) : cohérence choix/choixCorrect et règle
+  if (typeKey === 'qcm' || typeKey === 'selection') {
+    console.log('[DEBUG-getInvalidFields-QCM] row.type:', row.type, 'typeKey:', typeKey);
+    console.log('[DEBUG-getInvalidFields-QCM] choix raw:', JSON.stringify(row.choix), 'type:', typeof row.choix, 'isArray:', Array.isArray(row.choix));
+    console.log('[DEBUG-getInvalidFields-QCM] choixCorrect raw:', JSON.stringify(row.choixCorrect), 'type:', typeof row.choixCorrect, 'isArray:', Array.isArray(row.choixCorrect));
+
+    const choixArray = Array.isArray(row.choix) ? row.choix : [];
+    const choixCorrectArray = Array.isArray(row.choixCorrect) ? row.choixCorrect : [];
+
+    console.log('[DEBUG-getInvalidFields-QCM] choixArray:', JSON.stringify(choixArray), 'length:', choixArray.length);
+    console.log('[DEBUG-getInvalidFields-QCM] choixCorrectArray:', JSON.stringify(choixCorrectArray), 'length:', choixCorrectArray.length);
+
+    // Cohérence présence
+    if (choixArray.length === 0 && choixCorrectArray.length > 0) {
+      console.log('[DEBUG-getInvalidFields-QCM] COHERENCE: choix vide, choixCorrect rempli → PUSH invalid');
+      invalid.push('choix');
+      invalid.push('choixCorrect');
+    } else if (choixArray.length > 0 && choixCorrectArray.length === 0) {
+      console.log('[DEBUG-getInvalidFields-QCM] COHERENCE: choix rempli, choixCorrect vide → PUSH invalid');
+      invalid.push('choix');
+      invalid.push('choixCorrect');
+    } else {
+      console.log('[DEBUG-getInvalidFields-QCM] COHERENCE: OK ou les deux vides, skip');
+    }
+
+    // Vérification que tous les éléments de choixCorrect sont des indices numériques valides
+    if (choixCorrectArray.length > 0) {
+      const numericChoixCorrect = choixCorrectArray.map(v => Number(v));
+      // Un élément non numérique (ex: texte libre "SSID" au lieu d'un indice) ou hors limites
+      const hasInvalidIndices = numericChoixCorrect.some(v => isNaN(v) || v < 0 || v >= choixArray.length);
+      if (hasInvalidIndices) {
+        invalid.push('choixCorrect');
+      }
+    }
+
+    // Règle unique/multiple vs nombre de réponses
+    if (choixCorrectArray.length > 0) {
+      const regleLabel = valueToLabel('regle', row.regle) || row.regle;
+      if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
+        invalid.push('regle');
+        invalid.push('choixCorrect');
+      } else if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
+        invalid.push('regle');
+        invalid.push('choixCorrect');
+      }
+    }
+  }
+
   return invalid;
 }
 

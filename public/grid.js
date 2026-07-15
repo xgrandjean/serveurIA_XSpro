@@ -257,15 +257,18 @@ function initGrid(colonnes, rows) {
           const rowIndex = params.node?.rowIndex;
           const colId = params.column?.getColId();
           if (rowIndex !== undefined && colId && state.rows[rowIndex]) {
-            state.rows[rowIndex][colId] = '';
+            // Les champs array (choix, choixCorrect) doivent être réinitialisés avec [] et non ''
+            const champsArray = state.workerConfig?.champsArray || [];
+            const emptyValue = champsArray.includes(colId) ? [] : '';
+            state.rows[rowIndex][colId] = emptyValue;
             const node = params.node;
             if (node) {
-              node.setDataValue(colId, '');
+              node.setDataValue(colId, emptyValue);
 // Flash manuel sur la bonne colonne (plus de enableCellChangeFlash)
                state.gridApi.flashCells({ rowNodes: [node], columns: [colId], flashDuration: 150, fadeDuration: 400 });
             }
             // Envoyer la modification au serveur
-            sendWS({ type: 'cell:edit', rowIndex, cle: colId, value: '' });
+            sendWS({ type: 'cell:edit', rowIndex, cle: colId, value: emptyValue });
           }
           // Bloquer le comportement par défaut (AG Grid déplacerait le focus)
           return true;
@@ -468,16 +471,24 @@ TextareaCellEditor.prototype.autoGrow = function() {
 };
 TextareaCellEditor.prototype.getGui = function() { return this.textarea; };
 TextareaCellEditor.prototype.getValue = function() {
-  if (this.indexRefArray) {
+    if (this.indexRefArray) {
     // Reconvertir chaque ligne de texte saisie en indice correspondant dans refField
-    // (recherche exacte, espaces ignorés). Une ligne sans correspondance est ignorée —
-    // l'incohérence sera de toute façon signalée en rouge par getInvalidFields côté vue.
+    // (recherche exacte, espaces ignorés).
+    // ATTENTION : Si un texte ne correspond à aucun choix EXISTANT, on le garde quand
+    // même comme valeur brute (string ou nombre). L'incohérence sera signalée en rouge
+    // par getInvalidFields côté vue — jamais de rejet silencieux.
     return this.textarea.value
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(Boolean)
-      .map(text => this.indexRefArray.findIndex(v => String(v).trim() === text))
-      .filter(idx => idx !== -1);
+      .map(text => {
+        const idx = this.indexRefArray.findIndex(v => String(v).trim() === text);
+        if (idx !== -1) return idx;
+        // Texte ne correspondant à aucun choix existant → garder comme valeur potentielle
+        // Si c'est un nombre, le garder comme nombre (indice); sinon garder comme string
+        const n = Number(text);
+        return isNaN(n) ? text : n;
+      });
   }
   if (this.isArrayField) {
     // Un élément par ligne — produit directement le tableau final stocké/envoyé.
@@ -674,7 +685,14 @@ const dataCols = colonnes.map(col => {
         if (refField) {
           const refArray = Array.isArray(params.data?.[refField]) ? params.data[refField] : [];
           const indices = Array.isArray(value) ? value : [];
-          rawItems = indices.map(idx => refArray[Number(idx)]).filter(v => v !== undefined);
+          // Si le tableau de référence est vide, afficher les indices bruts (pour que
+          // l'utilisateur voie que les données existent encore, même si la résolution
+          // échoue). Ex: [0, 1] → "0 ⏎ 1"
+          if (refArray.length === 0 && indices.length > 0) {
+            rawItems = indices.map(String);
+          } else {
+            rawItems = indices.map(idx => refArray[Number(idx)]).filter(v => v !== undefined);
+          }
         } else {
           rawItems = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
         }
