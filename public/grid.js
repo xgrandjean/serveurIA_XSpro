@@ -6,6 +6,26 @@
  *   - rien          → libre, IA et user peuvent modifier
  *   - readOnly:true → IA peut écrire, user NE PEUT PAS modifier manuellement
  *   - placeholder:true → valeur imposée par défaut, IA N'Y TOUCHE PAS, user peut modifier
+ *
+ * ── DÉCISIONS VOLONTAIRES (ne pas défaire sans validation préalable) ──────────
+ * 1. `cellDataType: false` est posé GLOBALEMENT sur toutes les colDefs (une seule
+ *    fois, juste avant `return def` dans buildColDefs). Ne pas le retirer ni le
+ *    réintroduire localement (selectChoix, colonnes numériques...) : on gère
+ *    nous-mêmes formatage/parsing partout (valueFormatter/valueParser/cellEditor),
+ *    et laisser AG Grid auto-détecter le type cause soit un rejet silencieux de
+ *    saisie ("Data type of the new value does not match..."), soit un affichage
+ *    d'erreur ("Invalid Number") sur une valeur vide/blanche. Cf. échanges du
+ *    2026-07-14.
+ * 2. `formatMultilineForDisplay()` insère un symbole visible (⏎) à chaque saut de
+ *    ligne réel dans les champs texte multilignes (contenu, indication...), pour
+ *    qu'un saut de ligne volontaire soit visuellement distinct d'un simple
+ *    retour automatique (word-wrap) dans une cellule limitée à ~2 lignes.
+ *    Pour les champs array (choix, choixCorrect) en revanche, le rendu reste
+ *    À PLAT sur une seule ligne : les éléments sont séparés par le même symbole
+ *    mais SANS saut de ligne réel, avec troncature "..." (CSS) si trop long.
+ *    Affichage UNIQUEMENT — la donnée réelle (édition, envoi serveur, export)
+ *    n'est jamais modifiée. Le tooltip (title) affiche le texte sans le symbole.
+ * ──────────────────────────────────────────────────────────────────────────────
  */
 
 'use strict';
@@ -341,6 +361,20 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
 // Entrée simple = saut de ligne dans la textarea.
 // Shift+Entrée / Échap = validation et sortie (laisse AG Grid gérer).
 // Hauteur popup : 60px (4 lignes) avec resize vertical possible.
+// ── Affichage des retours à la ligne dans les cellules ────────────────────────
+// Les champs multilignes stockent leurs sauts de ligne en <br> (contenu, indication...)
+// ou en \n brut selon le champ. Dans une cellule limitée à ~2 lignes, un saut de ligne
+// volontaire est visuellement indiscernable d'un simple retour automatique (word-wrap).
+// On matérialise donc chaque saut de ligne par un symbole visible (⏎) — purement pour
+// l'affichage : la donnée réelle (envoyée au serveur, à l'édition, à l'export) n'est
+// jamais modifiée, seul le rendu HTML de la cellule en tient compte.
+function formatMultilineForDisplay(text) {
+  return String(text)
+    .replace(/<br\s*\/?>/gi, '\n')   // normaliser <br> → \n
+    .split('\n')
+    .join(' ⏎<br>');                // symbole visible + vrai saut de ligne pour le rendu
+}
+
 function TextareaCellEditor() {}
 TextareaCellEditor.prototype.init = function(params) {
   this.textarea = document.createElement('textarea');
@@ -460,12 +494,6 @@ const dataCols = colonnes.map(col => {
       // agSelectCellEditor - ouvre avec Entrée en mode clavier, affiche les labels, stocke les valeurs
       // permet la navigation gauche/droite même hors édition
       ...(hasSelectChoix ? {
-        // Désactive l'auto-détection AG Grid du cellDataType : les valeurs de ces colonnes
-        // sont gérées explicitement par getOptionValue/getOptionLabel ci-dessous, et une
-        // détection automatique (souvent 'text' si la 1ère valeur vue est vide/string) entre
-        // en conflit avec les valeurs numériques renvoyées par l'éditeur → rejet silencieux
-        // de la saisie ("Data type of the new value does not match...").
-        cellDataType: false,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: {
           values: sc.choix.map(entry => entry.valeur),
@@ -522,11 +550,6 @@ const dataCols = colonnes.map(col => {
     // cellEditor pour les colonnes numériques
     if (!hasSelectChoix && (col.type === 'decimal' || col.type === 'number' || col.type === 'integer')) {
       def.cellEditor = 'agNumberCellEditor';
-      // Comme pour selectChoix : on gère nous-mêmes le formatage/parsing (valueFormatter
-      // ci-dessus, agNumberCellEditor), donc on désactive l'auto-détection AG Grid du
-      // cellDataType — sinon une valeur vide/blanche ('', ' ') sur une colonne détectée
-      // 'number' s'affiche "Invalid Number" au lieu de rester simplement vide.
-      def.cellDataType = false;
     }
 
     // CellRenderer générique pour les colonnes dérivées
@@ -569,6 +592,27 @@ const dataCols = colonnes.map(col => {
         }
         return newValue ?? '';
       };
+
+      // CellRenderer : sépare chaque élément de l'array par le symbole de saut de ligne,
+      // mais à PLAT sur une seule ligne (pas de <br>) — si trop long, on tronque avec des
+      // "..." (overflow CSS) plutôt que de passer à la ligne comme les champs texte.
+      def.cellRenderer = (params) => {
+        const span = document.createElement('span');
+        const value = params.value;
+        const items = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
+        if (items.length) {
+          span.textContent = items.map(v => String(v)).join(' ⏎ ');
+          span.title = items.join('\n');
+          span.style.whiteSpace = 'nowrap';
+          span.style.overflow = 'hidden';
+          span.style.textOverflow = 'ellipsis';
+          span.style.display = 'inline-block';
+          span.style.maxWidth = '100%';
+          span.style.verticalAlign = 'middle';
+          span.style.cursor = 'pointer';
+        }
+        return span;
+      };
     }
 
     // CellRenderer pour les colonnes multilignes (hauteur dynamique)
@@ -578,12 +622,12 @@ const dataCols = colonnes.map(col => {
         const span = document.createElement('span');
         const value = params.value;
         if (value !== null && value !== undefined && value !== '') {
-          span.innerHTML = String(value).replace(/\n/g, '<br>');
-          span.title = String(value);
+          span.innerHTML = formatMultilineForDisplay(value);
+          span.title = String(value).replace(/<br\s*\/?>/gi, '\n'); // tooltip : texte propre, sans le symbole
           span.className = 'ag-cell-multiline';
 
-          // Calculer si le contenu nécessite 1 ou 2 lignes
-          const textContent = String(value).replace(/<br>/g, '\n');
+          // Calculer si le contenu nécessite 1 ou 2 lignes (sur le texte réel, sans le symbole)
+          const textContent = String(value).replace(/<br\s*\/?>/gi, '\n');
           const lines = textContent.split('\n');
           const isShort = lines.length === 1 && lines[0].length <= 50;
 
@@ -629,6 +673,14 @@ const dataCols = colonnes.map(col => {
         return b;
       };
     }
+
+    // Désactive globalement l'auto-détection AG Grid du type de donnée (cellDataType).
+    // On gère nous-mêmes le formatage et le parsing de toutes les colonnes (selectChoix,
+    // numériques, arrays...) via valueFormatter/valueParser/cellEditor définis ci-dessus ;
+    // laisser AG Grid déduire un type à partir de la 1ère valeur vue (souvent vide/blanche
+    // sur une ligne neuve) provoque des rejets silencieux de saisie ou des affichages
+    // d'erreur ("Invalid Number", "Data type of the new value does not match...").
+    def.cellDataType = false;
 
     return def;
   });

@@ -56,6 +56,35 @@
  *   Fixe        | set: { points: 1 }
  *   Conditionnel| set: { champ: { si: { champ, op }, alors, sinon } }
  *   abs         | set: { champ: { abs: true } }      (rend positif)
+ *
+ * ── POLITIQUE DE VALIDATION MANUELLE (validateCellEdit) — DÉCISION VOLONTAIRE ──
+ * ⚠️ Ne pas réintroduire de rejet/revert sur la base de règles croisées sans
+ * validation préalable (cf. échanges du 2026-07-14). Principe retenu :
+ *
+ *   TOUTE modification manuelle d'une cellule est acceptée (ok: true), dans
+ *   n'importe quel ordre — y compris remplir "correction" avant "choixCorrect",
+ *   ou "choix" avant "choixCorrect", ou choisir un "type" sur une ligne dont les
+ *   autres champs sont encore vides/incohérents pour ce type.
+ *
+ *   validateCellEdit ne fait plus que CONSTATER l'état de la ligne après la
+ *   modification, via deux fonctions dédiées à l'affichage (rouge) uniquement,
+ *   jamais au blocage :
+ *     - getInvalidFields(row) : champs remplis mais dont la valeur est
+ *       incohérente (avec le type, ou avec d'autres champs — ex: choixCorrect
+ *       hors limites, regle "unique" avec 2 réponses correctes...).
+ *     - getMissingFields(row) : champs requis pour ce type mais encore vides
+ *       (REQUIRED_FIELDS_BY_TYPE) — inclut désormais 'contenu' pour tous les
+ *       types, pas seulement 'cours'.
+ *
+ * Une ancienne version (avant 2026-07-14) bloquait ces cas via des règles
+ * croisées dans validateCellEdit (ex: "correction" rejeté tant que
+ * "choixCorrect" est vide pour une question "courte"). Cette approche a été
+ * abandonnée : elle imposait un ordre de remplissage implicite et non
+ * documenté, ce qui rendait la création manuelle de questions pénible voire
+ * bloquante dans certains cas. Si un vrai blocage (revert) doit un jour être
+ * réintroduit pour un cas précis, il doit être discuté et documenté ici avant
+ * implémentation — pas réintroduit silencieusement à l'occasion d'un futur
+ * correctif.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
@@ -994,154 +1023,20 @@ function validateCellEdit(row, cle, newValue) {
   const regles = MANIFEST.regles?.typesEtRegles;
   if (!regles) return { ok: true, invalidFields: [] };
 
-  // Construire la ligne simulée avec la nouvelle valeur
+  // Ligne simulée avec la nouvelle valeur, pour évaluer l'état complet après cette édition.
   const sim = { ...row, [cle]: newValue };
 
-  if (ALWAYS_ALLOWED.has(cle)) {
-    if (cle === 'type') {
-      // Le type est le point d'entrée du remplissage progressif d'une ligne : il ne doit
-      // jamais être rejeté au prétexte que les autres champs (choix, points...) sont
-      // encore vides ou incohérents à ce stade. On l'accepte toujours, et on affiche en
-      // rouge (indicatif, non bloquant) les champs encore requis pour ce type.
-      return { ok: true, invalidFields: getMissingFields(sim) };
-    }
-    const invalidFields = getInvalidFields(sim);
-    if (invalidFields.length) {
-      const label = TYPE_INT_TO_KEY[newValue] || TYPE_INT_TO_KEY[row.type] || '?';
-      return { ok: false, rowInvalid: true, invalidFields, message: `Ligne non conforme pour le type « ${label} » : ${invalidFields.join(', ')}.` };
-    }
-    return { ok: true, invalidFields: getMissingFields(sim) };
-  }
-
-  const typeKey = TYPE_INT_TO_KEY[row.type];
-  if (!typeKey) return { ok: true, invalidFields: [] };
-
-  // Validation spécifique pour les changements de règle sur les questions courtes
-  if (typeKey === 'courte' && cle === 'regle') {
-    const regleLabel = valueToLabel('regle', newValue) || newValue;
-    const choixCorrect = sim.choixCorrect;
-    const choixCorrectArray = Array.isArray(choixCorrect) ? choixCorrect : (typeof choixCorrect === 'string' ? choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
-
-    // Vérification d'incohérence entre la nouvelle règle et les réponses existantes
-    if ((regleLabel === 'nombre' || newValue === 6) && !isEmptyVal(choixCorrect)) {
-      // Nouvelle règle est "nombre" mais les réponses ne sont pas numériques
-      const hasNonNumeric = choixCorrectArray.some(item => {
-        return typeof item !== 'number' && (typeof item === 'string' && isNaN(Number(item)));
-      });
-      if (hasNonNumeric) {
-        return {
-          ok: false,
-          rowInvalid: true,
-          invalidFields: ['regle', 'choixCorrect'],
-          message: `Incohérence : la règle « nombre » nécessite des réponses numériques, mais « choixCorrect » contient des valeurs non numériques.`
-        };
-      }
-    }
-
-    // Validation normale du champ modifié
-    const res = validateFieldAgainstType(cle, newValue, typeKey, row);
-    if (!res.ok) {
-      const invalidFields = getInvalidFields(sim);
-      return { ok: false, message: res.message, invalidFields };
-    }
-    // Revalidation complète de la ligne : retourner tous les champs invalides
-    const allInvalid = getInvalidFields(sim);
-    if (allInvalid.length > 0) {
-      return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
-    }
-    return { ok: true, invalidFields: getMissingFields(sim) };
-  }
-
-  // Validation spécifique pour qcm (1) et Liste de choix (4)
-  if ((typeKey === 'qcm' || typeKey === 'selection') && (cle === 'choix' || cle === 'choixCorrect' || cle === 'regle')) {
-    const choixArray = Array.isArray(sim.choix) ? sim.choix : (typeof sim.choix === 'string' ? sim.choix.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
-    const choixCorrectArray = Array.isArray(sim.choixCorrect) ? sim.choixCorrect : (typeof sim.choixCorrect === 'string' ? sim.choixCorrect.split(/<br\s*\/?>|,|\n/i).map(v => v.trim()).filter(Boolean) : []);
-    const regleLabel = valueToLabel('regle', sim.regle) || sim.regle;
-
-    // Vérification d'incohérence entre choix et choixCorrect
-    if (choixArray.length === 0 && choixCorrectArray.length > 0) {
-      return {
-        ok: false,
-        rowInvalid: true,
-        invalidFields: ['choix', 'choixCorrect'],
-        message: `Incohérence : « choix » est vide mais « choixCorrect » contient des valeurs.`
-      };
-    }
-    if (choixArray.length > 0 && choixCorrectArray.length === 0) {
-      return {
-        ok: false,
-        rowInvalid: true,
-        invalidFields: ['choix', 'choixCorrect'],
-        message: `Incohérence : « choix » contient des valeurs mais « choixCorrect » est vide.`
-      };
-    }
-
-    // Vérification des indices hors limites
-    if (choixCorrectArray.length > 0 && choixArray.length > 0) {
-      const numericChoixCorrect = choixCorrectArray.map(v => Number(v)).filter(v => !isNaN(v));
-      const hasOutOfBounds = numericChoixCorrect.some(idx => idx < 0 || idx >= choixArray.length);
-      if (hasOutOfBounds) {
-        return {
-          ok: false,
-          rowInvalid: true,
-          invalidFields: ['choixCorrect'],
-          message: `Incohérence : « choixCorrect » contient des indices hors limites (valeurs : ${numericChoixCorrect.join(', ')}, mais « choix » n'a que ${choixArray.length} élément(s)).`
-        };
-      }
-    }
-
-    // Vérification de la règle
-    // RÈGLE "unique" : exactement 1 réponse correcte requise
-    if (regleLabel === 'unique' && choixCorrectArray.length !== 1) {
-      return {
-        ok: false,
-        rowInvalid: true,
-        invalidFields: ['regle', 'choixCorrect'],
-        message: `Incohérence : la règle « unique » nécessite exactement 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.`
-      };
-    }
-    // RÈGLE "multiple" : au moins 1 réponse correcte requise
-    // COMPORTEMENT ACCEPTÉ : toutes les combinaisons sont valides (1, 2, 3 ou 4 réponses possibles)
-    if (regleLabel === 'multiple' && choixCorrectArray.length < 1) {
-      return {
-        ok: false,
-        rowInvalid: true,
-        invalidFields: ['regle', 'choixCorrect'],
-        message: `Incohérence : la règle « multiple » nécessite au moins 1 réponse correcte, mais « choixCorrect » en contient ${choixCorrectArray.length}.`
-      };
-    }
-
-    // Pour Liste de choix (selection), forcer regle à "unique"
-    if (typeKey === 'selection' && regleLabel !== 'unique') {
-      return {
-        ok: false,
-        rowInvalid: true,
-        invalidFields: ['regle'],
-        message: `Pour le type « Liste de choix », la règle doit être « unique ».`
-      };
-    }
-
-    // Revalidation complète de la ligne : retourner tous les champs invalides
-    const allInvalid = getInvalidFields(sim);
-    if (allInvalid.length > 0) {
-      return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
-    }
-    return { ok: true, invalidFields: getMissingFields(sim) };
-  }
-
-  // Validation du champ modifié
-  const res = validateFieldAgainstType(cle, newValue, typeKey, row);
-  if (!res.ok) {
-    const invalidFields = getInvalidFields(sim);
-    return { ok: false, message: res.message, invalidFields };
-  }
-
-  // Revalidation complète de la ligne : retourner tous les champs invalides
-  const allInvalid = getInvalidFields(sim);
-  if (allInvalid.length > 0) {
-    return { ok: false, rowInvalid: true, invalidFields: allInvalid, message: `Ligne non conforme : ${allInvalid.join(', ')}.` };
-  }
-  return { ok: true, invalidFields: getMissingFields(sim) };
+  // Principe : toute modification manuelle est acceptée, dans n'importe quel ordre —
+  // remplir "correction" avant "choixCorrect", ou "choix" avant "choixCorrect", etc. doit
+  // rester possible sans jamais être rejeté. On ne fait plus que CONSTATER l'état de la
+  // ligne après coup et le signaler visuellement :
+  //   - getInvalidFields  : champs remplis mais dont la valeur est incohérente avec le
+  //                         type ou avec d'autres champs (ex: choixCorrect hors limites,
+  //                         regle "unique" avec 2 réponses correctes...)
+  //   - getMissingFields  : champs requis pour ce type mais encore vides (contenu, points...)
+  // Les deux sont purement indicatifs (rouge) — aucun des deux ne bloque la saisie.
+  const invalidFields = Array.from(new Set([...getInvalidFields(sim), ...getMissingFields(sim)]));
+  return { ok: true, invalidFields };
 }
 
 module.exports = {
