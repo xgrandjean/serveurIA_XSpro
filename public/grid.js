@@ -175,6 +175,28 @@ function onInit(msg) {
   // Styles de ligne définis par le hook vue
   state.rowStyles = msg.rowStyles || [];
 
+  // Conversion des valeurs string → indice numérique pour les champs avec selectChoix
+  // XSpro envoie des strings comme "cours", "qcm" ou aussi les labels français
+  // (ex: "Cours" depuis le payload), il faut les convertir en indices numériques
+  // pour que AG Grid les reconnaisse dans les dropdowns.
+  const typeStrToIdx = {
+    'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5,
+    'QCM': 1, 'Réponse courte': 2, 'Texte long': 3, 'Liste de choix': 4, 'Cours': 5,
+    '': 0, ' ': 0
+  };
+  const regleStrToIdx = { 'validation': 1, 'unique': 2, 'multiple': 3, 'texte': 4, 'texte(10)': 5, 'nombre': 6, '': 0, ' ': 0 };
+  const correctionStrToIdx = { 'auto': 1, 'manuel': 2, 'semi': 3, '': 0, ' ': 0 };
+  const ordreStrToIdx = { 'aleatoire': 1, 'fixe': 2, '': 0, ' ': 0 };
+  const allStrToIdx = { type: typeStrToIdx, regle: regleStrToIdx, correction: correctionStrToIdx, ordre_choix: ordreStrToIdx };
+
+  for (const row of state.rows) {
+    for (const [cle, strToIdx] of Object.entries(allStrToIdx)) {
+      if (row[cle] !== undefined && typeof row[cle] === 'string' && strToIdx[row[cle]] !== undefined) {
+        row[cle] = strToIdx[row[cle]];
+      }
+    }
+  }
+
   // Colonnes dérivées (formules de calcul)
   state.colonnesDerivees = msg.colonnesDerivees || {};
   // Initialiser les formules du mode actif
@@ -631,7 +653,29 @@ const dataCols = colonnes.map(col => {
     if (hasSelectChoix) {
       def.valueFormatter = (p) => {
         if (p.value === null || p.value === undefined || p.value === '') return '';
-        const selected = sc.choix.find(c => c.valeur === p.value);
+        // Normaliser la valeur : si c'est une string (label XSpro ou type),
+        // convertir en indice pour trouver le label correspondant dans selectChoix
+        let normalizedVal = p.value;
+        if (typeof p.value === 'string') {
+          // Pour 'type' : gérer les labels français
+          if (col.cle === 'type') {
+            const typeStrToIdx = {
+              'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5,
+              'QCM': 1, 'Réponse courte': 2, 'Texte long': 3, 'Liste de choix': 4, 'Cours': 5,
+              '': 0, ' ': 0
+            };
+            normalizedVal = typeStrToIdx[p.value] ?? p.value;
+          } else {
+            // Autres champs : labels simples
+            const otherStrToIdx = {
+              'validation': 1, 'unique': 2, 'multiple': 3, 'texte': 4, 'texte(10)': 5, 'nombre': 6,
+              'auto': 1, 'manuel': 2, 'semi': 3, 'aleatoire': 1, 'fixe': 2,
+              '': 0, ' ': 0
+            };
+            normalizedVal = otherStrToIdx[p.value] ?? p.value;
+          }
+        }
+        const selected = sc.choix.find(c => c.valeur === normalizedVal);
         return selected ? selected.label : p.value;
       };
     }
