@@ -80,26 +80,44 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
     session.rows, colonnes, effectiveWorkerConfig.regles, viewHook
   );
 
-  // ── 6. Message utilisateur ─────────────────────────────────────────────────
+  // ── 6. Injection du plan validé dans le message ACT ────────────────────────
+  // Le plan est stocké dans session.currentPlan (set par le mode PLAN).
+  // buildUserMessage() le cherche dans workerConfig._currentPlan.
+  // On copie effectiveWorkerConfig et on y injecte le plan si on est en mode ACT.
+  const actWorkerConfig = { ...effectiveWorkerConfig };
+  if (mode === 'act' && session.currentPlan) {
+    actWorkerConfig._currentPlan = session.currentPlan;
+    console.log(`[LLM] Plan injecté dans le message ACT (${session.currentPlan.length} chars)`);
+  }
+
   const editionParActions = overriddenConfig.editionParActions === true;
   const dataCSV    = buildDataCSV(rowsWithDefaults, colsLLM, selectChoix, editionParActions);
-  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, effectiveWorkerConfig);
+  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, actWorkerConfig);
 
   // ── 7. Contenu multi-part (texte + fichiers routés par provider) ───────────
   const userContent = await buildUserContent(userText, files, providerId);
 
-  // ── 8. Messages ────────────────────────────────────────────────────────────
+  // ── 8. Messages — PAS d'historique ─────────────────────────────────────────
+  // Le message utilisateur est auto-suffisant : il contient déjà les données
+  // actuelles, le plan validé, la demande et le contexte. L'historique des tours
+  // précédents n'apporte aucune information supplémentaire et ne fait que
+  // consommer des tokens inutilement, provoquant des troncatures.
+  // L'historique est conservé dans session.history pour l'affichage UI uniquement.
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...session.history.filter(m => m.role !== 'system'),
     { role: 'user',   content: userContent },
   ];
 
-  const truncated = truncateMessages(messages, ia.maxPromptLength || 25000);
+  const truncated = truncateMessages(messages, ia.maxPromptLength || 40000);
 
-  // ── 9. Appel LLM ───────────────────────────────────────────────────────────
+  // ── 9. Log taille des messages + appel LLM ─────────────────────────────────
+  const systemPromptSize = truncated[0]?.content?.length || 0;
+  const userMsgSize = truncated[truncated.length - 1]?.content?.length || 0;
+  const totalSize = truncated.reduce((a, m) => a + (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length), 0);
   console.log(`[LLM] ${mode.toUpperCase()} → ${ia.endpoint} (${ia.model})`);
-  const rawResponse = await callLLM(ia, truncated);
+  console.log(`[LLM] Messages : ${truncated.length} total, system ${systemPromptSize} chars, user ${userMsgSize} chars, total ${totalSize} chars`);
+  console.log(`[LLM] Timeout config : ${mode === 'act' ? Math.max((ia.timeoutMs || 30000) * 4, 120000) : (ia.timeoutMs || 30000)}ms (mode ${mode})`);
+  const rawResponse = await callLLM(ia, truncated, mode);
 
   // ── 10. Historique ─────────────────────────────────────────────────────────
   SM.pushHistory(session, 'assistant', rawResponse);
@@ -422,10 +440,38 @@ async function buildUserContent(textContent, files = [], providerId = 'openai') 
 }
 
 // ── Appel HTTP LLM ────────────────────────────────────────────────────────────
-async function callLLM(ia, messages) {
-  const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), ia.timeoutMs || 30000);
+/**
+ * Appelle l'API LLM avec timeout adaptatif et logs détaillés.
+ * Enrichit les erreurs avec cause, suggestion et httpStatus pour un affichage
+ * informatif côté UI (cf. server.js, grid.js).
+ *
+ * @param {Object}   ia       — config IA { endpoint, apiKey, model, timeoutMs }
+ * @param {Array}    messages — messages format OpenAI [{ role, content }]
+ * @param {string}   mode     — 'plan' | 'act' (pour adapter le timeout et max_tokens)
+ * @returns {Promise<string>} — contenu textuel de la réponse LLM
+ */
+async function callLLM(ia, messages, mode = 'act') {
+  // Timeout adaptatif : 30s pour PLAN, 120s pour ACT (4x le timeout config, min 120s)
+  const baseTimeout = ia.timeoutMs || 30000;
+  const timeoutMs = mode === 'act' ? Math.max(baseTimeout * 4, 120000) : baseTimeout;
 
+  // max_tokens adaptatif : 4096 pour PLAN, 8192 pour ACT
+  const maxTokens = mode === 'act' ? 8192 : 4096;
+
+  // Sérialiser le body une seule fois (log + envoi)
+  const bodyPayload = {
+    model:       ia.model,
+    messages,
+    max_tokens:  maxTokens,
+    temperature: 0.2,
+  };
+  const bodyStr = JSON.stringify(bodyPayload);
+  console.log(`[LLM] Requête ${mode} — body ${bodyStr.length} chars, timeout ${timeoutMs}ms, max_tokens ${maxTokens}`);
+
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), timeoutMs);
+
+  let startTime = Date.now();
   let response;
   try {
     response = await fetch(ia.endpoint, {
@@ -434,28 +480,73 @@ async function callLLM(ia, messages) {
         'Content-Type':  'application/json',
         'Authorization': `Bearer ${ia.apiKey}`,
       },
-      body: JSON.stringify({
-        model:       ia.model,
-        messages,
-        max_tokens:  4096,
-        temperature: 0.2,
-      }),
+      body: bodyStr,
       signal: controller.signal,
     });
+  } catch (fetchError) {
+    clearTimeout(timeoutId);
+    // AbortError (timeout) vs autre erreur réseau
+    if (fetchError.name === 'AbortError') {
+      const cause = 'timeout';
+      const suggestion = `Le LLM n'a pas répondu dans le délai imparti de ${timeoutMs / 1000}s. Tu peux augmenter ia.timeoutMs dans le payload ou réessayer.`;
+      console.error(`[LLM] Timeout (${mode}) après ${timeoutMs}ms`);
+      throw Object.assign(new Error(`⚠ Timeout : le LLM n'a pas répondu en ${timeoutMs / 1000}s`), { cause, suggestion, httpStatus: null, timeoutMs });
+    }
+    const cause = 'network';
+    const suggestion = 'Vérifie ta connexion réseau et que l\'endpoint est accessible.';
+    console.error(`[LLM] Erreur réseau (${mode}) :`, fetchError.message);
+    throw Object.assign(new Error(`⚠ Erreur réseau : ${fetchError.message}`), { cause, suggestion, httpStatus: null });
   } finally {
     clearTimeout(timeoutId);
   }
 
+  const elapsed = Date.now() - startTime;
+
   if (!response.ok) {
-    const err = await response.text().catch(() => '');
-    throw new Error(`LLM HTTP ${response.status} : ${err.slice(0, 300)}`);
+    const errBody = await response.text().catch(() => '');
+    const truncatedErr = errBody.slice(0, 300);
+    let cause, suggestion;
+    switch (response.status) {
+      case 401:
+        cause = 'auth';
+        suggestion = 'Clé API invalide — vérifie ta clé Mistral.';
+        break;
+      case 429:
+        cause = 'rate_limit';
+        suggestion = 'Trop de requêtes vers l\'API — attends quelques secondes puis réessaie.';
+        break;
+      case 400:
+        cause = 'bad_request';
+        suggestion = 'Requête mal formée — vérifie les logs pour plus de détails.';
+        break;
+      case 500: case 502: case 503:
+        cause = 'server_error';
+        suggestion = `Le serveur LLM a retourné une erreur HTTP ${response.status} — réessaie plus tard ou contacte le support.`;
+        break;
+      default:
+        cause = 'http_error';
+        suggestion = `Erreur HTTP ${response.status} — vérifie la configuration.`;
+    }
+    console.error(`[LLM] Échec HTTP ${response.status} (${mode}) en ${elapsed}ms : ${truncatedErr}`);
+    throw Object.assign(
+      new Error(`⚠ ${suggestion} (HTTP ${response.status})`),
+      { cause, suggestion, httpStatus: response.status }
+    );
   }
 
-  const data    = await response.json();
+  const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error(`Réponse LLM inattendue : ${JSON.stringify(data).slice(0, 200)}`);
+  if (!content) {
+    const cause = 'empty_response';
+    const suggestion = 'Le LLM a répondu mais sans contenu textuel — vérifie les logs de la requête.';
+    console.error(`[LLM] Réponse inattendue (${mode}) en ${elapsed}ms :`, JSON.stringify(data).slice(0, 200));
+    throw Object.assign(
+      new Error(`⚠ Réponse LLM vide ou inattendue`),
+      { cause, suggestion, httpStatus: response.status }
+    );
+  }
 
-  console.log(`[LLM] Réponse reçue (${content.length} chars)`);
+  console.log(`[LLM] Réponse reçue (${mode}) — ${content.length} chars en ${elapsed}ms`);
   return content;
 }
 
@@ -795,10 +886,9 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
   // 7. Contenu multi-part (texte + fichiers routés)
   const userContent = await buildUserContent(userText, files, providerId);
 
-  // 8. Messages
+  // 8. Messages — PAS d'historique (identique à run())
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...session.history.filter(m => m.role !== 'system'),
     { role: 'user',   content: userContent },
   ];
 

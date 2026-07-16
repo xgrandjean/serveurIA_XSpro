@@ -124,8 +124,39 @@ function handleWSMessage(msg) {
     case 'export:ready':      onExportReady(msg);                            break;
     case 'session:done':      onSessionDone(msg.exportFallback);            break;
     case 'session:cancelled': onSessionCancelled();                         break;
+    case 'session:newtask':
+      addMessage('system', '↺ Nouvelle tâche — historique effacé. Tu peux continuer à travailler sur les données.');
+      setStatusBadge('connected', 'Prêt');
+      setStatusMessage('Prêt');
+      state.updatedCells = 0;
+      state.totalCells = 0;
+      // Re-afficher le message d'accueil
+      const inner = el('conversation-inner');
+      const welcome = document.createElement('div');
+      welcome.className = 'conv-welcome';
+      welcome.innerHTML = '<div class="conv-welcome-icon">⚡</div><div class="conv-welcome-text">Décris ce que tu veux faire avec les données.<br/>L\'IA remplira la grille en temps réel.</div>';
+      inner.insertBefore(welcome, inner.firstChild);
+      break;
     case 'prompt:preview':    onPromptPreview(msg);                         break;
-    case 'error':             addMessage('error', `⚠ ${msg.message}`); onStatusChange('error'); break;
+    case 'error': {
+      // Message d'erreur enrichi avec cause, suggestion, httpStatus
+      let displayMsg = `⚠ ${msg.message}`;
+      if (msg.cause) {
+        displayMsg += `\n   Cause : ${msg.cause}`;
+      }
+      if (msg.suggestion) {
+        displayMsg += `\n   Suggestion : ${msg.suggestion}`;
+      }
+      if (msg.httpStatus) {
+        displayMsg += `\n   HTTP ${msg.httpStatus}`;
+      }
+      if (msg.timeoutMs) {
+        displayMsg += `\n   Timeout : ${msg.timeoutMs / 1000}s`;
+      }
+      addMessage('error', displayMsg);
+      onStatusChange('error');
+      break;
+    }
     default: console.warn('[WS] inconnu :', msg.type);
   }
 }
@@ -166,6 +197,8 @@ function onInit(msg) {
   if (msg.workerConfig?.prompt) {
     el('prompt-input').value = msg.workerConfig.prompt;
   }
+  // Mettre à jour l'état du bouton send (au cas où le prompt est rempli automatiquement)
+  updateSendButtonState();
 
   // SelectChoix pour les dropdowns
   state.selectChoix = msg.selectChoix || {};
@@ -1242,9 +1275,10 @@ function bindUI() {
     }
   });
 
-  // Envoi prompt
+// Envoi prompt
   el('btn-send').addEventListener('click', sendPrompt);
   el('prompt-input').addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter') sendPrompt(); });
+  el('prompt-input').addEventListener('input', updateSendButtonState);
 
   // Mode de travail (work mode) — changement
   el('work-mode-selector').addEventListener('change', (e) => {
@@ -1276,6 +1310,12 @@ function bindUI() {
 
   // Download bar
   el('btn-download-close').addEventListener('click', () => hide('download-bar'));
+
+  // Nouvelle tâche
+  el('btn-newtask').addEventListener('click', () => {
+    if (!confirm('Nouvelle tâche ? Les données modifiées seront conservées mais l\'historique sera effacé.')) return;
+    sendWS({ type: 'session:newtask' });
+  });
 
   // Pièces jointes
   el('btn-attach').addEventListener('click', () => el('file-input').click());
@@ -1787,6 +1827,16 @@ function setStatusBadge(cls, label) {
 
 function setStatusMessage(msg) { el('status-message').textContent = msg; }
 
+// Met à jour l'état visuel du bouton send selon la présence d'un prompt
+function updateSendButtonState() {
+  const prompt = el('prompt-input').value.trim();
+  const hasPrompt = prompt.length > 0 || state.attachedFiles.length > 0;
+  const btnSend = el('btn-send');
+  if (btnSend) {
+    btnSend.classList.toggle('has-prompt', hasPrompt);
+  }
+}
+
 function setAiRunning(running) {
   state.isAiRunning = running;
   if (state.gridApi) state.gridApi.refreshCells({ force: true });
@@ -1796,7 +1846,7 @@ function setAiRunning(running) {
   // Supprimer désactivé pendant IA ET si rien de sélectionné
   el('btn-delete-rows').disabled = running || (state.gridApi?.getSelectedRows().length === 0);
   el('prompt-input').disabled     = running;
-  el('btn-send-label').textContent = running ? '…' : '↑';
+el('btn-send-label').innerHTML = running ? '…' : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6 Q5 12 4 18"/><path d="M20 12 L4 6"/><path d="M20 12 L4 18"/><line x1="4" y1="12" x2="14" y2="12"/></svg>';
   el('btn-send-spinner').classList.toggle('hidden', !running);
 }
 

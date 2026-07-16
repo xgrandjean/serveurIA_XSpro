@@ -551,7 +551,17 @@ async function handleUIMessage(session, msg) {
         }, files, activeMode);
       } catch (e) {
         SM.setStatus(session, SM.STATUS.ERROR);
-        wsSend(session, { type: 'error', message: e.message });
+        // Message d'erreur enrichi avec cause, suggestion, httpStatus si disponibles
+        const errorMsg = {
+          type: 'error',
+          message: e.message || '⚠ Erreur inconnue',
+          cause: e.cause || 'unknown',
+          suggestion: e.suggestion || null,
+          httpStatus: e.httpStatus || null,
+          timestamp: Date.now(),
+        };
+        console.error(`[WS] Erreur session ${session.sessionId} (prompt:send ${mode}) :`, e.message, e.cause ? `(cause: ${e.cause})` : '');
+        wsSend(session, errorMsg);
       }
       break;
     }
@@ -576,7 +586,16 @@ async function handleUIMessage(session, msg) {
         }, [], session.activeMode);
       } catch (e) {
         SM.setStatus(session, SM.STATUS.ERROR);
-        wsSend(session, { type: 'error', message: e.message });
+        const errorMsg = {
+          type: 'error',
+          message: e.message || '⚠ Erreur inconnue',
+          cause: e.cause || 'unknown',
+          suggestion: e.suggestion || null,
+          httpStatus: e.httpStatus || null,
+          timestamp: Date.now(),
+        };
+        console.error(`[WS] Erreur session ${session.sessionId} (plan:validate) :`, e.message, e.cause ? `(cause: ${e.cause})` : '');
+        wsSend(session, errorMsg);
       }
       break;
     }
@@ -605,6 +624,16 @@ async function handleUIMessage(session, msg) {
         session.rows = msg.rows;
         console.log(`[WS] rows:sync — ${session.rows.length} lignes pour ${session.sessionId}`);
       }
+      break;
+    }
+
+    // Nouvelle tâche : vide l'historique et le plan, garde les données modifiées
+    case 'session:newtask': {
+      session.history = [];
+      session.currentPlan = null;
+      SM.setStatus(session, SM.STATUS.CONNECTED);
+      wsSend(session, { type: 'session:newtask' });
+      console.log(`[WS] Nouvelle tâche pour ${session.sessionId} — historique vidé, données conservées`);
       break;
     }
 

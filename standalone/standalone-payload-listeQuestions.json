@@ -4,10 +4,10 @@
   "contextName": "formulaireListeQuestions",
   "callbackUrl": null,
   "ia": {
-    "apiKey": "sk-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMzM0MSwidG9rZW5faWQiOjMwNjk2LCJleHBpcmVzIjoxODExODg3MjAwfQ.M-x1tI8lrDRMzCj2Qpo_hOd3W5Ie0NKp2IoU_41CeTc",
-    "endpoint": "https://albert.api.etalab.gouv.fr/v1/chat/completions",
-    "provider": "albert",
-    "model": "mistralai/Ministral-3-8B-Instruct-2512",
+    "apiKey": "E8tfaxilRfBFknsKvvAbhNSi1wqaEI5x",
+    "endpoint": "https://api.mistral.ai/v1/chat/completions",
+    "provider": "mistral",
+    "model": "mistral-large-latest",
     "timeoutMs": 30000,
     "maxPromptLength": 25000,
     "maxContenu": 50000

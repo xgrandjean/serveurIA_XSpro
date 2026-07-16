@@ -242,17 +242,11 @@ body { display: flex; flex-direction: column; height: 100vh; }
 #input-area {
   flex-shrink: 0;
   border-top: 1px solid var(--grey-300);
-  padding: 10px 10px 8px;
+  padding: 8px 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  background: #fff;
-}
-
-#mode-row {
-  display: flex;
-  align-items: center;
   gap: 6px;
+  background: #fff;
 }
 
 #mode-selector {
@@ -289,25 +283,15 @@ body { display: flex; flex-direction: column; height: 100vh; }
   background: #fff;
 }
 
-/* Bouton copier la requête dans le presse-papier */
-#btn-copy-prompt {
+/* ── Ligne suggestions + copier prompt ───────────────────────────────────── */
+#suggestions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#suggestions-row #btn-copy-prompt {
   flex-shrink: 0;
-  padding: 4px 9px;
-  border: 1px solid var(--grey-300);
-  border-radius: var(--radius-sm);
-  background: #fff;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--grey-700);
-  transition: background .15s, border-color .15s;
 }
-#btn-copy-prompt:hover {
-  background: var(--blue-xlight);
-  border-color: var(--blue-mid);
-  color: var(--blue-dark);
-}
-#btn-copy-prompt:active { background: var(--blue-light); }
 
 /* Fichiers joints */
 #attachments-bar {
@@ -345,11 +329,12 @@ body { display: flex; flex-direction: column; height: 100vh; }
 }
 .chip-remove:hover { color: var(--red); }
 
-/* Prompt row */
+/* Prompt row — conteneur relatif pour le bouton overlay */
 #prompt-row {
   display: flex;
   align-items: flex-end;
   gap: 6px;
+  position: relative;
 }
 
 .btn-attach {
@@ -369,7 +354,7 @@ body { display: flex; flex-direction: column; height: 100vh; }
 
 #prompt-input {
   flex: 1;
-  padding: 8px 10px;
+  padding: 8px 36px 8px 10px;
   border: 1px solid var(--grey-300);
   border-radius: var(--radius-sm);
   font-family: var(--font);
@@ -383,23 +368,68 @@ body { display: flex; flex-direction: column; height: 100vh; }
 #prompt-input:focus   { outline: none; border-color: var(--blue-mid); box-shadow: 0 0 0 2px rgba(44,82,130,.12); }
 #prompt-input:disabled { background: var(--grey-100); color: #999; }
 
-.btn-send {
-  background: var(--blue-dark);
-  color: #fff;
-  border: none;
+/* ── Barre outils du bas (Plan/Act + actions) ──────────────────────────────── */
+#tools-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}
+
+.tools-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--grey-300);
+  flex-shrink: 0;
+}
+
+.btn-tool {
+  background: none;
+  border: 1px solid var(--grey-300);
   border-radius: var(--radius-sm);
-  width: 38px;
-  align-self: stretch;
-  font-size: 17px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: var(--grey-700);
+  transition: background .15s, border-color .15s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.btn-tool:hover:not(:disabled) { background: var(--blue-xlight); border-color: var(--blue-mid); color: var(--blue-dark); }
+.btn-tool:disabled { opacity: .4; cursor: not-allowed; }
+.btn-tool:active { background: var(--blue-light); }
+
+/* Bouton envoyer — overlay dans le textarea */
+.btn-send {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: transparent;
+  border: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background .15s;
+  transition: color .15s;
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
 }
-.btn-send:hover:not(:disabled) { background: var(--blue-mid); }
-.btn-send:disabled { opacity: .4; cursor: not-allowed; }
+.btn-send svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.btn-send:not(.has-prompt) { opacity: 0.3; cursor: not-allowed; }
+.btn-send.has-prompt { color: var(--text); }
+.btn-send.has-prompt:hover { color: var(--blue-dark); }
+
+/* Flèche triangulaire pointe droite - base incurvée avec médiane */
+.btn-send-label-arrow {
+  display: block;
+}
 
 
 

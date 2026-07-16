@@ -61,20 +61,12 @@
       <!-- Zone saisie -->
       <div id="input-area">
 
-        <!-- Sélecteur de mode de conversation (Plan / Act) -->
-        <div id="mode-row">
-          <div id="mode-selector">
-            <button id="btn-mode-plan" class="btn-mode active" data-mode="plan" title="L'IA propose un plan avant d'agir">
-              📋 Plan
-            </button>
-            <button id="btn-mode-act" class="btn-mode" data-mode="act" title="L'IA agit directement">
-              ⚡ Act
-            </button>
-          </div>
+        <!-- Prompts suggérés + bouton copier (même ligne) -->
+        <div id="suggestions-row">
           <select id="prompt-suggestions" title="Prompts suggérés">
             <option value="">— Suggestions —</option>
           </select>
-          <button id="btn-copy-prompt" title="Copier la requête dans le presse-papier">📋</button>
+          <button id="btn-copy-prompt" class="btn-tool" title="Copier la requête dans le presse-papier (clic=système, double=complet)">📋 </button>
         </div>
 
         <!-- Fichiers joints -->
@@ -83,10 +75,8 @@
           <div id="attachments-chips"></div>
         </div>
 
-        <!-- Saisie + envoi -->
+        <!-- Saisie avec bouton ↑ intégré -->
         <div id="prompt-row">
-          <button id="btn-attach" class="btn-attach" title="Joindre un fichier">📎</button>
-          <input type="file" id="file-input" multiple accept="*/*" style="display:none" />
           <textarea
             id="prompt-input"
             placeholder="Décris ce que tu veux faire… (Ctrl+Entrée)"
@@ -94,9 +84,26 @@
             spellcheck="false"
           ></textarea>
           <button id="btn-send" class="btn-send" title="Envoyer (Ctrl+Entrée)">
-            <span id="btn-send-label">↑</span>
+            <span id="btn-send-label"></span>
             <span id="btn-send-spinner" class="spinner hidden"></span>
           </button>
+        </div>
+
+        <!-- Barre outils : Plan/Act + icônes d'actions -->
+        <div id="tools-row">
+          <div id="mode-selector">
+            <button id="btn-mode-plan" class="btn-mode active" data-mode="plan" title="L'IA propose un plan avant d'agir">
+              📋 Plan
+            </button>
+            <button id="btn-mode-act" class="btn-mode" data-mode="act" title="L'IA agit directement">
+              ⚡ Act
+            </button>
+          </div>
+          <div class="tools-separator"></div>
+          <button id="btn-newtask" class="btn-tool" title="Nouvelle tâche avec les données en cours">➕ Nouv. tâche</button>
+          <button id="btn-attach" class="btn-tool" title="Joindre un fichier">📎 Fichier</button>
+          <input type="file" id="file-input" multiple accept="*/*" style="display:none" />
+          <div style="flex:1"></div>
         </div>
 
       </div>
