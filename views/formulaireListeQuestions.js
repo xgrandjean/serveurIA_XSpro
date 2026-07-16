@@ -246,8 +246,9 @@ Langue : UNIQUEMENT du français correct et technique.`,
       choixCorrect:         'Array — format dépend du type (voir typesEtRegles).',
       indication:           'Indice optionnel affiché à la demande de l\'apprenant. "" si inutile.',
       explicationCorrection:'Explication affichée après correction. "" si inutile.',
+      consigneIA:           'Critère de correction et notation de la question à donner à l\'IA qui sera en charge de corriger l\'apprenant"" si inutile.',
       commentaire:          '"" par défaut — laisser vide sauf demande explicite.',
-      // consigneIA et ordreQuestion ne sont PAS documentés ici : ils sont dans
+      // ordreQuestion n'est PAS documentés ici : ils sont dans
       // colonnesLlmHidden des DEUX modes (analyse et creation), donc jamais vus par
       // le LLM. Les documenter ici ajouterait des instructions mortes dans le prompt
       // système si buildSystemPrompt sérialise formatChamps sans filtrage par
@@ -339,6 +340,7 @@ const MODES = {
 
   analyse: {
     label: 'Analyse / Modification',
+    description: 'Consulter et améliorer des questions existantes — corriger, reformuler, compléter les champs annexes notamment (indication, consigne de correction à donner à l\'IA pour cette ligne)',
 
     surchargesColonnes: {
       type:                  { width: 90 ,pinned:     'left'},
@@ -352,12 +354,12 @@ const MODES = {
       indication:            null,
       explicationCorrection: null,
       commentaire:           { width: 150 },
-      consigneIA:            null,
+      consigneIA:            { width: 150 },
       ordreQuestion:         { width: 70 },
     },
 
-    colonnesUiHidden:  ['consigneIA','ordreQuestion'],
-    colonnesLlmHidden: ['consigneIA', 'ordreQuestion'],
+    colonnesUiHidden:  ['ordreQuestion'],
+    colonnesLlmHidden: ['ordreQuestion'],
 
     systemPrompt: `Tu es un assistant pédagogique expert.
 Tu analyses et améliores des questions de formation existantes.
@@ -418,6 +420,7 @@ Exemple : corriger la ligne _id=3, supprimer la ligne _id=7, ajouter une questio
 
   creation: {
     label: 'Création',
+    description: 'Générer de nouvelles questions depuis le cours ou des documents joints',
 
     surchargesColonnes: {
       type:                  { width: 90, pinned:     'left'},

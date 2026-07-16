@@ -161,6 +161,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est 
 const MODES = {
   standard: {
     label: 'Standard',
+    description: 'Vue standard de la fiche de travaux',
     surchargesColonnes: {
       repere:      null,
       intitule:    null,
@@ -181,6 +182,7 @@ const MODES = {
 
   creation: {
     label: 'Création',
+    description: 'Créer une fiche de travaux à partir de documents (CCTP, descriptif…)',
     surchargesColonnes: {
       repere:      null,
       intitule:    null,

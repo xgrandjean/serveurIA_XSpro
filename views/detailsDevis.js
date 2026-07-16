@@ -263,6 +263,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est 
 const MODES = {
     standard: {
       label: 'Standard',
+      description: 'Vue standard du devis avec l\'ensemble des colonnes techniques et financières',
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       surchargesColonnes: {
         niveauListe:        {width: 70},
@@ -318,6 +319,7 @@ const MODES = {
 
     decomposition: {
       label: 'Décomposition',
+      description: 'Décomposer les lots en sous-lots — structure et quantités uniquement',
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       // Seules les colonnes suivantes sont visibles : reference, niveauListe, designation,
       // unite, quantiteTotale, heuresUnitaire — tout le reste est masqué
@@ -378,6 +380,7 @@ const MODES = {
 
     chiffrage: {
       label: 'Chiffrage',
+      description: 'Chiffrer et valoriser les postes — prix, main-d\'œuvre et taux horaire',
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       // Seules les colonnes suivantes sont visibles : reference, niveauListe, designation,
       // unite, quantiteTotale, prixAchatUnitaire, heuresUnitaire, tauxHoraire — tout le reste

@@ -167,6 +167,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est 
 const MODES = {
   standard: {
     label: 'Standard',
+    description: 'Vue standard de la commande fournisseur',
     surchargesColonnes: {
       reference:   null,
       designation: null,
@@ -190,6 +191,7 @@ const MODES = {
 
   creation: {
     label: 'Création',
+    description: 'Créer des commandes fournisseur à partir de documents (devis, CCTP…)',
     surchargesColonnes: {
       reference:   null,
       designation: null,

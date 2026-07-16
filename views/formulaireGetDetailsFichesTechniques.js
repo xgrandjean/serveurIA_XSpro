@@ -168,6 +168,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est 
 const MODES = {
   standard: {
     label: 'Standard',
+    description: 'Vue standard du carnet de liaisons',
     surchargesColonnes: {
       repere:                 null,
       typeLiaison:            null,
@@ -193,6 +194,7 @@ const MODES = {
 
   creation: {
     label: 'Création',
+    description: 'Créer un carnet de liaisons à partir de plans, schémas ou CCTP',
     surchargesColonnes: {
       repere:                 null,
       typeLiaison:            null,

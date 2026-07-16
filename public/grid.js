@@ -1283,6 +1283,11 @@ function bindUI() {
   // Mode de travail (work mode) — changement
   el('work-mode-selector').addEventListener('change', (e) => {
     onWorkModeChange(e.target.value || null);
+    // Mettre à jour le tooltip avec la description du mode sélectionné
+    const sel = e.target;
+    const modeId = sel.value;
+    const mode = state.modes[modeId];
+    sel.title = mode?.description || mode?.label || modeId || 'Mode de travail';
   });
 
   // Actions session
@@ -1499,6 +1504,8 @@ function populateWorkModeSelector(modes) {
   const defaultMode = keys.includes('standard') ? 'standard' : keys[0];
   sel.value = defaultMode;
   state.activeWorkMode = defaultMode;
+  // Tooltip du <select> : description du mode actif (le title sur <option> n'est pas supporté par les navigateurs)
+  sel.title = modes[defaultMode]?.description || modes[defaultMode]?.label || defaultMode;
 }
 
 /**

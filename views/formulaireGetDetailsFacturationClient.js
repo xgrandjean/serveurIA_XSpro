@@ -168,6 +168,7 @@ Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est 
 const MODES = {
   standard: {
     label: 'Standard',
+    description: 'Vue standard de la facturation client',
     surchargesColonnes: {
       reference:   null,
       designation: null,
@@ -189,6 +190,7 @@ const MODES = {
 
   creation: {
     label: 'Création',
+    description: 'Créer des facturations client à partir de documents (devis signé, CCTP…)',
     surchargesColonnes: {
       reference:   null,
       designation: null,
