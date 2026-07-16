@@ -393,23 +393,24 @@ wss.on('connection', (ws, req) => {
   const supportedTypes         = getSupportedTypes(providerId);
   const acceptString           = buildAcceptString(supportedTypes);
 
-   // Envoie l'état initial (config grille effective + données)
-    ws.send(JSON.stringify({
-      type:         'init',
-      sessionId,
-      contextName:  session.contextName,
-      workerConfig: session.effectiveWorkerConfig,
-      rows:         session.rows,
-      infosParent:  session.data.infosParent || {},
-      providerId,
-      acceptString,
-      supportedTypes,
-      xsproPayload: session.xsproPayload,
-      modes:        session.modes       || {},
-      selectChoix:  session.selectChoix || {},
-      rowStyles:    session.rowStyles   || [],
-      colonnesDerivees: session.colonnesDerivees || {},
-    }));
+    // Envoie l'état initial (config grille effective + données)
+     ws.send(JSON.stringify({
+       type:         'init',
+       sessionId,
+       contextName:  session.contextName,
+       workerConfig: session.effectiveWorkerConfig,
+       rows:         session.rows,
+       infosParent:  session.data.infosParent || {},
+       providerId,
+       acceptString,
+       supportedTypes,
+       xsproPayload: session.xsproPayload,
+       modes:        session.modes       || {},
+       selectChoix:  session.selectChoix || {},
+       champsRestreints: session.champsRestreints || {},
+       rowStyles:    session.rowStyles   || [],
+       colonnesDerivees: session.colonnesDerivees || {},
+     }));
 
     // Validation initiale des lignes (pour cohérence affichage ↔ édition)
     // Une ligne invalide doit apparaître barrée comme après édition manuelle, et une

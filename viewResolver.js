@@ -263,15 +263,17 @@ function resolveEffectiveWorkerConfig(session) {
      session.champsRestreints = rawCR || {};
    }
 
-   const nbModes = Object.keys(session.modes).length;
-   const nbSC    = Object.keys(session.selectChoix).length;
-   console.log(
-     `[ViewResolver] "${session.contextName}" — `
-     + `${effectiveColonnes.length} colonnes, `
-     + `${nbModes} mode(s), `
-     + `${nbSC} selectChoix, `
-     + `hook: ${viewHook ? 'oui' : 'non'}`
-   );
+    const nbModes = Object.keys(session.modes).length;
+    const nbSC    = Object.keys(session.selectChoix).length;
+    const nbCR    = Object.keys(session.champsRestreints || {}).length;
+    console.log(
+      `[ViewResolver] "${session.contextName}" — `
+      + `${effectiveColonnes.length} colonnes, `
+      + `${nbModes} mode(s), `
+      + `${nbSC} selectChoix, `
+      + `${nbCR} champsRestreints, `
+      + `hook: ${viewHook ? 'oui' : 'non'}`
+    );
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────

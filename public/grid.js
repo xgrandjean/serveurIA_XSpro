@@ -577,27 +577,35 @@ const dataCols = colonnes.map(col => {
         return span;
       } : undefined,
 
-      // agSelectCellEditor - ouvre avec Entrée en mode clavier, affiche les labels, stocke les valeurs
-      // permet la navigation gauche/droite même hors édition
-      ...(hasSelectChoix ? {
-        cellEditor: 'agSelectCellEditor',
-        cellEditorParams: (params) => {
-          // Restreint les valeurs proposées selon le type de la ligne courante, si le
-          // hook a déclaré une restriction pour ce champ (state.champsRestreints) —
-          // sinon (ex: colonne 'type' elle-même, jamais restreinte) liste complète.
-          // Restriction du MENU affiché uniquement ; la validation reste inchangée.
-          const restrictMap = state.champsRestreints?.[col.cle];
-          const allowedValeurs = restrictMap?.[params.data?.type];
-          const values = Array.isArray(allowedValeurs) ? allowedValeurs : sc.choix.map(entry => entry.valeur);
-          return {
-            values,
-            getOptionValue: (value) => value,
-            getOptionLabel: (value) => {
-              const entry = sc.choix.find(c => c.valeur === value);
-              return entry ? entry.label : value;
-            },
-          };
-        },
+       // agSelectCellEditor - ouvre avec Entrée en mode clavier, affiche les labels, stocke les valeurs
+       // permet la navigation gauche/droite même hors édition
+       ...(hasSelectChoix ? {
+         cellEditor: 'agSelectCellEditor',
+         cellEditorParams: (params) => {
+           // Restreint les valeurs proposées selon le type de la ligne courante, si le
+           // hook a déclaré une restriction pour ce champ (state.champsRestreints) —
+           // sinon (ex: colonne 'type' elle-même, jamais restreinte) liste complète.
+           // Restriction du MENU affiché uniquement ; la validation reste inchangée.
+           const restrictMap = state.champsRestreints?.[col.cle];
+           let typeValeur = params.data?.type;
+           // Conversion string → integer si nécessaire (ex: "qcm" → 1, "cours" → 5)
+           // Le hook vue fournit des restrictions avec clés numériques (1,2,3,4,5)
+           // mais les données peuvent contenir des strings ("qcm", "cours", etc.)
+           if (typeof typeValeur === 'string') {
+             const typeStrToInt = { 'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5 };
+             typeValeur = typeStrToInt[typeValeur] ?? typeValeur;
+           }
+           const allowedValeurs = restrictMap?.[typeValeur];
+           const values = Array.isArray(allowedValeurs) ? allowedValeurs : sc.choix.map(entry => entry.valeur);
+           return {
+             values,
+             getOptionValue: (value) => value,
+             getOptionLabel: (value) => {
+               const entry = sc.choix.find(c => c.valeur === value);
+               return entry ? entry.label : value;
+             },
+           };
+         },
         suppressKeyboardEvent: (params) => {
           const currentRowIndex = params.node?.rowIndex ?? params.api.getFocusedCell()?.rowIndex;
           // Toujours laisser passer ArrowLeft/ArrowRight pour la navigation horizontale
