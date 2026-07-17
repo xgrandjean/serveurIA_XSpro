@@ -90,6 +90,14 @@
 
 'use strict';
 
+// ── Paramétrage prompt (source unique de vérité, cf. README-prompts.md) ───────
+// Chargé ici (et pas seulement par viewResolver.js) car MANIFEST.regles est aussi
+// lu directement par les fonctions internes de ce fichier (validateCellEdit,
+// getInvalidFields, computeChampsRestreints) — elles ne passent pas par la fusion
+// effectiveWorkerConfig de viewResolver.js. Éviter d'avoir le contenu dupliqué
+// en dur dans MANIFEST *et* dans le JSON : une seule définition, requise ici.
+const promptConfig = require('./formulaireListeQuestions.json');
+
 // ── MANIFEST ──────────────────────────────────────────────────────────────────
 const MANIFEST = {
 
@@ -147,12 +155,11 @@ const MANIFEST = {
       style: { background: '#FEF9EC' } },
   ],
 
-  // ── Prompt système de base (commun aux deux modes, peut être surchargé par MODE) ─
-  systemPrompt: `Tu es un assistant pédagogique expert en création de contenu de formation.
-Tu génères ou modifies des questions et cours structurés pour un système e-learning.
-Respecte scrupuleusement les règles métier définies et le format de sortie attendu.
-Ne produis que des lignes utiles — n'ajoute pas de lignes vides ni de doublons.
-Langue : UNIQUEMENT du français correct et technique.`,
+  // ── Prompt système de base, règles métier, promptsSuggeres et formatReponse ─
+  // Source unique : formulaireListeQuestions.json (cf. README-prompts.md). Lu ici
+  // (pas juste laissé à null) car des fonctions plus bas dans ce fichier lisent
+  // MANIFEST.regles directement — voir commentaire en tête de fichier.
+  systemPrompt: promptConfig.systemPrompt,
 
   promptsSuggeres: null, // surchargé par les MODES
   prompt:          null,
@@ -181,102 +188,12 @@ Langue : UNIQUEMENT du français correct et technique.`,
     }
   },
 
-  // ── Règles métier — sérialisées en JSON dans le prompt par buildSystemPrompt ─
-  regles: {
-
-    /**
-     * Contrat par type de question.
-     * Ces règles sont absolues — toute ligne non conforme sera rejetée côté XSpro.
-     */
-    typesEtRegles: {
-       qcm: {
-         description:   'Question à choix multiples',
-         regle:         ['unique', 'multiple'],
-         correction:    ['auto'],
-         choix:         'Requis. 4 propositions par défaut (sauf mention contraire). Array de strings.',
-         choixCorrect:  'Requis. Indices 0-based des bonnes réponses. Ex: [1] ou [0,2]. Pour regle="multiple" : au moins 1 indice, toutes les combinaisons acceptées (1, 2, 3 ou 4 réponses possibles).',
-       ordre_choix:   ['aleatoire', 'fixe'],
-         points:        'Entier 1-3 selon difficulté.',
-       },
-       selection: {
-         description:   'Liste déroulante (un seul choix visible à la fois)',
-         regle:         ['unique'],
-         correction:    ['auto'],
-         choix:         'Requis. 4 propositions par défaut (sauf mention contraire). Array de strings.',
-         choixCorrect:  'Requis. Indice 0-based de la bonne réponse. Ex: [1].',
-         ordre_choix:   ['aleatoire', 'fixe'],
-         points:        'Entier 1-3 selon difficulté.',
-       },
-       courte: {
-         description:   'Réponse courte saisie libre',
-         regle:         ['texte', 'nombre'],
-         correction:    ['auto', 'semi', 'manuel'],
-         choix:         'Vide — laisser [].',
-         choixCorrect:  'Array de strings : toutes les réponses acceptables. Ex: ["herbivore", "végétarien"]. Respecte la casse exacte.',
-         ordre_choix:   [' '],
-         points:        'Entier 1-3 selon difficulté.',
-       },
-       ouverte: {
-         description:   'Texte long — réponse libre',
-         regle:         ['texte', 'texte(10)'],
-         correction:    ['manuel', 'semi'],
-         choix:         'Vide — laisser [].',
-         choixCorrect:  'Vide — laisser [].',
-         ordre_choix:   [' '],
-         points:        'Entier 1-3 selon difficulté.',
-       },
-       cours: {
-         description:   'Bloc de contenu pédagogique (pas une question)',
-         regle:         [' ', 'validation'],
-         correction:    [' ', 'auto'],
-         choix:         'Vide — laisser [].',
-         choixCorrect:  'Vide — laisser [].',
-         ordre_choix:   [' '],
-         points:        'Vide — les cours ne sont pas notés.',
-         contenu:       'Markdown enrichi : ## titres, **gras**, *italique*, - listes, | tableaux, ```blocs code```. HTML simple accepté (entités encodés).',
-       },
-    },
-
-    /**
-     * Format des champs communs à tous les types.
-     */
-    formatChamps: {
-      contenu:              'Énoncé de la question ou corps du cours. Sauts de ligne → <br>. Markdown pour les cours, texte simple pour les questions.',
-      choix:                'Array de strings. Ex: ["Les félidés", "Les équidés", "Les bovidés", "Les canidés"].',
-      choixCorrect:         'Array — format dépend du type (voir typesEtRegles).',
-      indication:           'Indice optionnel affiché à la demande de l\'apprenant. "" si inutile.',
-      explicationCorrection:'Explication affichée après correction. "" si inutile.',
-      consigneIA:           'Critère de correction et notation de la question à donner à l\'IA qui sera en charge de corriger l\'apprenant"" si inutile.',
-      commentaire:          '"" par défaut — laisser vide sauf demande explicite.',
-      // ordreQuestion n'est PAS documentés ici : ils sont dans
-      // colonnesLlmHidden des DEUX modes (analyse et creation), donc jamais vus par
-      // le LLM. Les documenter ici ajouterait des instructions mortes dans le prompt
-      // système si buildSystemPrompt sérialise formatChamps sans filtrage par
-      // colonnesLlmHidden. Si ces champs doivent un jour être exposés au LLM dans
-      // un mode donné, réintroduire l'entrée à ce moment-là.
-    },
-
-    /**
-     * Valeurs autorisées par champ (pour validation LLM).
-     */
-    valeursPossibles: {
-      type:        ['qcm', 'courte', 'ouverte', 'selection', 'cours'],
-      regle:       [' ', 'validation', 'unique', 'multiple', 'texte', 'texte(10)', 'nombre'],
-      correction:  [' ', 'auto', 'manuel', 'semi'],
-      ordre_choix: [' ', 'aleatoire', 'fixe'],
-    },
-
-    /**
-     * Consignes de qualité transversales.
-     */
-    qualite: [
-      'Les réponses doivent être 100 % exactes — particulièrement pour les sujets techniques.',
-      'Pour les qcm : les distracteurs (mauvaises réponses) doivent être plausibles.',
-      'Ne pas créer deux questions identiques ou trop similaires dans la même session.',
-      'La difficulté doit être progressive (points 1 → 3).',
-      'Aucun charabia, aucun mot étranger non justifié.',
-    ],
-  },
+  // ── Règles métier — source unique : formulaireListeQuestions.json ──────────
+  // Lu ici (pas juste laissé à null dans un futur MANIFEST minimal) car
+  // validateCellEdit/getInvalidFields/computeChampsRestreints lisent
+  // MANIFEST.regles directement plus bas dans ce fichier — voir commentaire
+  // en tête de fichier.
+  regles: promptConfig.regles,
 
   // ── Règles de post-traitement déclaratives ───────────────────────────────────
   reglesPostProcess: {
@@ -361,61 +278,15 @@ const MODES = {
     colonnesUiHidden:  ['ordreQuestion'],
     colonnesLlmHidden: ['ordreQuestion'],
 
-    systemPrompt: `Tu es un assistant pédagogique expert.
-Tu analyses et améliores des questions de formation existantes.
-Tu peux : corriger le contenu, améliorer la formulation, ajuster la difficulté,
-  compléter les champs manquants, corriger les incohérences type/regle/correction,
-  ajouter de nouvelles questions, ou supprimer une question devenue inutile.
-
-Les lignes existantes dans "DONNÉES ACTUELLES" ne sont pas une simple référence :
-elles font partie intégrante de la solution finale, comme une base déjà écrite que
-tu complètes. Tu dois :
-- t'aligner sur leur niveau de difficulté, leur style de formulation et la progression déjà engagée
-- éviter toute redondance ou répétition avec les questions déjà présentes
-- ne jamais contredire leur contenu pédagogique
-- les conserver telles quelles par défaut ; tu ne les modifies ou supprimes que si elles
-  sont explicitement incohérentes (type/regle/correction) ou si la demande le précise.`,
+    systemPrompt: promptConfig.modes.analyse.systemPrompt,
 
     regles: null,  // hérite du MANIFEST
 
-    // Liste plate — chaque MODE expose ses propres suggestions, pas de sous-imbrication
-    // par sous-mode (cf. architecture formulairePromptDialog : une liste par mode actif).
-    promptsSuggeres: [
-      'Vérifie la cohérence de toutes les questions (type, règle, réponses correctes)',
-      'Améliore la formulation des questions trop ambiguës',
-      'Complète les champs "indication" et "explicationCorrection" manquants',
-      'Augmente progressivement la difficulté des questions (points 1 → 3)',
-      'Identifie et corrige les erreurs factuelles dans les qcm',
-    ],
+    promptsSuggeres: promptConfig.modes.analyse.promptsSuggeres,
 
     modele: null,
 
-    // Contrat d'actions (editionParActions actif au niveau MANIFEST) : le LLM référence
-    // les lignes existantes par leur _id (colonne ajoutée en tête du CSV), et ne renvoie
-    // que ce qui change — pas besoin de retranscrire les lignes non concernées.
-    formatReponse: `
-== FORMAT DE RÉPONSE ==
-Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :
-  { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
-  { "_action": "delete", "_id": <id> }
-  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
-- "_id" référence la colonne _id du CSV "DONNÉES ACTUELLES" — jamais un numéro de ligne.
-- "update" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.
-- "insert" : "_apres" = _id de la ligne après laquelle insérer ; null = en tête ; "fin" = en dernier.
-- Ne renvoie AUCUNE action pour une ligne existante que tu ne modifies pas.
-- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_id"/"_apres").
-- Si une valeur est inconnue, utiliser "" (chaîne vide).
-- Pas de texte avant ni après. Pas de balises markdown.
-
-Exemple : corriger la ligne _id=3, supprimer la ligne _id=7, ajouter une question après _id=3 :
-[
-  { "_action": "update", "_id": 3, "points": 2, "correction": "semi" },
-  { "_action": "delete", "_id": 7 },
-  { "_action": "insert", "_apres": 3, "type": "qcm", "contenu": "...", "regle": "unique",
-    "correction": "auto", "points": "1", "choix": ["A","B","C","D"], "ordre_choix": "aleatoire",
-    "choixCorrect": [0], "indication": "", "explicationCorrection": "", "commentaire": "" }
-]
-`,
+    formatReponse: promptConfig.modes.analyse.formatReponse,
   },
 
   creation: {
@@ -441,65 +312,15 @@ Exemple : corriger la ligne _id=3, supprimer la ligne _id=7, ajouter une questio
     colonnesUiHidden:  ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
     colonnesLlmHidden: ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
 
-    systemPrompt: `Tu es un assistant pédagogique expert en ingénierie pédagogique.
-Tu crées des questions de formation originales à partir du contenu des cours fournis
-et/ou des documents joints (PDF, ZIP, texte).
-
-Règles de création :
-- Génère UNIQUEMENT les nouvelles lignes demandées — ne retranscris pas les questions déjà présentes.
-  Techniquement, cela signifie : n'utilise que des actions "insert" (jamais "update"/"delete"
-  sauf demande explicite de corriger une ligne existante incohérente).
-- Base-toi sur le contenu des cours (section "COURS") comme source de vérité thématique.
-- Les lignes existantes dans "DONNÉES ACTUELLES" te servent de contexte : thème, niveau de
-  langue et de difficulté déjà engagés, à respecter pour que tes nouvelles questions s'insèrent
-  naturellement dans la continuité — sans jamais les répéter ou les paraphraser.
-- Si un document est joint, extrais-en les notions clés avant de générer les questions.
-- Varie les types (qcm, courte, ouverte, selection) selon la nature de la notion à évaluer.
-  ("cours" n'est volontairement pas listé ici : ce n'est pas un type de question
-  évaluative mais un bloc de contenu pédagogique — à ne générer que sur demande explicite.)
-- Respecte une progression de difficulté : points 1 (mémorisation) → 2 (compréhension) → 3 (application).
-- Pour les qcm : 4 propositions exactement (sauf mention contraire), distracteurs plausibles.
-- Valide techniquement chaque question avant de l'écrire.`,
+    systemPrompt: promptConfig.modes.creation.systemPrompt,
 
     regles: null,  // hérite du MANIFEST
 
-    promptsSuggeres: [
-      'Génère 10 questions qcm variées à partir du cours',
-      'Crée un mix de 5 qcm, 3 réponses courtes et 2 questions ouvertes',
-      'Génère des questions de niveau avancé (points 3) sur les notions complexes',
-      'Crée des questions avec indication et explication de correction',
-      'Extrait les notions clés du document joint et génère une question par notion',
-      'Génère uniquement des questions de type "réponse courte" sur les définitions',
-      'Analyse le document joint et génère des questions adaptées au niveau',
-      'Compare ce document avec le cours existant et complète les notions manquantes',
-    ],
+    promptsSuggeres: promptConfig.modes.creation.promptsSuggeres,
 
     modele: null,
 
-    // Contrat d'actions (editionParActions actif au niveau MANIFEST) : en création,
-    // le LLM n'utilise quasiment que "insert" — cohérent avec systemPrompt
-    // ("ne retranscris pas les questions déjà présentes").
-    formatReponse: `
-== FORMAT DE RÉPONSE ==
-Réponds UNIQUEMENT avec un tableau JSON valide d'actions "insert" — une par nouvelle question :
-  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
-- "_apres" = _id de la ligne du CSV "DONNÉES ACTUELLES" après laquelle insérer ; "fin" = à la suite
-  de toutes les lignes existantes (cas le plus courant en création) ; null = en tête.
-- N'utilise "update"/"delete" que si la demande te demande explicitement de corriger ou retirer
-  une ligne existante incohérente — sinon ces actions sont hors sujet en mode création.
-- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_apres").
-- Si une valeur est inconnue, utiliser "" (chaîne vide).
-- Pas de texte avant ni après. Pas de balises markdown.
-
-Exemple : ajouter 2 nouvelles questions à la suite des lignes existantes :
-[
-  { "_action": "insert", "_apres": "fin", "type": "qcm", "contenu": "...", "regle": "unique",
-    "correction": "auto", "points": "1", "choix": ["A","B","C","D"], "ordre_choix": "aleatoire",
-    "choixCorrect": [0] },
-  { "_action": "insert", "_apres": "fin", "type": "courte", "contenu": "...", "regle": "texte",
-    "correction": "auto", "points": "1", "choixCorrect": ["réponse"] }
-]
-`,
+    formatReponse: promptConfig.modes.creation.formatReponse,
   },
 };
 

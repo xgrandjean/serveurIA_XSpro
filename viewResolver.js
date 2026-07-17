@@ -31,10 +31,20 @@
  * Contrat SELECT_CHOIX (optionnel) :
  *   { [cle]: { choix: [{ valeur, label }], fallback: { siCondition, alors, sinon } } }
  *   S'applique indépendamment des modes.
+ *
+ * Contrat JSON pairé (optionnel, cf. README-prompts.md) :
+ *   views/<viewModule>.json, même dossier que le hook. Porte uniquement la partie
+ *   déclarative "prompt" : systemPrompt, regles, promptsSuggeres, formatReponse
+ *   (racine + par mode), plus historique (limite de conservation) et slots
+ *   (politique de cycle de vie par slot, racine + par mode). Absent = comportement
+ *   inchangé, 100% rétrocompatible : seul le MANIFEST/MODES du .js fait foi. Présent
+ *   = surcharge les 4 champs prompt du MANIFEST et des MODES correspondants (mêmes
+ *   règles de fusion que le reste : null/absent = pas de surcharge, garde le .js).
  */
 
 'use strict';
 
+const fs   = require('fs');
 const path = require('path');
 
 // ── Chargement du hook vue ────────────────────────────────────────────────────
@@ -59,6 +69,53 @@ function loadViewHook(workerConfig) {
     console.warn(`[ViewResolver] Hook vue "${viewModule}" introuvable : ${e.message}`);
     return null;
   }
+}
+
+// ── Chargement du JSON pairé (paramétrage prompt) ─────────────────────────────
+/**
+ * Charge views/<viewModule>.json si présent — cf. contrat en tête de fichier et
+ * README-prompts.md. Absent ou invalide = null, aucune erreur bloquante : le hook
+ * fonctionne alors exactement comme avant l'introduction du JSON pairé.
+ *
+ * @param {Object} workerConfig
+ * @returns {Object|null}
+ */
+function loadPairedJson(workerConfig) {
+  const viewModule = workerConfig?.viewModule;
+  if (!viewModule) return null;
+
+  const jsonPath = path.join(__dirname, 'views', `${viewModule}.json`);
+  if (!fs.existsSync(jsonPath)) return null;
+
+  try {
+    const raw = fs.readFileSync(jsonPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    console.log(`[ViewResolver] Paramétrage prompt chargé : views/${viewModule}.json`);
+    return parsed;
+  } catch (e) {
+    console.warn(`[ViewResolver] JSON pairé "${viewModule}.json" invalide, ignoré : ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Fusionne les 4 champs prompt déclaratifs d'un JSON pairé (racine ou entrée de
+ * mode) sur un objet MANIFEST/MODE du .js. Même règle que resolveManifestField :
+ * absent/null côté JSON = pas de surcharge, on garde la valeur .js telle quelle.
+ *
+ * @param {Object} base    — MANIFEST ou entrée MODES[modeId] du .js (jamais muté)
+ * @param {Object|null} jsonSection — racine du JSON pairé, ou jsonConfig.modes[modeId]
+ * @returns {Object} — copie de base avec les champs prompt éventuellement surchargés
+ */
+function mergePromptFields(base, jsonSection) {
+  if (!jsonSection) return base;
+  return {
+    ...base,
+    systemPrompt:    jsonSection.systemPrompt    ?? base.systemPrompt,
+    regles:          jsonSection.regles          ?? base.regles,
+    promptsSuggeres: jsonSection.promptsSuggeres ?? base.promptsSuggeres,
+    formatReponse:   jsonSection.formatReponse   ?? base.formatReponse,
+  };
 }
 
 // ── Résolution des colonnes effectives ───────────────────────────────────────
@@ -174,8 +231,12 @@ function resolveManifestField(mfValue, xsproValue) {
 function resolveEffectiveWorkerConfig(session) {
   const { workerConfig, data } = session;
 
-  const viewHook = loadViewHook(workerConfig);
-  const mf       = viewHook?.MANIFEST || {};
+  const viewHook  = loadViewHook(workerConfig);
+  const jsonConfig = loadPairedJson(workerConfig);
+  // JSON pairé = surcharge des seuls champs prompt déclaratifs (cf. contrat en tête
+  // de fichier). Tout le reste du MANIFEST (colonnes, styles, editionParActions...)
+  // vient exclusivement du .js, comme avant.
+  const mf = mergePromptFields(viewHook?.MANIFEST || {}, jsonConfig);
 
   // Fusion MANIFEST → effectiveWorkerConfig
   // Si surchargesColonnes est défini → mode déclaratif (prioritaire)
@@ -219,8 +280,33 @@ function resolveEffectiveWorkerConfig(session) {
 
   // Hook vue, modes et selectChoix exposés sur la session
    session.viewHook    = viewHook;
-   session.modes       = viewHook?.MODES        || {};
+   // MODES du .js, avec surcharge des 4 champs prompt par le JSON pairé le cas
+   // échéant (jsonConfig.modes[modeId]) — même logique de fusion que le MANIFEST
+   // ci-dessus. Le reste d'une entrée MODE (colonnesUiHidden, surchargesColonnes,
+   // editionParActions...) vient toujours exclusivement du .js.
+   const jsModes = viewHook?.MODES || {};
+   session.modes = {};
+   for (const [modeId, modeDef] of Object.entries(jsModes)) {
+     session.modes[modeId] = mergePromptFields(modeDef, jsonConfig?.modes?.[modeId]);
+   }
    session.rowStyles   = mf.rowStyles || null;
+
+   // Politique de cycle de vie du contexte LLM (historique + slots), cf.
+   // README-prompts.md §3-4. Purement issue du JSON pairé — pas d'équivalent .js,
+   // c'est un concept qui n'existait pas avant son introduction. Absent = null,
+   // llmClient.js applique alors les policies par défaut documentées au §4.
+   // Fusion racine/mode différée à llmClient.js (qui connaît le mode actif) plutôt
+   // que résolue ici, pour rester cohérent avec la façon dont systemPrompt/regles
+   // par mode sont déjà surchargés au moment de l'appel (cf. run(), overriddenConfig).
+   session.promptPolicy = jsonConfig
+     ? {
+         historique: jsonConfig.historique || null,
+         slotsBase:  jsonConfig.slots || null,
+         slotsParMode: Object.fromEntries(
+           Object.entries(jsonConfig.modes || {}).map(([modeId, m]) => [modeId, m.slots || null])
+         ),
+       }
+     : null;
    
    // Export format depuis le MANIFEST (pour conversion indices→labels dans excelExport)
    session.exportFormat = mf.exportFormat || {};
@@ -277,4 +363,4 @@ function resolveEffectiveWorkerConfig(session) {
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
-module.exports = { resolveEffectiveWorkerConfig, loadViewHook };
+module.exports = { resolveEffectiveWorkerConfig, loadViewHook, loadPairedJson };

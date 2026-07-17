@@ -93,7 +93,17 @@ function createSession(payload) {
 
     // ── Historique conversationnel (isolé par session) ────────────────────────
     // Format OpenAI-compatible : [{ role: 'system'|'user'|'assistant', content }]
+    // Usage : AFFICHAGE UI UNIQUEMENT (cf. llmClient.js). Ne sert pas à reconstruire
+    // les messages envoyés au LLM.
     history: [],
+
+    // ── Tours historisés à usage LLM (cf. README-prompts.md §3-6) ─────────────
+    // Distinct de `history` ci-dessus : contenu structuré par slot (demande /
+    // infosVue / reponse), un tour par appel où au moins un slot est marqué
+    // 'historise' pour le mode actif. Consommé par llmClient.js pour reconstruire
+    // un vrai tableau messages[] user/assistant. Vide/non utilisé pour un hook
+    // sans JSON pairé (session.promptPolicy === null) — comportement inchangé.
+    llmTurns: [],
 
     // ── Plan en cours (mode Plan/Act) ─────────────────────────────────────────
     currentPlan: null,
@@ -183,6 +193,20 @@ function pushHistory(session, role, content) {
   touchSession(session);
 }
 
+// ── Ajout d'un tour historisé à usage LLM ────────────────────────────────────
+/**
+ * Stocke un tour structuré par slot, distinct de session.history (UI). Un champ
+ * absent/null signifie "ce slot n'était pas en policy 'historise' pour ce tour" —
+ * llmClient.js ne le rejoue donc pas dans messages[]. Cf. README-prompts.md §3-6.
+ *
+ * @param {Object} session
+ * @param {Object} turn — { modeId, demande, infosVue, reponse }
+ */
+function pushLlmTurn(session, turn) {
+  session.llmTurns.push({ ...turn, timestamp: Date.now() });
+  touchSession(session);
+}
+
 // ── Attachement de la WebSocket UI ───────────────────────────────────────────
 /**
  * @param {Object} session
@@ -235,6 +259,7 @@ function resetRows(session) {
   session.rows = session.data.lignes.map((r, i) => ({ _id: i + 1, ...r }));
   session._nextId = session.rows.length + 1;
   session.history   = [];
+  session.llmTurns  = [];
   session.currentPlan = null;
   setStatus(session, STATUS.CONNECTED);
   console.log(`[SessionManager] Rows réinitialisés : ${session.sessionId}`);
@@ -303,6 +328,7 @@ module.exports = {
   setCellValue,
   consumeNextId,
   pushHistory,
+  pushLlmTurn,
   attachWs,
   detachWs,
   deleteSession,

@@ -19,12 +19,101 @@ const { resolveProvider, getHandler }  = require('./providers');
 const { FILE_TYPES, resolveFileType }  = require('./fileTypes');
 const { runHandler }                   = require('./fileHandlers');
 
+// ── Politique de cycle de vie du contexte LLM (cf. README-prompts.md §3-6) ────
+// Policies par défaut : reproduisent exactement le comportement "PAS d'historique"
+// actuel tant qu'aucun JSON pairé n'existe pour la vue (session.promptPolicy null).
+const DEFAULT_SLOT_POLICIES = {
+  systemPrompt:    'once',
+  regles:          'once',
+  modele:          'once',
+  promptAdditions: 'once',
+  formatReponse:   'once',
+  donnees:         'latest',
+  plan:            'latest',
+  infosParent:     'latest', // figé — jamais surchargeable (cf. README §4)
+  infosVue:        'historise',
+  demande:         'historise',
+  reponse:         'nonHistorise',
+};
+
+/**
+ * Résout la policy effective de chaque slot pour le mode actif, à partir des
+ * défauts ci-dessus surchargés par session.promptPolicy (racine puis mode).
+ * @returns {Object|null} — { [slot]: { policy, resume } }, ou null si aucun JSON
+ *                           pairé pour cette vue (comportement actuel inchangé).
+ */
+function resolveSlotPolicies(promptPolicy, modeId) {
+  if (!promptPolicy) return null; // pas de JSON pairé → pas d'historisation, comme avant
+
+  const resolved = {};
+  for (const slot of Object.keys(DEFAULT_SLOT_POLICIES)) {
+    const fromBase = promptPolicy.slotsBase?.[slot];
+    const fromMode = modeId ? promptPolicy.slotsParMode?.[modeId]?.[slot] : null;
+    const entry = fromMode || fromBase || { policy: DEFAULT_SLOT_POLICIES[slot] };
+    resolved[slot] = entry;
+  }
+  // infosParent : figé en 'latest' quoi qu'il arrive (cf. README §4).
+  resolved.infosParent = { policy: 'latest' };
+  return resolved;
+}
+
+/**
+ * Construit les messages user/assistant des tours historisés (avant le tour
+ * courant), à partir de session.llmTurns, en appliquant la limite de rétention.
+ * @returns {{ messages: Array, warnings: Array }}
+ */
+function buildHistorizedMessages(session, historiqueCfg) {
+  const allTurns = session.llmTurns || [];
+  if (!allTurns.length) return { messages: [], warnings: [] };
+
+  const limite = historiqueCfg?.limite;
+  let keptTurns = allTurns;
+  let toursSupprimes = 0;
+
+  if (limite?.type === 'tours' && Number.isFinite(limite.valeur)) {
+    if (allTurns.length > limite.valeur) {
+      toursSupprimes = allTurns.length - limite.valeur;
+      keptTurns = allTurns.slice(toursSupprimes);
+    }
+  } else if (limite?.type === 'caracteres' && Number.isFinite(limite.valeur)) {
+    let total = 0;
+    const reversed = [...allTurns].reverse();
+    const kept = [];
+    for (const t of reversed) {
+      const size = (t.demande?.length || 0) + (t.infosVue ? JSON.stringify(t.infosVue).length : 0) + (t.reponse?.length || 0);
+      if (total + size > limite.valeur && kept.length > 0) break; // garder au moins 1 tour
+      total += size;
+      kept.push(t);
+    }
+    keptTurns = kept.reverse();
+    toursSupprimes = allTurns.length - keptTurns.length;
+  }
+
+  const messages = [];
+  for (const turn of keptTurns) {
+    let userContent = '';
+    if (turn.infosVue) userContent += `INFOS VUE (tour précédent) :\n${JSON.stringify(turn.infosVue)}\n\n`;
+    if (turn.demande)  userContent += `DEMANDE (tour précédent) : ${turn.demande}`;
+    if (userContent) messages.push({ role: 'user', content: userContent });
+    if (turn.reponse) messages.push({ role: 'assistant', content: turn.reponse });
+  }
+
+  const warnings = [];
+  if (toursSupprimes > 0) {
+    warnings.push({ type: 'troncature_historique', limiteAppliquee: limite.valeur, toursSupprimes });
+  }
+  return { messages, warnings };
+}
+
 // ── Point d'entrée principal ──────────────────────────────────────────────────
 /**
  * @param {Object}       session     — session courante
  * @param {string|null}  userPrompt  — texte utilisateur
  * @param {'plan'|'act'} mode
  * @param {Object}       callbacks   — { onPlan, onCellUpdate, onDone }
+ *   onDone(updatedRows, meta) — meta.warnings: Array, ex. troncature_historique /
+ *   troncature_taille (cf. README-prompts.md §6). meta est un nouveau paramètre,
+ *   tout code appelant existant qui l'ignore continue de fonctionner à l'identique.
  * @param {Array}        files       — [{ name, mimeType, data (base64), size }]
  */
 async function run(session, userPrompt, mode, callbacks, files = []) {
@@ -48,6 +137,11 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   const activeModeId = session.activeMode;
   const activeMode   = activeModeId ? (session.modes?.[activeModeId] || null) : null;
   const hiddenKeys   = new Set(activeMode?.colonnesLlmHidden || []);
+
+  // ── 2c. Policies de cycle de vie du contexte (cf. README-prompts.md §3-6) ──
+  // null si la vue n'a pas de JSON pairé → aucune historisation, comportement
+  // strictement identique à avant cette évolution.
+  const slotPolicies = resolveSlotPolicies(session.promptPolicy, activeModeId);
 
   // Construire un effectiveWorkerConfig surchargé par le mode actif
   const overriddenConfig = { ...effectiveWorkerConfig };
@@ -97,18 +191,32 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   // ── 7. Contenu multi-part (texte + fichiers routés par provider) ───────────
   const userContent = await buildUserContent(userText, files, providerId);
 
-  // ── 8. Messages — PAS d'historique ─────────────────────────────────────────
-  // Le message utilisateur est auto-suffisant : il contient déjà les données
-  // actuelles, le plan validé, la demande et le contexte. L'historique des tours
-  // précédents n'apporte aucune information supplémentaire et ne fait que
-  // consommer des tokens inutilement, provoquant des troncatures.
-  // L'historique est conservé dans session.history pour l'affichage UI uniquement.
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user',   content: userContent },
-  ];
+  // ── 8. Messages ──────────────────────────────────────────────────────────
+  // Sans JSON pairé (slotPolicies === null) : comportement inchangé — le message
+  // utilisateur est auto-suffisant, pas d'historique envoyé au LLM (session.history
+  // reste réservé à l'affichage UI). Avec JSON pairé : les tours dont au moins un
+  // slot est 'historise' sont rejoués comme vrais messages user/assistant avant le
+  // tour courant (cf. README-prompts.md §3-6), dans la limite de session.promptPolicy.historique.
+  let warnings = [];
+  const messages = [{ role: 'system', content: systemPrompt }];
+
+  if (slotPolicies) {
+    const { messages: historizedMessages, warnings: historiqueWarnings } =
+      buildHistorizedMessages(session, session.promptPolicy.historique);
+    messages.push(...historizedMessages);
+    warnings = warnings.concat(historiqueWarnings);
+  }
+
+  messages.push({ role: 'user', content: userContent });
 
   const truncated = truncateMessages(messages, ia.maxPromptLength || 40000);
+  if (truncated.length < messages.length) {
+    warnings.push({
+      type: 'troncature_taille',
+      limiteAppliquee: ia.maxPromptLength || 40000,
+      messagesSupprimes: messages.length - truncated.length,
+    });
+  }
 
   // ── 9. Log taille des messages + appel LLM ─────────────────────────────────
   const systemPromptSize = truncated[0]?.content?.length || 0;
@@ -121,6 +229,19 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
 
   // ── 10. Historique ─────────────────────────────────────────────────────────
   SM.pushHistory(session, 'assistant', rawResponse);
+
+  // Tour historisé à usage LLM (distinct de session.history ci-dessus) — cf.
+  // README-prompts.md §3-6. Rien n'est stocké si la vue n'a pas de JSON pairé,
+  // ou si aucun slot n'est en policy 'historise' pour ce mode.
+  if (slotPolicies) {
+    const turn = {
+      modeId:   activeModeId,
+      demande:  slotPolicies.demande?.policy  === 'historise' ? (userPrompt || null) : null,
+      infosVue: slotPolicies.infosVue?.policy === 'historise' ? (data.infosVue || null) : null,
+      reponse:  slotPolicies.reponse?.policy  === 'historise' ? (rawResponse || null) : null,
+    };
+    if (turn.demande || turn.infosVue || turn.reponse) SM.pushLlmTurn(session, turn);
+  }
 
   // ── 11. Traitement selon le mode ───────────────────────────────────────────
   if (mode === 'plan') {
@@ -159,7 +280,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
     }
   }
 
-  if (onDone) onDone(updatedRows);
+  if (onDone) onDone(updatedRows, { warnings });
 }
 
 // ── Valeurs par défaut sur les placeholders ───────────────────────────────────
