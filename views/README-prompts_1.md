@@ -61,10 +61,19 @@ qu'aujourd'hui, seule son origine (un ou deux fichiers) change.
 
 ## 4. Résolution des policies par slot (défaut si absent)
 
-Si un hook (migré ou non) ne définit pas de `slots` du tout, ou omet un slot
-précis, la policy par défaut appliquée est celle qui correspond au comportement
-**actuel** de `llmClient.js` — donc migrer un hook vers un `.json` sans y toucher
-ne change rien à ce qu'il envoie au LLM :
+**Important, corrigé le 2026-07-17** : la seule présence d'un `.json` pairé
+n'active *pas* l'historisation. Un hook migré uniquement pour factoriser son
+texte de prompt (`systemPrompt`/`regles`/...), sans section `slots` ni
+`historique`, se comporte **exactement comme avant sa migration** — aucun
+message historisé n'est envoyé au LLM. C'est un choix délibéré : un refactor
+structurel (sortir le texte en JSON) ne doit jamais avoir pour effet de bord de
+changer le comportement d'exécution d'une vue.
+
+L'activation de l'historisation exige donc une décision explicite : le JSON
+doit définir une section `slots` (racine ou dans au moins un `modes.<mode>`).
+Dans ce cas seulement, les slots non explicités dans cette section héritent des
+policies par défaut ci-dessous — qui reproduisent le comportement historique de
+`llmClient.js` :
 
 | Slot | Policy par défaut | Raison |
 |---|---|---|
@@ -73,9 +82,9 @@ ne change rien à ce qu'il envoie au LLM :
 | `infosParent` | `latest` (figé — aucun hook ne peut le surcharger en `historise`) | Vient de XSpro, jamais retravaillé par le LLM |
 | `infosVue` | `historise` | Retravaillé par le LLM au fil des tours, la continuité a de la valeur |
 | `demande` | `historise` | Comprendre l'enchaînement des demandes utilisateur d'un tour à l'autre |
-| `reponse` | `nonHistorise` | Comportement actuel : consommée pour mettre à jour les rows, puis jetée |
+| `reponse` | `nonHistorise` | Comportement historique : consommée pour mettre à jour les rows, puis jetée — sauf convention §7bis ci-dessous |
 
-Un mode qui ne surcharge pas `slots` hérite donc de ces valeurs (ou de celles
+Un mode qui ne surcharge pas `slots` hérite de ces valeurs (ou de celles
 définies à la racine du JSON, si le hook les a explicitées — comme
 `formulaireListeQuestions.json` le fait pour `reponse: nonHistorise` à la
 racine, surchargé en `historise` par `analyse` et `creation`).
@@ -119,10 +128,56 @@ un avertissement visible (hors périmètre de ce document).
    reformulation à l'occasion de la migration — un changement de comportement du
    LLM doit être une décision séparée, explicite, pas un effet de bord d'un
    refactor structurel).
-2. Ajouter `historique` et `slots` en reprenant les policies par défaut de la
-   section 4 (comportement identique à avant), puis ajuster uniquement si un
-   besoin précis a été identifié pour cette vue.
-3. Remplacer dans le `.js` les valeurs migrées par `null` (elles héritent du
-   JSON), en laissant tout le reste du `.js` inchangé.
+2. Dans le `.js`, remplacer les valeurs migrées par `null` — **deux variantes**,
+   selon que le fichier lit ou non ces champs en interne :
+   - **Cas général** (`detailsDevis`, `formulaireGetDetailsTravaux`,
+     `formulaireGetDetailsFichesTechniques`, `formulaireGetDetailsAF`,
+     `formulaireGetDetailsFacturationClient`) : rien dans le `.js` ne lit
+     `MANIFEST.regles`/`systemPrompt`/etc. en dehors de la fusion externe faite
+     par `viewResolver.js` → simple `null`, pas de `require()`.
+   - **Cas particulier** (`formulaireListeQuestions`) : des fonctions du `.js`
+     (`validateCellEdit`, `getInvalidFields`, `computeChampsRestreints`...) lisent
+     `MANIFEST.regles` **directement**, sans passer par la fusion de
+     `viewResolver.js`. Mettre `null` casserait ces fonctions. Dans ce cas :
+     `const promptConfig = require('./<nomDuHook>.json');` en tête de fichier,
+     puis `MANIFEST.regles: promptConfig.regles` (etc.) — une seule source de
+     vérité, lue aux deux endroits qui en ont besoin. Vérifier au préalable avec
+     `grep -n "MANIFEST\.\(regles\|systemPrompt\|formatReponse\)" <fichier>.js`
+     (en excluant la déclaration elle-même) pour savoir quel cas s'applique.
+3. Ajouter `historique` et `slots` — voir §7bis, c'est désormais la convention
+   par défaut plutôt qu'une case à cocher au cas par cas.
 4. Ne rien migrer qu'on n'a pas de raison de vouloir ajuster prochainement — un
-   hook peut très bien rester 100% `.js` indéfiniment (cf. §3, point 3).
+   hook peut très bien rester 100% `.js` indéfiniment (§3, point 3).
+5. **Toujours valider avant de livrer** : `node -c <fichier>.js` (syntaxe),
+   `JSON.parse` sur le `.json`, puis un test end-to-end via
+   `viewResolver.resolveEffectiveWorkerConfig` (systemPrompt/regles fusionnés,
+   modes hérités correctement) et `resolveSlotPolicies` de `llmClient.js`
+   (policies attendues, `historique.limite` correct). Voir les migrations
+   précédentes pour le pattern de test (stubs `providers.js`/`fileTypes.js`/
+   `fileHandlers.js` si le require de `llmClient.js` les réclame).
+
+## 7bis. Convention par défaut : historisation activée (2026-07-17)
+
+Décision actée le 2026-07-17 : **par défaut, tout hook migré active
+l'historisation** — `slots.reponse: historise` à la racine du JSON (donc
+commun à tous les modes, sauf besoin explicite de différencier), avec
+`historique.limite = { type: 'tours', valeur: 15 }`. Le nombre de tours est
+ajustable au cas par cas ensuite, à la hausse ou à la baisse, sans reconsidérer
+le principe d'activation lui-même.
+
+`formulaireListeQuestions` reste une exception assumée à 6 tours (valeur fixée
+avant cette convention, conservée telle quelle pour l'instant — questions/cours
+produisent des tours plus volumineux que des lignes de devis/tâches/articles,
+ce qui justifierait une limite plus basse, mais ce n'est pas tranché
+définitivement).
+
+## Annexe — État des hooks migrés
+
+| Hook | `require()` JSON ? | `slots.reponse` | Limite historique |
+|---|---|---|---|
+| `formulaireListeQuestions` | Oui | `historise` (asymétrie : `resume` prévu en `analyse`, absent en `creation`) | 6 tours |
+| `detailsDevis` | Non | `historise` (racine, uniforme) | 15 tours |
+| `formulaireGetDetailsTravaux` | Non | `historise` (racine, uniforme) | 15 tours |
+| `formulaireGetDetailsFichesTechniques` | Non | `historise` (racine, uniforme) | 15 tours |
+| `formulaireGetDetailsAF` | Non | `historise` (racine, uniforme) | 15 tours |
+| `formulaireGetDetailsFacturationClient` | Non | `historise` (racine, uniforme) | 15 tours |
