@@ -186,7 +186,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
 
   const editionParActions = overriddenConfig.editionParActions === true;
   const dataCSV    = buildDataCSV(rowsWithDefaults, colsLLM, selectChoix, editionParActions);
-  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, actWorkerConfig);
+  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, actWorkerConfig, activeMode);
 
   // ── 7. Contenu multi-part (texte + fichiers routés par provider) ───────────
   const userContent = await buildUserContent(userText, files, providerId);
@@ -409,13 +409,19 @@ Réponds UNIQUEMENT avec un tableau JSON valide.
 }
 
 // ── Message utilisateur ───────────────────────────────────────────────────────
-function buildUserMessage(userPrompt, mode, dataCSV, infosParent, infosVue, workerConfig) {
+function buildUserMessage(userPrompt, mode, dataCSV, infosParent, infosVue, workerConfig, activeMode = null) {
   const parts = [];
 
   if (infosParent && Object.keys(infosParent).length) {
     parts.push('== CONTEXTE ==');
     for (const [k, v] of Object.entries(infosParent)) {
-      if (v) parts.push(`${k} : ${v}`);
+      if (v) {
+        if (typeof v === 'object') {
+          parts.push(`${k} : ${JSON.stringify(v)}`);
+        } else {
+          parts.push(`${k} : ${v}`);
+        }
+      }
     }
   }
 
@@ -435,6 +441,13 @@ function buildUserMessage(userPrompt, mode, dataCSV, infosParent, infosVue, work
 
   parts.push('\n== DONNÉES ACTUELLES ==');
   parts.push(dataCSV);
+
+  if (activeMode) {
+    parts.push('\n== MODE ACTIF ==');
+    parts.push(`Mode : ${activeMode.label || '(mode actif)'}`);
+    if (activeMode.description) parts.push(`Description : ${activeMode.description}`);
+    parts.push('La demande ci-dessous peut ne pas correspondre au mode actif. En cas de conflit, la demande prime.');
+  }
 
   if (userPrompt) {
     parts.push('\n== DEMANDE ==');
@@ -482,7 +495,7 @@ Décris le plan : colonnes, logique, attention. Format compact. Attends validati
 function buildDataCSV(rows, colsLLM, selectChoix = {}, includeId = false) {
   if (!rows?.length || !colsLLM?.length) return '(aucune donnée)';
 
-  const header = (includeId ? ['_id', ...colsLLM.map(c => c.cle)] : colsLLM.map(c => c.cle)).join(';');
+  const header = (includeId ? ['_id', ...colsLLM.map(c => c.cle)] : colsLLM.map(c => c.cle)).join('\t');
   const lines  = rows.map(row => {
     const cells = colsLLM.map(c => {
       const v = row[c.cle];
@@ -495,9 +508,9 @@ function buildDataCSV(rows, colsLLM, selectChoix = {}, includeId = false) {
         if (entry) return entry.label;
       }
 
-      return String(v).replace(/;/g, ',').replace(/\n/g, ' ');
+      return String(v).replace(/\t/g, ' ').replace(/\n/g, '\\n');
     });
-    return (includeId ? [row._id ?? '', ...cells] : cells).join(';');
+    return (includeId ? [row._id ?? '', ...cells] : cells).join('\t');
   });
 
   return [header, ...lines].join('\n');
@@ -1002,7 +1015,7 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
   // 6. Message utilisateur
   const editionParActions = overriddenConfig.editionParActions === true;
   const dataCSV    = buildDataCSV(rowsWithDefaults, colsLLM, selectChoix, editionParActions);
-  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, effectiveWorkerConfig);
+  const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, effectiveWorkerConfig, activeMode);
 
   // 7. Contenu multi-part (texte + fichiers routés)
   const userContent = await buildUserContent(userText, files, providerId);
