@@ -70,71 +70,19 @@ surchargesColonnes: {
     */
    champsMultiligne: ['reference', 'designation', 'commentaire'],
 
-  systemPrompt: `Tu es un assistant spécialisé dans le suivi et la complétion fidèle de facturations client (listes de prestations facturées).
-  Les prestations sont ici généralement déjà définies, au moins dans les grandes lignes (reference, designation, quantite en partie renseignés) :
-  ton rôle est de vérifier, corriger et compléter les champs manquants ou incohérents, SANS reformuler ni restructurer ce qui existe déjà.
-  Ne modifie une valeur déjà renseignée que si elle est manifestement erronée ou si la correction est explicitement demandée.
-  Les champs facture/regle/annule sont réservés à la saisie manuelle côté comptabilité et ne t'apparaissent pas — ne cherche jamais à les lire ni à les renseigner.
+  // Portés par le JSON pairé (cf. README-prompts.md).
+  systemPrompt: null,
 
-  Les prestations déjà présentes dans "DONNÉES ACTUELLES" font partie intégrante de la facturation
-  finale, comme un document déjà rédigé que tu complètes. En l'absence d'instruction explicite :
-  conserve-les telles quelles, complète uniquement ce qui manque. Tu ne modifies ou supprimes une
-  prestation existante que si c'est explicitement demandé ou si elle est manifestement erronée
-  (ex: référence en doublon).`,
-
-  promptsSuggeres: {
-    creation: [
-      'Complète les prestations manquantes à partir des données déjà présentes dans cette facturation',
-      'Vérifie et corrige les références en doublon sans modifier les autres prestations',
-      'Complète les prix unitaires manquants pour les prestations déjà définies',
-    ],
-    analyse: [
-      'Fais la synthèse de l\'état d\'avancement de cette facturation client',
-      'Liste les prestations non facturées ou non réglées',
-      'Quel est le montant total restant à payer ?',
-    ],
-  },
+  promptsSuggeres: null,
   prompt: null,
   modele:          null,
   export:          null,
 
-  // Contrat d'actions (editionParActions actif) — partagé par tous les modes qui ne
-  // définissent pas leur propre formatReponse (résolu par viewResolver.js).
-  formatReponse: `
-== FORMAT DE RÉPONSE ==
-Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :
-  { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
-  { "_action": "delete", "_id": <id> }
-  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
-- "_id" référence la colonne _id du CSV "DONNÉES ACTUELLES" — jamais un numéro de ligne.
-- "update" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.
-- "insert" : "_apres" = _id de la prestation après laquelle insérer ; null = en tête ; "fin" = en dernier.
-- Ne renvoie AUCUNE action pour une prestation existante que tu ne modifies pas.
-- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_id"/"_apres").
-- Si une valeur est inconnue, utiliser "" (chaîne vide).
-- Pas de texte avant ni après. Pas de balises markdown.
-`,
+  // Portée par le JSON pairé (cf. README-prompts.md).
+  formatReponse: null,
 
-  // Règles métier — structure libre, sérialisée en JSON dans le prompt
-  regles: {
-    champsObligatoires: ['designation'],
-    identifiants: {
-      champ: 'reference',
-      description: 'référence de la prestation — ne jamais inventer une référence, laisser vide si non fournie',
-    },
-    interdictions: [
-      'Ne jamais renseigner facture, regle ou annule — champs réservés à la saisie manuelle côté comptabilité',
-      'Ne pas inventer de montant précis si il n\'est pas déductible du contexte — laisser vide plutôt que d\'inventer un chiffre arbitraire',
-    ],
-    texteLibre: `
-    - designation doit être une description claire et actionnable de la prestation (ex. "Fourniture et pose de prises de courant", "Installation Tableau Général Basse Tension").
-    - quantite est un nombre positif représentant la quantité facturée — jamais négative.
-    - montant est le prix unitaire HT, un nombre positif — jamais négatif.
-    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.
-    - codeTVA reprend le code applicable (1, 2, 3) s'il est déductible du contexte, sinon laisse vide.
-    - Une prestation = une ligne homogène ; si une demande couvre plusieurs prestations distinctes, crée une ligne par prestation plutôt qu'une ligne fourre-tout.
-    `,
-  },
+  // Portées par le JSON pairé (cf. README-prompts.md).
+  regles: null,
 
   /**
    * Règles déclaratives pour postProcessDefaults et postProcessMerge.
@@ -205,23 +153,9 @@ const MODES = {
     },
     colonnesUiHidden:  ['facture', 'regle', 'annule','commentaire','codeTVA'],
     colonnesLlmHidden: ['facture', 'regle', 'annule','commentaire','codeTVA'],
-    systemPrompt: `Tu es un assistant spécialisé dans la création de facturations client à partir de documents (devis signé, CCTP, situation de travaux...).
-    Contrairement au mode standard, les prestations ne sont pas censées être déjà définies : à toi de les déduire des documents fournis
-    et de les structurer en une liste complète et actionnable (reference, designation, quantite, montant).
-    N'hésite pas à décomposer une facturation complexe en plusieurs lignes distinctes par type de prestation.
-    Si un montant n'est pas déductible du contexte, laisse-le vide plutôt que d'inventer un chiffre arbitraire.
-
-    Si des prestations figurent déjà dans "DONNÉES ACTUELLES", conserve-les telles quelles par défaut
-    et insère les nouvelles prestations déduites du document (action "insert", "_apres" au bon endroit)
-    — ne les modifie ou remplace que si elles sont explicitement incohérentes (ex: référence en doublon)
-    ou si la demande le précise.`,
+    systemPrompt: null,  // hérite du JSON pairé (modes.creation)
     regles: null,
-    promptsSuggeres: {
-      creation: [
-        'Décompose ce devis signé en liste de prestations à facturer',
-        'Génère une facturation client complète à partir de ce document',
-      ],
-    },
+    promptsSuggeres: null,  // hérite du JSON pairé (modes.creation)
     modele: null,
   },
 };

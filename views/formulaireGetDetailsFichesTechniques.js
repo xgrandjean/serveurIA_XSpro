@@ -73,71 +73,19 @@ const MANIFEST = {
     */
    champsMultiligne: ['repere', 'typeLiaison', 'tenant', 'repereTenant', 'typeConnectTenant', 'aboutissant', 'repereAboutissant', 'typeConnectAboutissant', 'commentaire'],
 
-  systemPrompt: `Tu es un assistant spécialisé dans le suivi et la complétion fidèle de carnets de liaisons (câbles, tuyauteries, raccordements entre équipements).
-  Les liaisons sont ici généralement déjà définies, au moins dans les grandes lignes (repere, tenant/aboutissant, typeLiaison en partie renseignés) :
-  ton rôle est de vérifier, corriger et compléter les champs manquants ou incohérents, SANS reformuler ni restructurer ce qui existe déjà.
-  Ne modifie une valeur déjà renseignée que si elle est manifestement erronée ou si la correction est explicitement demandée.
-  Si on te demande une synthèse ou un état d'avancement, base-toi uniquement sur les champs fait/validation/nonValide déjà présents dans les données — ne les invente jamais.
+  // Portés par le JSON pairé (cf. README-prompts.md).
+  systemPrompt: null,
 
-  Les liaisons déjà présentes dans "DONNÉES ACTUELLES" font partie intégrante du carnet final, comme
-  un document déjà rédigé que tu complètes. En l'absence d'instruction explicite : conserve-les telles
-  quelles, complète uniquement ce qui manque. Tu ne modifies ou supprimes une liaison existante que si
-  c'est explicitement demandé ou si elle est manifestement erronée (ex: repere en doublon).`,
-
-  promptsSuggeres: {
-    creation: [
-      'Complète les liaisons manquantes à partir des données déjà présentes dans ce carnet',
-      'Vérifie et corrige les repères en doublon sans modifier les autres liaisons',
-      'Complète les repereTenant/repereAboutissant manquants pour les liaisons déjà définies',
-    ],
-    analyse: [
-      'Fais la synthèse de l\'état d\'avancement de ce carnet de liaisons',
-      'Liste les liaisons non réalisées ou non validées',
-      'Vérifie la cohérence entre repereTenant et repereAboutissant',
-    ],
-  },
+  promptsSuggeres: null,
   prompt: null,
   modele:          null,
   export:          null,
 
-  // Contrat d'actions (editionParActions actif) — partagé par tous les modes qui ne
-  // définissent pas leur propre formatReponse (résolu par viewResolver.js).
-  formatReponse: `
-== FORMAT DE RÉPONSE ==
-Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :
-  { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
-  { "_action": "delete", "_id": <id> }
-  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
-- "_id" référence la colonne _id du CSV "DONNÉES ACTUELLES" — jamais un numéro de ligne.
-- "update" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.
-- "insert" : "_apres" = _id de la liaison après laquelle insérer ; null = en tête ; "fin" = en dernier.
-- Ne renvoie AUCUNE action pour une liaison existante que tu ne modifies pas.
-- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_id"/"_apres").
-- Si une valeur est inconnue, utiliser "" (chaîne vide).
-- Pas de texte avant ni après. Pas de balises markdown.
-`,
+  // Portée par le JSON pairé (cf. README-prompts.md).
+  formatReponse: null,
 
-  // Règles métier — structure libre, sérialisée en JSON dans le prompt
-  regles: {
-    champsObligatoires: ['repere'],
-    identifiants: {
-      champ: 'repere',
-      description: 'identifiant unique de la liaison — ne jamais dupliquer un repere déjà présent dans les données ou le modèle',
-    },
-    interdictions: [
-      'Ne jamais renseigner fait, validation ou nonValide — champs réservés à la saisie manuelle sur le terrain',
-      'Ne pas dupliquer un repere déjà existant',
-      'Ne pas inventer de repereTenant ou repereAboutissant fictif si l\'équipement n\'est pas identifiable — laisser vide plutôt que d\'inventer',
-      'Ne pas inventer de typeConnectTenant/typeConnectAboutissant si le type de borne n\'est pas précisé',
-    ],
-    texteLibre: `
-    - typeLiaison doit respecter des désignations normalisées réalistes (câbles électriques : U1000R2V, HO7VK… ; tuyauteries : PER, cuivre, PVC…) cohérentes avec la longueur et le contexte.
-    - longueurLiaison est un nombre décimal positif en mètres — vide si inconnue, jamais négative.
-    - tenant/aboutissant sont les libellés lisibles des équipements ; repereTenant/repereAboutissant sont leurs repères courts correspondants — rester cohérent entre les deux (même équipement = même repère partout dans le carnet).
-    - Une liaison relie toujours deux équipements distincts — tenant et aboutissant ne doivent jamais désigner le même équipement.
-    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.
-    `,
-  },
+  // Portées par le JSON pairé (cf. README-prompts.md).
+  regles: null,
 
   /**
    * Règles déclaratives pour postProcessDefaults et postProcessMerge.
@@ -213,25 +161,9 @@ const MODES = {
     },
     colonnesUiHidden:  ['fait', 'validation', 'nonValide'],
     colonnesLlmHidden: ['fait', 'validation', 'nonValide'],
-    systemPrompt: `Tu es un assistant spécialisé dans la création de carnets de liaisons (câbles, tuyauteries, raccordements entre équipements) à partir de documents (plans, schémas, CCTP, descriptif d'installation...).
-    Contrairement au mode standard, les liaisons ne sont pas censées être déjà définies : à toi de les déduire des documents fournis
-    et de les structurer en une liste complète et cohérente (repere, typeLiaison, tenant/aboutissant, repereTenant/repereAboutissant…).
-    N'hésite pas à décomposer une installation complexe en plusieurs liaisons distinctes par équipement ou par type de raccordement.
-    Ne renseigne JAMAIS fait, validation ou nonValide — ces champs sont réservés à la saisie manuelle sur le terrain.
-    Si un équipement ou un repère n'est pas identifiable dans les documents, laisse le champ vide plutôt que d'inventer.
-
-    Si des liaisons figurent déjà dans "DONNÉES ACTUELLES", conserve-les telles quelles par défaut et
-    insère les nouvelles liaisons déduites du document (action "insert", "_apres" au bon endroit) — ne les
-    modifie ou remplace que si elles sont explicitement incohérentes (ex: repere en doublon) ou si la
-    demande le précise.`,
+    systemPrompt: null,  // hérite du JSON pairé (modes.creation)
     regles: null,
-    promptsSuggeres: {
-      creation: [
-        'Décompose ce plan/schéma en liste de liaisons',
-        'Génère le carnet de liaisons complet à partir de ce document',
-        'Crée un repère unique pour chaque liaison sans doublon',
-      ],
-    },
+    promptsSuggeres: null,  // hérite du JSON pairé (modes.creation)
     modele: null,
   },
 };

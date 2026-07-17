@@ -135,76 +135,18 @@ const MANIFEST = {
      { si: { champ: 'niveauListe', op: 'gt', valeur: 1 }, style: { background: '#F5F5F5', fontWeight: '400' } },
    ],
 
-   systemPrompt: `Tu es un assistant spécialisé dans la création et la modification de lignes de devis BTP.
-   Tu peux créer, modifier ou supprimer des lignes selon la demande.
-   Respecte la hiérarchie existante et les règles métier définies.
-
-   Les lignes existantes dans "DONNÉES ACTUELLES" ne sont pas une simple référence : elles
-   font partie intégrante de la solution finale, comme un devis déjà rédigé que tu complètes.
-   En l'absence d'instruction explicite : conserve-les telles quelles, complète uniquement ce
-   qui manque. Tu ne modifies ou supprimes une ligne existante que si c'est explicitement
-   demandé ou si elle est manifestement incohérente.
-   Ne crée jamais de code de référence fictif — laisse "reference" vide si tu ne le connais pas réellement.
-   Ne renseigne "sousTraitance" à '✓' que si c'est explicitement demandé.`,
+   // Portés par le JSON pairé detailsDevis.json (cf. README-prompts.md).
+   systemPrompt: null,
    promptsSuggeres: null,
    prompt:          null,
    modele:          null,
    export:          null,
 
-   // Contrat d'actions (editionParActions actif) — partagé par tous les modes qui ne
-   // définissent pas leur propre formatReponse (résolu par viewResolver.js).
-   formatReponse: `
-== FORMAT DE RÉPONSE ==
-Réponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :
-  { "_action": "update", "_id": <id>, <champs modifiés uniquement> }
-  { "_action": "delete", "_id": <id> }
-  { "_action": "insert", "_apres": <id> | null | "fin", <tous les champs de la nouvelle ligne> }
-- "_id" référence la colonne _id du CSV "DONNÉES ACTUELLES" — jamais un numéro de ligne.
-- "update" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.
-- "insert" : "_apres" = _id de la ligne après laquelle insérer (ex: juste après un poste existant
-  pour y ajouter une sous-ligne) ; null = en tête ; "fin" = en dernier.
-- Ne renvoie AUCUNE action pour une ligne existante que tu ne modifies pas.
-- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ "_action"/"_id"/"_apres").
-- Si une valeur est inconnue, utiliser "" (chaîne vide).
-- Pas de texte avant ni après. Pas de balises markdown.
-`,
+   // Portée par le JSON pairé detailsDevis.json (cf. README-prompts.md).
+   formatReponse: null,
 
-  // Règles métier — structure libre, sérialisée en JSON dans le prompt
-  regles: {
-    hierarchie: {
-      champ: 'niveauListe',
-      niveaux: {
-        ' ':      'ligne vide ou de titre (désignation seule) — équivalent à <h1>',
-        '▶ ◇ ○': 'chapitre — équivalent à <h2>',
-        '○ ◆ ○': 'sous-chapitre — équivalent à <h3>',
-        '○ ○ ●': 'ligne de détail — équivalent à <h4>',
-      },
-      contraintes: [
-        'Ne pas sauter de niveau (ex: passer de ▶ ◇ ○ à ○ ○ ● directement est interdit)',
-        'Ne pas redescendre à un niveau déjà fermé',
-        'Les lignes ▶ ◇ ○ suivies de ○ ◆ ○ n\'ont en général pas de référence, pas de prix, pas d\'heures',
-      ],
-    },
-    champsObligatoires: ['designation'], // non utilisé, infoo issue de XSpro qui a utilisé cette clé pour filtrer les lignes invalides
-    valeursParDefaut: {
-      remiseAchat:    ' ',
-      remiseClient:   ' ',
-      sousTraitance:  ' ',   // label de l'indice 0
-      prixVenteForce: '',
-      margeForcee:    '',
-      tauxHoraire:    ' ',  // label de l'indice 0 — corrigé par reglesPostProcess si heures présentes
-    },
-    texteLibre: `
-    - Les lignes avec niveauListe ' ' ne reçoivent en principe jamais de référence, prix, ni heures.
-    - Les lignes avec niveauListe '▶ ◇ ○' ne reçoivent pas de référence, prix, ni heure s'ils ont des sous-chapitres. 
-    - Pour les lignes sous-traitées (sousTraitance = '✓') : heuresUnitaire = 0 et tauxHoraire = ' ' obligatoires.
-    - tauxHoraire : utilise ' ' si heuresUnitaire est vide ou 0, sinon utilise l'un des taux disponibles dans le modèle.
-    - Les prix et quantités sont toujours positifs ou vides — jamais négatifs.
-    - Les références ne sont à renseigner que si elles existent réellement.
-    - Les prix unitaires doivent refléter des tarifs réalistes du marché français BTP 2024-2025.
-    - Si on te demande un bilan financier, rappelle que c'est un outil de création de lignes de devis.
-    `,
-  },
+  // Règles métier — source unique : detailsDevis.json (cf. README-prompts.md).
+  regles: null,
   /**
    * Règles déclaratives pour postProcessDefaults et postProcessMerge.
    * L'interpréteur intégré (plus bas dans ce fichier) génère automatiquement
@@ -350,31 +292,9 @@ const MODES = {
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
         'infoPrixTotalFO', 'infoHeuresTotalMO', 'infoPrixTotalMO', 'infoPrixTotalMOetFO'],
-      systemPrompt: `Tu es un assistant spécialisé dans la décomposition de travaux en postes de devis à partir d'un CCTP.
-    Le document source peut se présenter sous deux formes — détermine laquelle s'applique avant d'agir :
-    1. Le CCTP ne contient pas de bordereau de prix exploitable : génère une hiérarchie cohérente
-       (chapitres, sous-chapitres, lignes de détail) avec pour chaque ligne de détail une désignation
-       précise et une quantité réaliste, déduites de la description des travaux.
-    2. Le CCTP contient déjà un bordereau de prix ou une décomposition en postes (tableau, annexe,
-       liste numérotée...) : reprends fidèlement cette structure existante (désignations, unités,
-       quantités, références) plutôt que d'en inventer une nouvelle — ne modifie ou ne complète que
-       ce qui est explicitement manquant.
-    Dans les deux cas : ne renseigne pas les prix, heures ni sous-traitance — concentre-toi sur la structure et les quantités.
-    Ne crée jamais de code de référence fictif — "reference" ne se renseigne que si elle est explicitement
-    présente dans le document fourni ; laisse-la vide sinon, y compris dans le cas 2 si le bordereau source n'en comporte pas.
-
-    Les lignes existantes dans "DONNÉES ACTUELLES" (le cas échéant) sont à conserver telles quelles
-    par défaut : insère les nouvelles lignes de décomposition à la position hiérarchique appropriée
-    (via "_apres"), sans jamais modifier ce qui existe déjà sauf incohérence explicite ou demande.`,
+      systemPrompt: null,  // hérite du JSON pairé (modes.decomposition)
       regles:          null,
-      promptsSuggeres: {
-        creation: [
-          'Décompose ce CCTP en chapitres et postes de devis',
-          'Reprends le bordereau de prix fourni dans ce document',
-          'Génère la structure hiérarchique de ces travaux',
-          'Extrait les postes existants de ce CCTP sans les modifier',
-        ],
-      },
+      promptsSuggeres: null,  // hérite du JSON pairé (modes.decomposition)
       modele: null,
     },
 
@@ -411,26 +331,9 @@ const MODES = {
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
         'infoPrixTotalFO', 'infoHeuresTotalMO', 'infoPrixTotalMO', 'infoPrixTotalMOetFO'],
-      systemPrompt: `Tu es un assistant spécialisé dans le chiffrage de devis BTP.
-      La structure et les quantités sont déjà définies — ton objectif est de renseigner les prix et la main d'œuvre.
-      Pour chaque ligne de détail (niveauListe '○ ○ ●') :
-      - prixAchatUnitaire : prix unitaire matériel réaliste marché français BTP 2024-2025, vide si pas de matériel
-      - heuresUnitaire : nombre d'heures de main d'œuvre prévues PAR unité de quantiteTotale, vide si pas de pose
-      - tauxHoraire : utilise l'un des taux disponibles dans le modèle, ' ' si heuresUnitaire est vide ou 0
-      Une ligne peut cumuler matériel ET main d'œuvre — exemple : 60 m de câble à X €/m avec 0,06 h/m de pose.
-      Tu peux créer des lignes supplémentaires si nécessaire pour affiner le chiffrage — utilise une action
-      "insert" avec "_apres" pointant sur le _id de la ligne existante concernée, pour l'insérer au bon endroit
-      dans la hiérarchie (jamais en fin de tableau par défaut, sauf si c'est réellement là qu'elle doit aller).
-      Ne modifie pas les désignations ni la structure hiérarchique des lignes existantes.
-      Ne crée jamais de code de référence fictif — laisse "reference" vide si tu ne le connais pas réellement.`,
+      systemPrompt: null,  // hérite du JSON pairé (modes.chiffrage)
       regles:          null,
-      promptsSuggeres: {
-        creation: [
-          'Chiffre les lignes avec des prix matériel réalistes',
-          'Estime les heures de main d\'œuvre pour chaque poste',
-          'Complète les quantités manquantes et chiffre l\'ensemble',
-        ],
-      },
+      promptsSuggeres: null,  // hérite du JSON pairé (modes.chiffrage)
       modele: null,
     },
 };

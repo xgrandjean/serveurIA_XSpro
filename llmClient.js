@@ -45,6 +45,13 @@ const DEFAULT_SLOT_POLICIES = {
 function resolveSlotPolicies(promptPolicy, modeId) {
   if (!promptPolicy) return null; // pas de JSON pairé → pas d'historisation, comme avant
 
+  // La seule présence d'un JSON pairé (ex: pour factoriser systemPrompt/regles) ne
+  // doit pas activer l'historisation par défaut — il faut que la vue définisse
+  // explicitement une section 'slots' (racine ou par mode) pour l'opt-in.
+  const hasSlotsBase = !!promptPolicy.slotsBase;
+  const hasSlotsMode  = modeId && !!promptPolicy.slotsParMode?.[modeId];
+  if (!hasSlotsBase && !hasSlotsMode) return null;
+
   const resolved = {};
   for (const slot of Object.keys(DEFAULT_SLOT_POLICIES)) {
     const fromBase = promptPolicy.slotsBase?.[slot];
