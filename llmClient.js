@@ -464,7 +464,7 @@ function buildUserMessage(userPrompt, mode, dataCSV, infosParent, infosVue, work
   if (mode === 'plan') {
     parts.push(`
 == INSTRUCTION ==
-Décris le plan : colonnes, logique, attention. Format compact. Attends validation.`);
+Regarde la logique et décris ta proposition en résumé : points d'attention, colonnes. Indique clairement s'il s'agit d'un ajout, d'une modification, ou des deux. Format compact. Attends validation.`);
   } else {
     if (workerConfig._currentPlan) {
       parts.push('\n== PLAN VALIDÉ ==');
