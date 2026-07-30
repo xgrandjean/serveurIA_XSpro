@@ -311,6 +311,14 @@ function resolveEffectiveWorkerConfig(session) {
    // Export format depuis le MANIFEST (pour conversion indices→labels dans excelExport)
    session.exportFormat = mf.exportFormat || {};
 
+   // Mode de revue par pending (opt-in par vue, cf. MANIFEST.revueParPending) : quand actif,
+   // llmClient.js (applyRowActions) marque les propositions IA (update/insert/delete) comme
+   // "en attente" sur les rows plutôt que de les committer directement — server.js/grid.js
+   // exposent alors une UI de validation individuelle/ligne/globale. Absent ou false = comportement
+   // historique inchangé (application directe), c'est le cas par défaut pour toutes les vues
+   // tant qu'elles n'activent pas ce flag explicitement.
+   session.reviewMode = !!mf.revueParPending;
+
    // Colonnes dérivées (calculées côté client) — extraites du mode actif
    session.colonnesDerivees = {};
    const modes = viewHook?.MODES || {};
@@ -347,6 +355,23 @@ function resolveEffectiveWorkerConfig(session) {
      }
    } else {
      session.champsRestreints = rawCR || {};
+   }
+
+   // CHAMPS_NON_APPLICABLES (optionnel, même schéma que CHAMPS_RESTREINTS) : { [valeurType]:
+   // [champs] } — champs structurellement hors sujet pour ce type de ligne. Contrairement à
+   // CHAMPS_RESTREINTS (restreint le MENU d'un dropdown), ceci bloque l'édition ET grise la
+   // cellule côté client (public/grid.js) : ne dépend que du champ "type" de la ligne, donc
+   // calculable une fois ici plutôt que recalculé à chaque édition côté serveur.
+   const rawCNA = viewHook?.CHAMPS_NON_APPLICABLES;
+   if (typeof rawCNA === 'function') {
+     try {
+       session.champsNonApplicables = rawCNA(workerConfig, data, session.xsproPayload) || {};
+     } catch (e) {
+       console.warn(`[ViewResolver] Erreur dans CHAMPS_NON_APPLICABLES() : ${e.message} — fallback {}`);
+       session.champsNonApplicables = {};
+     }
+   } else {
+     session.champsNonApplicables = rawCNA || {};
    }
 
     const nbModes = Object.keys(session.modes).length;

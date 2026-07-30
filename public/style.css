@@ -595,6 +595,90 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .ai-col-marker { color: #F6AD55; font-size: 10px; margin-right: 3px; }
 .cell-numeric  { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Cellule en attente (champ) — surlignage + mini ✓/✗ (validation "individuellement") */
+.field-pending-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.cell-value-wrap {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-pending-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.field-pending-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.field-pending-approve { color: var(--green); }
+.field-pending-approve:hover { background: var(--green-light); border-color: #9AE6B4; }
+.field-pending-reject  { color: var(--red); }
+.field-pending-reject:hover  { background: var(--red-light); border-color: #FEB2B2; }
+
+/* Colonne "Revue" — validation/rejet ligne entière (insert/delete/update) */
+.row-review-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.row-review-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.row-review-approve { color: var(--green); }
+.row-review-approve:hover { background: var(--green-light); border-color: #9AE6B4; }
+.row-review-reject  { color: var(--red); }
+.row-review-reject:hover  { background: var(--red-light); border-color: #FEB2B2; }
+
+/* En-tête fusionné sélection + revue (mode revueParPending) — case "tout
+   sélectionner" + valider/rejeter la sélection courante, cf. ReviewHeaderComponent */
+.review-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.review-header-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #fff;
+}
+/* Fond sombre de l'en-tête AG Grid : couleurs plus claires que les mêmes icônes
+   posées sur fond blanc dans les cellules, pour rester lisibles (taille déjà héritée
+   de .row-review-btn, identique à celle des cellules de ligne). */
+.review-header .row-review-approve { color: #7FE3AE; }
+.review-header .row-review-approve:hover { background: rgba(127, 227, 174, .2); }
+.review-header .row-review-reject  { color: #FF9BAA; }
+.review-header .row-review-reject:hover  { background: rgba(255, 155, 170, .2); }
+
 /* Barre téléchargement */
 #download-bar {
   display: flex;

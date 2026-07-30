@@ -181,6 +181,14 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
     session.rows, colonnes, effectiveWorkerConfig.regles, viewHook
   );
 
+  // Mode revue (session.reviewMode) : une ligne marquée __pendingDelete n'a pas encore
+  // été retirée de session.rows (elle reste affichée, barrée, tant que l'utilisateur n'a
+  // pas validé la suppression) — mais du point de vue du LLM elle est déjà partie, sans
+  // quoi il pourrait la re-proposer ou raisonner sur une ligne "fantôme".
+  const rowsForLLM = session.reviewMode
+    ? rowsWithDefaults.filter(r => !r.__pendingDelete)
+    : rowsWithDefaults;
+
   // ── 6. Injection du plan validé dans le message ACT ────────────────────────
   // Le plan est stocké dans session.currentPlan (set par le mode PLAN).
   // buildUserMessage() le cherche dans workerConfig._currentPlan.
@@ -192,7 +200,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   }
 
   const editionParActions = overriddenConfig.editionParActions === true;
-  const dataCSV    = buildDataCSV(rowsWithDefaults, colsLLM, selectChoix, editionParActions);
+  const dataCSV    = buildDataCSV(rowsForLLM, colsLLM, selectChoix, editionParActions);
   const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, actWorkerConfig, activeMode);
 
   // ── 7. Contenu multi-part (texte + fichiers routés par provider) ───────────
@@ -770,6 +778,11 @@ function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}
 function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, session) {
   const actions = parseJsonArrayResponse(rawResponse);
   const placeholderKeys = new Set(colonnes.filter(c => c.placeholder).map(c => c.cle));
+  // Mode revue (cf. viewResolver.js MANIFEST.revueParPending) : les actions ne sont plus
+  // committées directement — elles sont marquées "en attente" sur les rows elles-mêmes
+  // (__pendingFields / __pendingInsert / __pendingDelete), pour validation/rejet ultérieur
+  // via sessionManager.js (approveField/rejectField/approveRow/rejectRow/approveAll/rejectAll).
+  const reviewMode = !!session?.reviewMode;
 
   const byId          = new Map(originalRows.map(r => [r._id, r]));
   const deletedIds     = new Set();
@@ -812,11 +825,17 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
 
   const buildUpdatedRow = (orig, fields) => {
     const result = { ...orig };
+    // En mode revue, snapshot de la valeur d'ORIGINE de chaque champ touché — une seule
+    // fois par champ (si un 2e run IA retouche un champ déjà en attente, on ne doit pas
+    // écraser la vraie baseline avec la valeur intermédiaire déjà proposée).
+    const pendingFields = reviewMode ? { ...(orig.__pendingFields || {}) } : null;
     for (const [key, val] of Object.entries(fields)) {
       if (placeholderKeys.has(key)) continue;
+      if (pendingFields && !(key in pendingFields)) pendingFields[key] = orig[key];
       const col = colonnes.find(c => c.cle === key);
       result[key] = coerceValue(val, col);
     }
+    if (pendingFields && Object.keys(pendingFields).length) result.__pendingFields = pendingFields;
     normalizeSelectChoixRow(result, selectChoix);
     return result;
   };
@@ -824,6 +843,7 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   const buildInsertedRow = (fields) => {
     const row = sanitizeNewRow(fields, colonnes, placeholderKeys, selectChoix);
     row._id = SM.consumeNextId(session);
+    if (reviewMode) row.__pendingInsert = true;
     return row;
   };
 
@@ -837,7 +857,12 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   // Lignes existantes (conservées, mises à jour, ou omises si supprimées)
   // + insertions positionnées juste après chaque ligne
   for (const orig of originalRows) {
-    if (deletedIds.has(orig._id)) continue;
+    if (deletedIds.has(orig._id)) {
+      // Mode revue : la ligne reste affichée (barrée côté UI), en attente de validation
+      // de la suppression — retirée seulement via SM.approveRow/approveAll.
+      if (reviewMode) result.push({ ...orig, __pendingDelete: true });
+      continue;
+    }
 
     const fields = updatesById.get(orig._id);
     result.push(fields ? buildUpdatedRow(orig, fields) : { ...orig });
@@ -1018,10 +1043,14 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
   const rowsWithDefaults = applyPlaceholderDefaults(
     session.rows, colonnes, effectiveWorkerConfig.regles, viewHook
   );
+  // cf. run() — une ligne __pendingDelete (mode revue) est invisible pour le LLM
+  const rowsForLLM = session.reviewMode
+    ? rowsWithDefaults.filter(r => !r.__pendingDelete)
+    : rowsWithDefaults;
 
   // 6. Message utilisateur
   const editionParActions = overriddenConfig.editionParActions === true;
-  const dataCSV    = buildDataCSV(rowsWithDefaults, colsLLM, selectChoix, editionParActions);
+  const dataCSV    = buildDataCSV(rowsForLLM, colsLLM, selectChoix, editionParActions);
   const userText   = buildUserMessage(userPrompt, mode, dataCSV, data.infosParent, data.infosVue, effectiveWorkerConfig, activeMode);
 
   // 7. Contenu multi-part (texte + fichiers routés)

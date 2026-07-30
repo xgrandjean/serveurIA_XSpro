@@ -151,6 +151,15 @@ function setStatus(session, newStatus) {
 /**
  * Modifie une valeur dans session.rows et met à jour lastActivityAt.
  *
+ * En mode revue (session.reviewMode), le changement devient "en attente" au lieu
+ * d'être committé directement — même mécanisme que les propositions IA (cf.
+ * llmClient.js applyRowActions/buildUpdatedRow) : snapshot de la valeur d'origine
+ * dans row.__pendingFields (une seule fois), écriture de la nouvelle valeur. Décision
+ * du 2026-07-30 : peu importe l'origine du changement (frappe manuelle ou LLM), même
+ * traitement — validable/rejetable via approveField/rejectField. Une ligne déjà
+ * __pendingInsert (pas encore validée) n'a pas besoin de ce sous-suivi par champ :
+ * valider/rejeter la ligne couvre déjà tout son contenu.
+ *
  * @param {Object} session
  * @param {number} rowIndex  — index dans session.rows
  * @param {string} cle       — clé de la colonne
@@ -158,11 +167,22 @@ function setStatus(session, newStatus) {
  * @returns {boolean}        — true si la mise à jour a eu lieu
  */
 function setCellValue(session, rowIndex, cle, value) {
-  if (!session.rows[rowIndex]) {
+  const row = session.rows[rowIndex];
+  if (!row) {
     console.warn(`[SessionManager] setCellValue : rowIndex ${rowIndex} hors limites`);
     return false;
   }
-  session.rows[rowIndex][cle] = value;
+  if (session.reviewMode && !row.__pendingInsert) {
+    if (!row.__pendingFields) row.__pendingFields = {};
+    if (!(cle in row.__pendingFields)) row.__pendingFields[cle] = row[cle];
+    row[cle] = value;
+    if (row.__pendingFields[cle] === value) {
+      delete row.__pendingFields[cle];
+      if (Object.keys(row.__pendingFields).length === 0) delete row.__pendingFields;
+    }
+  } else {
+    row[cle] = value;
+  }
   touchSession(session);
   return true;
 }
@@ -245,7 +265,163 @@ function deleteSession(sessionId) {
  * @returns {Array}
  */
 function snapshotRows(session) {
-  return session.rows.map(({ _id, ...rest }) => ({ ...rest }));
+  return session.rows.map(({ _id, __pendingFields, __pendingInsert, __pendingDelete, ...rest }) => ({ ...rest }));
+}
+
+// ── Revue des propositions (IA + manuelles, mode revueParPending) ─────────────
+/**
+ * Une row porte jusqu'à 3 marqueurs internes, jamais transmis à XSpro (retirés par
+ * snapshotRows comme _id) :
+ *   __pendingFields = { champ: valeurOrigine, ... } — update proposé, pas encore validé
+ *   __pendingInsert = true                          — ligne insérée (IA ou manuelle)
+ *   __pendingDelete = true                          — suppression proposée, ligne encore présente
+ * Posés par llmClient.js (applyRowActions) POUR les propositions IA, et par
+ * setCellValue/proposeInsertRow/proposeDeleteRows ci-dessous POUR les changements
+ * manuels (bouton "+ Ligne"/"✂️", édition de cellule) — décision du 2026-07-30 :
+ * même traitement quelle que soit l'origine. Résolus ici (approve = garder l'état
+ * actuel, reject = revenir à l'état d'avant la proposition).
+ */
+function hasPendingMarker(row) {
+  return !!(row.__pendingInsert || row.__pendingDelete || (row.__pendingFields && Object.keys(row.__pendingFields).length));
+}
+
+/**
+ * Nombre de lignes portant au moins une proposition en attente (granularité ligne —
+ * utilisé pour le badge "N ligne(s) en attente" côté UI).
+ */
+function countPendingRows(session) {
+  return session.rows.filter(hasPendingMarker).length;
+}
+
+/**
+ * Valide un champ en attente : la valeur proposée par le LLM devient définitive.
+ * @returns {boolean} true si une proposition existait bien pour ce champ
+ */
+function approveField(session, id, cle) {
+  const row = session.rows.find(r => r._id === id);
+  if (!row?.__pendingFields || !(cle in row.__pendingFields)) return false;
+  delete row.__pendingFields[cle];
+  if (Object.keys(row.__pendingFields).length === 0) delete row.__pendingFields;
+  touchSession(session);
+  return true;
+}
+
+/**
+ * Rejette un champ en attente : restaure la valeur d'origine (avant la proposition IA).
+ */
+function rejectField(session, id, cle) {
+  const row = session.rows.find(r => r._id === id);
+  if (!row?.__pendingFields || !(cle in row.__pendingFields)) return false;
+  row[cle] = row.__pendingFields[cle];
+  delete row.__pendingFields[cle];
+  if (Object.keys(row.__pendingFields).length === 0) delete row.__pendingFields;
+  touchSession(session);
+  return true;
+}
+
+/**
+ * Valide toutes les propositions en attente d'une ligne — insertion conservée,
+ * suppression effectuée, mises à jour de champs committées. Une ligne à la fois
+ * pending-delete ET pending-fields voit la suppression l'emporter (elle disparaît).
+ * @returns {boolean} true si la ligne portait bien une proposition
+ */
+function approveRow(session, id) {
+  const idx = session.rows.findIndex(r => r._id === id);
+  if (idx === -1) return false;
+  const row = session.rows[idx];
+  if (row.__pendingDelete) {
+    session.rows.splice(idx, 1);
+  } else if (row.__pendingInsert) {
+    delete row.__pendingInsert;
+  } else if (row.__pendingFields) {
+    delete row.__pendingFields;
+  } else {
+    return false;
+  }
+  touchSession(session);
+  return true;
+}
+
+/**
+ * Rejette toutes les propositions en attente d'une ligne — insertion annulée (ligne
+ * retirée, elle n'a jamais existé côté données validées), suppression annulée (ligne
+ * conservée), mises à jour de champs restaurées à leur valeur d'origine.
+ * @returns {boolean} true si la ligne portait bien une proposition
+ */
+function rejectRow(session, id) {
+  const idx = session.rows.findIndex(r => r._id === id);
+  if (idx === -1) return false;
+  const row = session.rows[idx];
+  if (row.__pendingInsert) {
+    session.rows.splice(idx, 1);
+  } else if (row.__pendingDelete) {
+    delete row.__pendingDelete;
+  } else if (row.__pendingFields) {
+    for (const [cle, oldVal] of Object.entries(row.__pendingFields)) row[cle] = oldVal;
+    delete row.__pendingFields;
+  } else {
+    return false;
+  }
+  touchSession(session);
+  return true;
+}
+
+/**
+ * Valide/rejette une liste de lignes en une passe (sélection multiple via la colonne
+ * fusionnée sélection+revue, cf. public/grid.js ReviewHeaderComponent). Ignore
+ * silencieusement les _id qui ne portent aucune proposition en attente.
+ */
+function approveRows(session, ids) {
+  for (const id of ids) approveRow(session, id);
+}
+
+function rejectRows(session, ids) {
+  for (const id of ids) rejectRow(session, id);
+}
+
+/**
+ * Insère une ligne proposée manuellement (bouton "+ Ligne" en mode revue) — même
+ * statut __pendingInsert et mêmes commandes d'approbation/rejet qu'une insertion IA
+ * (cf. llmClient.js applyRowActions). `fields` est la ligne déjà construite côté
+ * client (valeurs par défaut/placeholders déjà appliquées, cf. grid.js
+ * addRowAfterSelected) — on se contente d'assigner l'_id et le marqueur pending.
+ *
+ * @param {Object} session
+ * @param {number|null|'fin'} apres — _id après lequel insérer ; null = en tête ; 'fin' = en dernier
+ * @param {Object} fields
+ */
+function proposeInsertRow(session, apres, fields) {
+  const row = { ...fields, _id: consumeNextId(session), __pendingInsert: true };
+  if (apres === null || apres === undefined) {
+    session.rows.unshift(row);
+  } else if (apres === 'fin') {
+    session.rows.push(row);
+  } else {
+    const idx = session.rows.findIndex(r => r._id === apres);
+    if (idx === -1) session.rows.push(row);
+    else session.rows.splice(idx + 1, 0, row);
+  }
+  touchSession(session);
+}
+
+/**
+ * Marque une liste de lignes comme proposées à la suppression (bouton "✂️" en mode
+ * revue) — même statut __pendingDelete qu'une suppression IA. Une ligne encore
+ * __pendingInsert (jamais validée) est retirée directement : elle n'a jamais existé
+ * côté données validées, il n'y a rien à "proposer de supprimer".
+ *
+ * @param {Object} session
+ * @param {Array<number>} ids
+ */
+function proposeDeleteRows(session, ids) {
+  for (const id of ids) {
+    const idx = session.rows.findIndex(r => r._id === id);
+    if (idx === -1) continue;
+    const row = session.rows[idx];
+    if (row.__pendingInsert) session.rows.splice(idx, 1);
+    else row.__pendingDelete = true;
+  }
+  touchSession(session);
 }
 
 // ── Reset des rows vers les données source ────────────────────────────────────
@@ -335,4 +511,13 @@ module.exports = {
   snapshotRows,
   resetRows,
   listSessions,
+  countPendingRows,
+  approveField,
+  rejectField,
+  approveRow,
+  rejectRow,
+  approveRows,
+  rejectRows,
+  proposeInsertRow,
+  proposeDeleteRows,
 };

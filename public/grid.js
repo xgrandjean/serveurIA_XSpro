@@ -67,6 +67,7 @@
    rows:          [],
    selectChoix:   {},
    champsRestreints: {},       // { [champ]: { [valeurType]: [valeursAutorisees] } } — restreint les dropdowns selon le type de la ligne (jamais 'type' lui-même)
+   champsNonApplicables: {},   // { [valeurType]: [champs] } — champs hors sujet pour ce type : grisés ET non éditables (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES)
    modes:         {},          // modes de travail (définis par le hook vue)
    activeWorkMode: null,       // ID du mode de travail actif (ex: 'decomposition')
    basePromptsSuggeres: null,  // promptsSuggeres originaux (XSpro ou MANIFEST) pour restauration
@@ -88,9 +89,13 @@
    styleOverrides:     {},      // { [rowIndex]: { color?, bgColor?, className? } } — surcharge via cell:rowStyle
    cellStyleOverrides: {},      // { "rowIndex:cle": { ... } } — surcharge cellule via cell:validate
    onCellEdit:         null,    // callback(rowIndex, cle, newValue) définie par la vue
+   reviewMode:         false,   // mode revue par pending actif pour cette vue (cf. MANIFEST.revueParPending)
+   pendingCount:       0,       // nombre de lignes portant une proposition IA en attente (mode revue)
  };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+console.log('[Grisage] grid.js chargé — build avec grisage des champs non applicables (2026-07-30)');
+
 document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
   state.sessionId = params.get('sessionId');
@@ -120,7 +125,8 @@ function handleWSMessage(msg) {
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
     case 'cell:rowStyle':     onRowStyle(msg.rowIndex, msg.style);           break;
     case 'cell:validate':    onRowValidate(msg);                           break;
-    case 'act:done':          onActDone(msg.rows);                           break;
+    case 'act:done':          onActDone(msg.rows, msg.pendingCount);         break;
+    case 'review:sync':      onReviewSync(msg);                            break;
     case 'export:ready':      onExportReady(msg);                            break;
     case 'session:done':      onSessionDone(msg.exportFallback);            break;
     case 'session:cancelled': onSessionCancelled();                         break;
@@ -166,6 +172,14 @@ function onInit(msg) {
   state.workerConfig = msg.workerConfig;
   state.rows         = msg.rows || [];
 
+  // Mode revue par pending (cf. viewResolver.js MANIFEST.revueParPending) : un seul mode
+  // d'exécution direct, sélecteur Plan/Act masqué — les propositions IA arrivent en
+  // attente (surlignage + ✓/✗) plutôt que d'écraser directement les données.
+  state.reviewMode   = !!msg.reviewMode;
+  state.pendingCount = msg.pendingCount || 0;
+  if (state.reviewMode) { hide('mode-selector'); state.mode = 'act'; }
+  else { show('mode-selector'); }
+
   console.log('[Payload XSpro]', msg.xsproPayload);
 
   document.title                 = `AI Worker — ${msg.contextName}`;
@@ -204,6 +218,9 @@ function onInit(msg) {
   state.selectChoix = msg.selectChoix || {};
   // Restriction des dropdowns selon le type de la ligne (jamais 'type' lui-même)
   state.champsRestreints = msg.champsRestreints || {};
+  // Champs hors sujet pour le type de la ligne — grisés ET non éditables (cf. buildColDefs)
+  state.champsNonApplicables = msg.champsNonApplicables || {};
+  console.log('[Grisage] champsNonApplicables reçu à l\'init :', JSON.stringify(state.champsNonApplicables));
 
   // Styles de ligne définis par le hook vue
   state.rowStyles = msg.rowStyles || [];
@@ -274,6 +291,7 @@ function onInit(msg) {
   setStatusMessage('Prêt');
   setAiRunning(false);
   scrollToBottom(true);
+  updateValidateButtonVisibility();
 }
 
 // ── Évaluation conditions rowStyles ───────────────────────────────────────────
@@ -421,6 +439,12 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
     getRowStyle: (params) => {
       const row = params.data;
       const rowIndex = params.node.rowIndex;
+      // Mode revue : teinte de ligne pour une insertion/suppression proposée par l'IA,
+      // en attente de validation — priorité la plus haute (l'info la plus importante).
+      if (state.reviewMode && row) {
+        if (row.__pendingInsert) return { background: '#F0FFF4', borderLeft: '3px solid #276749' };
+        if (row.__pendingDelete) return { background: '#FFF5F5', borderLeft: '3px solid #9B2335', textDecoration: 'line-through' };
+      }
       // Surcharge dynamique via cell:rowStyle (priorité la plus haute)
       const override = state.styleOverrides?.[rowIndex];
       if (override) {
@@ -572,19 +596,64 @@ TextareaCellEditor.prototype.isPopup = function() { return true; };
 TextareaCellEditor.prototype.focusIn = function() { this.textarea.focus(); };
 TextareaCellEditor.prototype.destroy = function() { this.textarea = null; };
 
+// ── Champs non applicables au type de la ligne (grisage + blocage édition) ───────
+// state.champsNonApplicables = { [valeurType]: [champs] }, reçu une fois à l'init
+// (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES) — ne dépend que du
+// champ "type" de la ligne, donc calculable directement ici sans aller-retour serveur.
+function isFieldNonApplicable(row, cle) {
+  if (!row) return false;
+  const list = state.champsNonApplicables?.[row.type];
+  return Array.isArray(list) && list.includes(cle);
+}
+
 // ── Construction des colonDefs ─────────────────────────────────────────────────
 function buildColDefs(colonnes) {
 
-  // Colonne de sélection (checkbox)
+  // Colonne de sélection (checkbox) — en mode revue, fusionnée avec la revue par
+  // ligne : la cellule ajoute les icônes ✓/✗ à côté de la case si la ligne porte
+  // une proposition en attente, et l'en-tête troque le simple "tout sélectionner"
+  // natif contre un ReviewHeaderComponent (sélectionner + valider/rejeter la
+  // sélection courante). Cf. discussion utilisateur : une seule colonne, 3 commandes.
   const checkboxCol = {
-    headerCheckboxSelection: true,
+    colId:                   '__select',
+    headerCheckboxSelection: !state.reviewMode,
     checkboxSelection:       true,
-    width:    40,
-    minWidth: 40,
-    maxWidth: 40,
+    headerComponent:         state.reviewMode ? ReviewHeaderComponent : undefined,
+    width:    state.reviewMode ? 100 : 40,
+    minWidth: state.reviewMode ? 100 : 40,
+    maxWidth: state.reviewMode ? 100 : 40,
     resizable:  false,
     sortable:   false,
     pinned:     'left',
+    cellRenderer: state.reviewMode ? (params) => {
+      const row = params.data;
+      const wrap = document.createElement('span');
+      wrap.className = 'row-review-actions';
+      if (!row) return wrap;
+      const hasPending = row.__pendingInsert || row.__pendingDelete
+        || (row.__pendingFields && Object.keys(row.__pendingFields).length > 0);
+      if (!hasPending) return wrap;
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.className = 'row-review-btn row-review-approve';
+      approveBtn.title = row.__pendingInsert ? 'Garder cette ligne'
+        : row.__pendingDelete ? 'Confirmer la suppression' : 'Valider toute la ligne';
+      approveBtn.textContent = '✓';
+      approveBtn.onclick = () => sendWS({ type: 'review:approveRow', id: row._id });
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.className = 'row-review-btn row-review-reject';
+      rejectBtn.title = row.__pendingInsert ? 'Annuler cette insertion'
+        : row.__pendingDelete ? 'Annuler la suppression' : 'Rejeter toute la ligne';
+      rejectBtn.textContent = '✗';
+      rejectBtn.onclick = () => sendWS({ type: 'review:rejectRow', id: row._id });
+
+      wrap.appendChild(approveBtn);
+      wrap.appendChild(rejectBtn);
+      return wrap;
+    } : undefined,
   };
 
 const dataCols = colonnes.map(col => {
@@ -602,10 +671,31 @@ const dataCols = colonnes.map(col => {
 
       // readOnly → user ne peut pas modifier | placeholder → user peut modifier
       // selectChoix → utilise le cellEditor agSelectCellEditor (édition via Entrée)
-      editable: () => hasSelectChoix ? true : !col.readOnly && !state.isAiRunning,
+      // Un champ non applicable au type de la ligne (champsNonApplicables) prime sur
+      // tout le reste, y compris le "true" inconditionnel de hasSelectChoix : comme
+      // dans XSpro, une cellule hors sujet pour ce type n'est jamais éditable.
+      editable: (params) => {
+        if (isFieldNonApplicable(params.data, col.cle)) return false;
+        return hasSelectChoix ? true : !col.readOnly && !state.isAiRunning;
+      },
 
       cellStyle: (params) => {
         const b = { fontSize: '12px' };
+        // Champ hors sujet pour le type de la ligne — prioritaire sur tout le reste
+        // (y compris le rouge "invalide" : une valeur inconsistante sur un champ qui
+        // ne s'applique de toute façon pas à ce type n'a plus d'intérêt à signaler).
+        if (isFieldNonApplicable(params.data, col.cle)) {
+          // Même hachure que .cellule-interdite dans la vue XSpro de référence
+          // (assets/css/typeTableur.css) — repris ici en style inline (AG Grid ne
+          // fonctionne pas par classes CSS pour ce genre de surcharge par cellule).
+          return {
+            ...b,
+            background: 'repeating-linear-gradient(135deg, #ffffff, #ffffff 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 6px)',
+            color: '#bbb',
+            fontStyle: 'italic',
+            cursor: 'not-allowed',
+          };
+        }
         // Surcharge via cell:validate (invalid cell)
         const override = state.cellStyleOverrides?.[`${params.rowIndex}:${col.cle}`];
         if (override) return override;
@@ -904,11 +994,130 @@ const dataCols = colonnes.map(col => {
     // d'erreur ("Invalid Number", "Data type of the new value does not match...").
     def.cellDataType = false;
 
+    // ── Mode revue (validation "individuellement", par champ) ──────────────────
+    // Superpose des icônes ✓/✗ sur toute cellule dont le champ est en attente
+    // (row.__pendingFields, posé côté serveur par llmClient.js/applyRowActions),
+    // par-dessus le rendu déjà défini plus haut (multiligne, array, dérivée, ou
+    // rendu par défaut) — jamais un remplacement. Actif uniquement pour les vues
+    // qui ont opté in via MANIFEST.revueParPending (les autres ne sont pas touchées).
+    if (state.reviewMode) {
+      const baseCellRenderer   = def.cellRenderer   || null;
+      const baseValueFormatter = def.valueFormatter || null;
+      const baseCellStyle      = def.cellStyle;
+
+      def.cellRenderer = (params) => {
+        const row = params.data;
+        const isPending = !!(row?.__pendingFields && (col.cle in row.__pendingFields));
+
+        const inner = document.createElement('span');
+        inner.className = 'cell-value-wrap';
+        if (baseCellRenderer) {
+          const rendered = baseCellRenderer(params);
+          if (rendered instanceof Node) inner.appendChild(rendered);
+          else if (rendered !== null && rendered !== undefined) inner.textContent = String(rendered);
+        } else {
+          const display = baseValueFormatter ? baseValueFormatter(params) : params.value;
+          inner.textContent = (display === null || display === undefined) ? '' : String(display);
+        }
+        if (!isPending) return inner;
+
+        const wrap = document.createElement('span');
+        wrap.className = 'field-pending-wrap';
+        wrap.appendChild(inner);
+
+        const actions = document.createElement('span');
+        actions.className = 'field-pending-actions';
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.className = 'field-pending-btn field-pending-approve';
+        approveBtn.title = 'Valider cette modification';
+        approveBtn.textContent = '✓';
+        approveBtn.onclick = (e) => { e.stopPropagation(); sendWS({ type: 'review:approveField', id: row._id, cle: col.cle }); };
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.className = 'field-pending-btn field-pending-reject';
+        rejectBtn.title = 'Rejeter cette modification';
+        rejectBtn.textContent = '✗';
+        rejectBtn.onclick = (e) => { e.stopPropagation(); sendWS({ type: 'review:rejectField', id: row._id, cle: col.cle }); };
+        actions.appendChild(approveBtn);
+        actions.appendChild(rejectBtn);
+        wrap.appendChild(actions);
+        return wrap;
+      };
+
+      def.cellStyle = (params) => {
+        const base = typeof baseCellStyle === 'function' ? (baseCellStyle(params) || {}) : (baseCellStyle || {});
+        const row = params.data;
+        const isPending = !!(row?.__pendingFields && (col.cle in row.__pendingFields));
+        if (!isPending) return base;
+        return { ...base, background: '#FFF8E1', boxShadow: 'inset 0 0 0 1px #F5A623' };
+      };
+    }
+
     return def;
   });
 
   return [checkboxCol, ...dataCols];
 }
+
+// ── En-tête fusionné sélection + revue (mode revueParPending) ─────────────────
+// Remplace le simple headerCheckboxSelection natif : garde la case "tout sélectionner"
+// (implémentée nous-mêmes pour pouvoir lui adjoindre les icônes) + deux icônes ✓/✗ qui
+// valident/rejettent TOUTES les lignes actuellement cochées (pas automatiquement toutes
+// les lignes en attente — l'utilisateur coche "tout" lui-même s'il le souhaite).
+function ReviewHeaderComponent() {}
+ReviewHeaderComponent.prototype.init = function(params) {
+  this.params = params;
+
+  this.eGui = document.createElement('span');
+  this.eGui.className = 'review-header';
+
+  this.checkbox = document.createElement('input');
+  this.checkbox.type = 'checkbox';
+  this.checkbox.className = 'review-header-checkbox';
+  this.checkbox.title = 'Tout sélectionner';
+  this.checkbox.addEventListener('click', () => {
+    const checked = this.checkbox.checked;
+    params.api.forEachNodeAfterFilterAndSort(node => node.setSelected(checked));
+  });
+
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.className = 'row-review-btn row-review-approve';
+  approveBtn.title = 'Valider les lignes sélectionnées';
+  approveBtn.textContent = '✓';
+  approveBtn.onclick = () => this.bulkAction('review:approveRows');
+
+  const rejectBtn = document.createElement('button');
+  rejectBtn.type = 'button';
+  rejectBtn.className = 'row-review-btn row-review-reject';
+  rejectBtn.title = 'Rejeter les lignes sélectionnées';
+  rejectBtn.textContent = '✗';
+  rejectBtn.onclick = () => this.bulkAction('review:rejectRows');
+
+  this.eGui.appendChild(this.checkbox);
+  this.eGui.appendChild(approveBtn);
+  this.eGui.appendChild(rejectBtn);
+
+  // Reflète l'état de la sélection courante sur la case "tout sélectionner"
+  // (cochée/indéterminée/vide), comme le ferait le headerCheckboxSelection natif.
+  this.onSelectionChanged = () => {
+    const total    = params.api.getDisplayedRowCount();
+    const selected = params.api.getSelectedNodes().length;
+    this.checkbox.checked      = total > 0 && selected === total;
+    this.checkbox.indeterminate = selected > 0 && selected < total;
+  };
+  params.api.addEventListener('selectionChanged', this.onSelectionChanged);
+};
+ReviewHeaderComponent.prototype.bulkAction = function(type) {
+  const ids = this.params.api.getSelectedRows().map(r => r._id).filter(id => id !== undefined);
+  if (!ids.length) return;
+  sendWS({ type, ids });
+};
+ReviewHeaderComponent.prototype.getGui = function() { return this.eGui; };
+ReviewHeaderComponent.prototype.destroy = function() {
+  this.params.api.removeEventListener('selectionChanged', this.onSelectionChanged);
+};
 
 // ── Ajout de lignes ───────────────────────────────────────────────────────────
 function addRowAfterSelected() {
@@ -950,6 +1159,17 @@ function addRowAfterSelected() {
     }
   }
 
+  // Mode revue : proposer l'insertion au serveur (statut __pendingInsert, mêmes
+  // commandes ✓/✗ qu'une insertion IA — décision du 2026-07-30) plutôt que d'insérer
+  // directement. Pas d'insertion optimiste locale : la ligne apparaîtra teintée verte
+  // au prochain review:sync renvoyé par le serveur.
+  if (state.reviewMode) {
+    const apres = insertIndex > 0 ? (state.rows[insertIndex - 1]?._id ?? null) : null;
+    sendWS({ type: 'review:proposeInsert', apres, fields: newRow });
+    addMessage('system', '↓ Ligne proposée — à valider');
+    return;
+  }
+
   // Insertion dans state.rows
   state.rows.splice(insertIndex, 0, newRow);
 
@@ -977,10 +1197,22 @@ function deleteSelectedRows() {
   const selected = state.gridApi.getSelectedNodes();
   if (!selected.length) return;
 
+  // Mode revue : proposer la suppression au serveur (statut __pendingDelete, mêmes
+  // commandes ✓/✗ qu'une suppression IA — décision du 2026-07-30) plutôt que de
+  // supprimer directement. Le rejet via la colonne Revue fait déjà office d'"annuler",
+  // pas besoin du toast "Annuler" ci-dessous dans ce mode.
+  if (state.reviewMode) {
+    const ids = selected.map(n => n.data?._id).filter(id => id !== undefined);
+    if (!ids.length) return;
+    sendWS({ type: 'review:proposeDelete', ids });
+    addMessage('system', `✂ ${ids.length} ligne${ids.length > 1 ? 's' : ''} proposée${ids.length > 1 ? 's' : ''} à la suppression — à valider`);
+    return;
+  }
+
   // Sauvegarder les lignes supprimées pour l'undo
   const deletedRows = selected.map(n => ({ ...n.data, rowIndex: n.rowIndex }));
   const deletedIndexes = selected.map(n => n.rowIndex).sort((a, b) => b - a);
-  
+
   const count = selected.length;
 
   // Indexes à supprimer (tri décroissant pour ne pas décaler les indexes)
@@ -1113,7 +1345,7 @@ function onRowStyle(rowIndex, style) {
 
 // ── Validation ligne : mise en évidence des cellules fautives ────────────────
 function onRowValidate(msg) {
-  const { rowIndex, invalidFields = [], message } = msg;
+  const { rowIndex, invalidFields = [], pendingFields, pendingCount, message } = msg;
   const keyPrefix = `${rowIndex}:`;
   // Supprimer toutes les overrides de cellules pour cette ligne
   Object.keys(state.cellStyleOverrides).forEach(k => {
@@ -1126,10 +1358,33 @@ function onRowValidate(msg) {
       state.cellStyleOverrides[`${rowIndex}:${cle}`] = invalidStyle;
     });
   }
+  // Mode revue : synchronise row.__pendingFields avec l'état serveur — c'est ce que
+  // lit directement le wrapper cellRenderer/cellStyle du mode revue (cf. buildColDefs)
+  // pour surligner ✓/✗ un champ en attente, que le changement vienne de l'IA ou d'une
+  // édition manuelle (décision du 2026-07-30 : même traitement quelle que soit l'origine).
+  if (Array.isArray(pendingFields)) {
+    const row = state.rows[rowIndex];
+    if (row) {
+      if (pendingFields.length > 0) row.__pendingFields = Object.fromEntries(pendingFields.map(k => [k, true]));
+      else delete row.__pendingFields;
+    }
+  }
+  // Édition manuelle en mode revue : met à jour le compteur (pas de review:sync ici,
+  // seul le champ édité change, pas tout le tableau) — pilote la visibilité de
+  // "Valider et exporter".
+  if (typeof pendingCount === 'number') {
+    state.pendingCount = pendingCount;
+    updateValidateButtonVisibility();
+  }
   // Redraw seulement si la grille existe déjà (sinon les overrides sont stockés pour onGridReady)
   if (state.gridApi) {
     const node = state.gridApi.getDisplayedRowAtIndex(rowIndex);
-    if (node) state.gridApi.redrawRows({ rowNodes: [node] });
+    if (node) {
+      state.gridApi.redrawRows({ rowNodes: [node] });
+      // Filet de sécurité (cf. onActDone/onReviewSync) : redrawRows seul ne réexécute pas
+      // toujours cellStyle/cellRenderer de façon fiable dans cette version d'AG Grid.
+      state.gridApi.refreshCells({ rowNodes: [node], force: true });
+    }
   }
   if (message) addMessage('error', `⚠ ${message}`);
 }
@@ -1166,19 +1421,49 @@ function onPlanReceived(planText) {
 }
 
 // ── Act terminé ───────────────────────────────────────────────────────────────
-function onActDone(updatedRows) {
+function onActDone(updatedRows, pendingCount) {
   state.rows = updatedRows;
+  if (typeof pendingCount === 'number') state.pendingCount = pendingCount;
   if (state.gridApi) {
     state.gridApi.setGridOption('rowData', [...updatedRows]);
     // Rafraîchir les styles de ligne après mise à jour par l'IA
     state.gridApi.redrawRows();
+    // Filet de sécurité (cf. onCellValueChanged) : redrawRows seul ne réexécute pas
+    // toujours les cellRenderer personnalisés (ex: colonne "Revue" sans field/valueGetter).
+    if (state.reviewMode) state.gridApi.refreshCells({ force: true });
   }
   updateRowCount();
   addMessage('system', `✓ Terminé — ${state.updatedCells} cellule(s) mise(s) à jour.`);
   setStatusBadge('paused', 'Terminé');
-  setStatusMessage('Vérifie et valide ou continue.');
+  setStatusMessage(state.reviewMode ? 'Vérifie et valide les propositions IA ci-dessous.' : 'Vérifie et valide ou continue.');
   setAiRunning(false);
   hideProgress();
+  updateValidateButtonVisibility();
+}
+
+// ── Revue par pending — synchronisation après approve/reject (mode revueParPending) ──
+function onReviewSync(msg) {
+  state.rows        = msg.rows || [];
+  state.pendingCount = msg.pendingCount || 0;
+  if (state.gridApi) {
+    state.gridApi.setGridOption('rowData', [...state.rows]);
+    state.gridApi.redrawRows();
+    // Filet de sécurité (cf. onCellValueChanged / onActDone) : redrawRows seul ne
+    // réexécute pas toujours les cellRenderer personnalisés sans field/valueGetter.
+    state.gridApi.refreshCells({ force: true });
+  }
+  updateRowCount();
+  updateValidateButtonVisibility();
+}
+
+// ── Visibilité du bouton "Valider et exporter" (mode revue) ───────────────────
+// Masqué tant qu'il reste des propositions IA en attente — la validation/rejet se
+// fait ligne par ligne, par champ, ou par sélection multiple via l'en-tête fusionné
+// sélection+revue (cf. ReviewHeaderComponent), plus de barre globale séparée.
+function updateValidateButtonVisibility() {
+  if (!state.reviewMode) return;
+  if ((state.pendingCount || 0) > 0) hide('btn-validate');
+  else show('btn-validate');
 }
 
 // ── Export prêt ───────────────────────────────────────────────────────────────
@@ -1472,7 +1757,7 @@ function sendPrompt() {
   state.attachedFiles = [];
   renderChips();
   setAiRunning(true);
-  addMessage('system', `Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}…`);
+  addMessage('system', state.reviewMode ? 'Traitement…' : `Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}…`);
 }
 
 // ── Modes de travail ────────────────────────────────────────────────────────────

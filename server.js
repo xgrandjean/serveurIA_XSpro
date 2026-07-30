@@ -408,14 +408,20 @@ wss.on('connection', (ws, req) => {
        modes:        session.modes       || {},
        selectChoix:  session.selectChoix || {},
        champsRestreints: session.champsRestreints || {},
+       champsNonApplicables: session.champsNonApplicables || {},
        rowStyles:    session.rowStyles   || [],
        colonnesDerivees: session.colonnesDerivees || {},
+       reviewMode:   !!session.reviewMode,
+       pendingCount: SM.countPendingRows(session),
      }));
 
     // Validation initiale des lignes (pour cohérence affichage ↔ édition)
     // Une ligne invalide doit apparaître barrée comme après édition manuelle, et une
     // ligne partiellement remplie doit afficher ses champs encore requis en rouge —
     // même logique qu'après une édition manuelle acceptée (cf. cas 'cell:edit' plus bas).
+    // Note : le grisage des champs non applicables au type (champsNonApplicables) ne
+    // passe pas par ce mécanisme — c'est une map statique consommée directement côté
+    // client (public/grid.js), pas besoin de la recalculer par ligne ici.
     if (Array.isArray(session.rows) && (session.viewHook?.getInvalidFields || session.viewHook?.getMissingFields)) {
       session.rows.forEach((row, rowIndex) => {
         const invalidFields = session.viewHook.getInvalidFields?.(row) || [];
@@ -454,19 +460,18 @@ async function handleUIMessage(session, msg) {
     case 'cell:edit': {
       const { rowIndex, cle, value } = msg;
       let sideEffects = null;
+      let invalidFields = [];
+      let validateMessage = null;
+
       // Validation métier via le hook vue
       if (session.viewHook?.validateCellEdit) {
         const row = { ...session.rows[rowIndex] };
         const result = session.viewHook.validateCellEdit(row, cle, value);
         if (!result.ok) {
           if (result.rowInvalid) {
-            // type/désignation → garder la valeur, envoyer validate avec champs fautifs
-            wsSend(session, {
-              type: 'cell:validate',
-              rowIndex,
-              invalidFields: result.invalidFields || [],
-              message: result.message,
-            });
+            // type/désignation → garder la valeur, champs fautifs remontés plus bas
+            invalidFields = result.invalidFields || [];
+            validateMessage = result.message;
             // Ne pas break : on accepte la valeur
           } else {
             // Autre champ → revert (pas de rouge : la valeur est restaurée)
@@ -479,19 +484,19 @@ async function handleUIMessage(session, msg) {
             break; // ne pas setCellValue
           }
         } else {
-          // Ligne valide → effacer les incohérences bloquantes, mais conserver l'affichage
-          // des champs encore requis pour ce type (result.invalidFields = getMissingFields,
-          // purement indicatif — cf. viewHook.validateCellEdit), sans quoi le rouge
-          // "à remplir" disparaît dès que la modification est acceptée.
-          wsSend(session, {
-            type: 'cell:validate',
-            rowIndex,
-            invalidFields: result.invalidFields || [],
-            message: null,
-          });
+          // Ligne valide → conserver l'affichage des champs encore requis pour ce
+          // type (result.invalidFields = getMissingFields, purement indicatif — cf.
+          // viewHook.validateCellEdit), sans quoi le rouge "à remplir" disparaît dès
+          // que la modification est acceptée.
+          invalidFields = result.invalidFields || [];
           sideEffects = result.sideEffects || null;
         }
       }
+
+      // Commit — ou mise en attente en mode revue, cf. SM.setCellValue : même
+      // traitement qu'une proposition IA, peu importe l'origine du changement
+      // (décision du 2026-07-30). Appelé AVANT l'envoi de cell:validate ci-dessous
+      // pour que pendingFields reflète l'état réellement à jour.
       SM.setCellValue(session, rowIndex, cle, value);
 
       // Effets de bord déclarés par le hook (ex: réconcilier un champ dont les valeurs
@@ -503,6 +508,20 @@ async function handleUIMessage(session, msg) {
           wsSend(session, { type: 'cell:update', rowIndex, cle: field, value: val });
         }
       }
+
+      // Message consolidé : rouge (invalide) + jaune (en attente, mode revue),
+      // état final après commit et effets de bord. pendingCount permet au client de
+      // mettre à jour la visibilité de "Valider et exporter" sans repasser par
+      // review:sync (édition manuelle = pas de changement de rows, juste de champ).
+      const finalRow = session.rows[rowIndex];
+      wsSend(session, {
+        type: 'cell:validate',
+        rowIndex,
+        invalidFields,
+        pendingFields: session.reviewMode ? Object.keys(finalRow?.__pendingFields || {}) : [],
+        pendingCount: session.reviewMode ? SM.countPendingRows(session) : undefined,
+        message: validateMessage,
+      });
       break;
     }
 
@@ -546,7 +565,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session) });
           },
         }, files, activeMode);
       } catch (e) {
@@ -581,7 +600,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session) });
           },
         }, [], session.activeMode);
       } catch (e) {
@@ -600,8 +619,65 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // ── Revue des propositions IA (mode revueParPending) ────────────────────────
+    // Chaque action agit sur session.rows (marqueurs __pendingFields/__pendingInsert/
+    // __pendingDelete posés par llmClient.js) puis renvoie l'état à jour à l'UI.
+    case 'review:approveField': {
+      SM.approveField(session, msg.id, msg.cle);
+      sendReviewSync(session);
+      break;
+    }
+    case 'review:rejectField': {
+      SM.rejectField(session, msg.id, msg.cle);
+      sendReviewSync(session);
+      break;
+    }
+    case 'review:approveRow': {
+      SM.approveRow(session, msg.id);
+      sendReviewSync(session);
+      break;
+    }
+    case 'review:rejectRow': {
+      SM.rejectRow(session, msg.id);
+      sendReviewSync(session);
+      break;
+    }
+    // Validation/rejet multi-lignes (sélection via la colonne fusionnée
+    // sélection+revue, commandes dans son en-tête — cf. public/grid.js ReviewHeaderComponent)
+    case 'review:approveRows': {
+      SM.approveRows(session, Array.isArray(msg.ids) ? msg.ids : []);
+      sendReviewSync(session);
+      break;
+    }
+    case 'review:rejectRows': {
+      SM.rejectRows(session, Array.isArray(msg.ids) ? msg.ids : []);
+      sendReviewSync(session);
+      break;
+    }
+
+    // Ajout/suppression manuelle de ligne (boutons "+ Ligne"/"✂️") en mode revue —
+    // même statut __pendingInsert/__pendingDelete qu'une action IA (cf. décision du
+    // 2026-07-30 : peu importe l'origine du changement). Le client (grid.js) n'envoie
+    // ces messages que si session.reviewMode est actif côté init.
+    case 'review:proposeInsert': {
+      SM.proposeInsertRow(session, msg.apres, msg.fields || {});
+      sendReviewSync(session);
+      break;
+    }
+    case 'review:proposeDelete': {
+      SM.proposeDeleteRows(session, Array.isArray(msg.ids) ? msg.ids : []);
+      sendReviewSync(session);
+      break;
+    }
+
     // L'utilisateur valide le résultat final et demande l'export/renvoi
     case 'session:validate': {
+      // Défense en profondeur : le bouton est déjà masqué côté UI tant qu'il reste du
+      // pending (mode revue), mais on refuse aussi côté serveur au cas où.
+      if (session.reviewMode && SM.countPendingRows(session) > 0) {
+        wsSend(session, { type: 'error', message: '⚠ Il reste des modifications en attente de validation — résous-les avant de valider et exporter.' });
+        break;
+      }
       wsSend(session, { type: 'status', status: SM.STATUS.DELIVERING });
       const finalRows = SM.snapshotRows(session);
       wsSend(session, { type: 'xspro:response', payload: { sessionId: session.sessionId, contextName: session.contextName, status: 'done', rows: finalRows, message: `${finalRows.length} ligne(s) traitée(s)` } });
@@ -614,7 +690,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {} });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
       break;
     }
 
@@ -657,6 +733,15 @@ function wsSend(session, data) {
   if (session.ws && session.ws.readyState === 1 /* OPEN */) {
     session.ws.send(JSON.stringify(data));
   }
+}
+
+// ── Helper : notifie l'UI de l'état courant des rows après une action de revue ─
+function sendReviewSync(session) {
+  wsSend(session, {
+    type:         'review:sync',
+    rows:         session.rows,
+    pendingCount: SM.countPendingRows(session),
+  });
 }
 
 // ── Ouverture navigateur ──────────────────────────────────────────────────────

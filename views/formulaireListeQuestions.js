@@ -110,6 +110,17 @@ const MANIFEST = {
   editionParActions: true,
 
   /**
+   * Mode revue par pending (prototype) : masque le sélecteur Plan/Act (mode unique
+   * direct) et transforme chaque proposition IA (update/insert/delete) en item "en
+   * attente" (surlignage + ✓/✗), validable individuellement (par champ), ligne par
+   * ligne, ou globalement — au lieu d'écraser directement les données. Cf.
+   * viewResolver.js (session.reviewMode), llmClient.js (applyRowActions),
+   * sessionManager.js (approveField/rejectField/approveRow/rejectRow/approveAllPending/
+   * rejectAllPending) et public/grid.js (colonne "Revue", barre de revue globale).
+   */
+  revueParPending: true,
+
+  /**
    * Surcharges visuelles par colonne (UI Worker).
    * Aucune surcharge structurelle globale ici — chaque MODE définit les siennes.
    */
@@ -665,6 +676,44 @@ function getMissingFields(row) {
   return required.filter(f => isEmptyVal(row[f]));
 }
 
+// Champs qui ne s'appliquent pas du tout au type de la ligne — grisés ET non éditables
+// côté UI (cf. public/grid.js), comme la vue XSpro de référence (cellule-interdite).
+// Contrairement à getInvalidFields/getMissingFields (purement indicatifs, jamais
+// bloquants — politique actée le 2026-07-14 pour l'édition manuelle des champs
+// PERTINENTS), ici la donnée est structurellement sans objet pour ce type : la
+// bloquer n'impose aucun ordre de remplissage, elle est juste hors sujet.
+// Déduit des mêmes règles que postProcessMerge (nettoyage post-LLM) pour choix/
+// choixCorrect/points/ordre_choix, et aligné sur reglesParType de la vue XSpro de
+// référence (formulaireListeQuestionsMajTable.js) pour indication/explicationCorrection/
+// consigneIA : un "cours" est un bloc de contenu, pas une question — ni indice, ni
+// explication de correction, ni consigne de correction pour l'IA n'ont de sens (seule
+// l'appréciation "commentaire" reste pertinente, comme dans XSpro).
+// "regle"/"correction" pour "cours" ne sont PAS listés ici : ils restent applicables
+// (restreints aux valeurs [" ", "validation"]/[" ", "auto"] via champsRestreints, déjà
+// en place) plutôt que non applicables — la distinction dépend de la valeur de "regle"
+// elle-même, ce que champsRestreints gère déjà correctement.
+const NON_APPLICABLE_FIELDS_BY_TYPE = {
+  qcm:       [],
+  selection: [],
+  courte:    ['choix', 'ordre_choix'],
+  ouverte:   ['choix', 'choixCorrect', 'ordre_choix'],
+  cours:     ['choix', 'choixCorrect', 'points', 'ordre_choix', 'indication', 'explicationCorrection', 'consigneIA'],
+};
+
+/**
+ * Reformate NON_APPLICABLE_FIELDS_BY_TYPE (clé = label type) en { [valeurTypeNumerique]:
+ * [champs] } — calculé une seule fois par session (comme CHAMPS_RESTREINTS), envoyé au
+ * client à l'init, et consommé directement par-là sans aller-retour serveur : la
+ * non-applicabilité ne dépend que du champ "type" de la ligne, disponible côté client.
+ */
+function computeChampsNonApplicables() {
+  const result = {};
+  for (const [valeurStr, typeKey] of Object.entries(TYPE_INT_TO_KEY)) {
+    result[Number(valeurStr)] = NON_APPLICABLE_FIELDS_BY_TYPE[typeKey] || [];
+  }
+  return result;
+}
+
 const FIELD_LABELS = { type:'Type', regle:'Règle', correction:'Correction', ordre_choix:'Ordre des choix', points:'Points', choix:'Choix', choixCorrect:'Réponses correctes', designation:'Désignation' };
 // Champs qui autorisent toujours l'édition (type + désignation)
 const ALWAYS_ALLOWED = new Set(['type', 'designation']);
@@ -981,6 +1030,7 @@ module.exports = {
   SELECT_CHOIX: buildSelectChoix,
   CHAMPS_RESTREINTS: (workerConfig, data, xsproPayload) =>
     computeChampsRestreints(buildSelectChoix(workerConfig, data, xsproPayload)),
+  CHAMPS_NON_APPLICABLES: () => computeChampsNonApplicables(),
   postProcessDefaults,
   postProcessMerge,
   validateCellEdit,
