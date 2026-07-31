@@ -291,7 +291,7 @@ function onInit(msg) {
   setStatusMessage('Prêt');
   setAiRunning(false);
   scrollToBottom(true);
-  updateValidateButtonVisibility();
+  updateReviewToolbar();
 }
 
 // ── Évaluation conditions rowStyles ───────────────────────────────────────────
@@ -439,11 +439,13 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
     getRowStyle: (params) => {
       const row = params.data;
       const rowIndex = params.node.rowIndex;
-      // Mode revue : teinte de ligne pour une insertion/suppression proposée par l'IA,
-      // en attente de validation — priorité la plus haute (l'info la plus importante).
+      // Mode revue : teinte de ligne pour une insertion/suppression en attente de
+      // validation (manuelle ou IA) — priorité la plus haute (l'info la plus
+      // importante). Teintes franches et non pastel : la version précédente
+      // (#F0FFF4/#FFF5F5, quasi blanches) ne se voyait pas d'un coup d'œil.
       if (state.reviewMode && row) {
-        if (row.__pendingInsert) return { background: '#F0FFF4', borderLeft: '3px solid #276749' };
-        if (row.__pendingDelete) return { background: '#FFF5F5', borderLeft: '3px solid #9B2335', textDecoration: 'line-through' };
+        if (row.__pendingInsert) return { background: '#C6F6D5', borderLeft: '4px solid #276749' };
+        if (row.__pendingDelete) return { background: '#FED7D7', borderLeft: '4px solid #9B2335', textDecoration: 'line-through' };
       }
       // Surcharge dynamique via cell:rowStyle (priorité la plus haute)
       const override = state.styleOverrides?.[rowIndex];
@@ -564,6 +566,21 @@ TextareaCellEditor.prototype.init = function(params) {
   });
   // Focus initial sans auto-expansion
   setTimeout(() => { this.textarea.focus(); }, 0);
+
+  // Filet de sécurité : AG Grid ne détecte pas toujours de façon fiable un clic
+  // "extérieur" comme devant valider la cellule — notamment quand le clic tombe
+  // dans la cellule d'origine (souvent plus large que le textarea popup) plutôt
+  // que sur une autre cellule du tableau. On écoute nous-mêmes tout mousedown hors
+  // du textarea, où qu'il tombe, pour forcer la validation.
+  this.onDocumentMouseDown = (e) => {
+    if (!this.textarea || this.textarea.contains(e.target)) return;
+    params.api.stopEditing();
+  };
+  // Enregistré après un court délai pour ne pas intercepter le mousedown qui vient
+  // d'ouvrir cet éditeur (même événement, encore en cours de propagation).
+  setTimeout(() => {
+    document.addEventListener('mousedown', this.onDocumentMouseDown, true);
+  }, 0);
 };
 TextareaCellEditor.prototype.autoGrow = function() {
   // Fonction conservée pour compatibilité mais non utilisée
@@ -594,7 +611,10 @@ TextareaCellEditor.prototype.getValue = function() {
 };
 TextareaCellEditor.prototype.isPopup = function() { return true; };
 TextareaCellEditor.prototype.focusIn = function() { this.textarea.focus(); };
-TextareaCellEditor.prototype.destroy = function() { this.textarea = null; };
+TextareaCellEditor.prototype.destroy = function() {
+  if (this.onDocumentMouseDown) document.removeEventListener('mousedown', this.onDocumentMouseDown, true);
+  this.textarea = null;
+};
 
 // ── Champs non applicables au type de la ligne (grisage + blocage édition) ───────
 // state.champsNonApplicables = { [valeurType]: [champs] }, reçu une fois à l'init
@@ -1008,9 +1028,14 @@ const dataCols = colonnes.map(col => {
       def.cellRenderer = (params) => {
         const row = params.data;
         const isPending = !!(row?.__pendingFields && (col.cle in row.__pendingFields));
+        // Une colonne multiligne est déjà à son budget de hauteur (2 lignes, cf.
+        // .ag-cell-multiline.tall, dans une rowHeight fixe de 40px) : y ajouter les
+        // icônes en flex inline pousserait la 2e ligne sous la bordure basse. On les
+        // pose plutôt en overlay absolu (badge), sans toucher à la mise en page du texte.
+        const isMultilineCol = state.workerConfig?.champsMultiligne?.includes(col.cle);
 
         const inner = document.createElement('span');
-        inner.className = 'cell-value-wrap';
+        inner.className = isMultilineCol ? 'cell-value-wrap-multiline' : 'cell-value-wrap';
         if (baseCellRenderer) {
           const rendered = baseCellRenderer(params);
           if (rendered instanceof Node) inner.appendChild(rendered);
@@ -1021,12 +1046,6 @@ const dataCols = colonnes.map(col => {
         }
         if (!isPending) return inner;
 
-        const wrap = document.createElement('span');
-        wrap.className = 'field-pending-wrap';
-        wrap.appendChild(inner);
-
-        const actions = document.createElement('span');
-        actions.className = 'field-pending-actions';
         const approveBtn = document.createElement('button');
         approveBtn.type = 'button';
         approveBtn.className = 'field-pending-btn field-pending-approve';
@@ -1039,8 +1058,19 @@ const dataCols = colonnes.map(col => {
         rejectBtn.title = 'Rejeter cette modification';
         rejectBtn.textContent = '✗';
         rejectBtn.onclick = (e) => { e.stopPropagation(); sendWS({ type: 'review:rejectField', id: row._id, cle: col.cle }); };
+
+        const actions = document.createElement('span');
+        const wrap = document.createElement('span');
+        if (isMultilineCol) {
+          wrap.className = 'field-pending-wrap-multiline';
+          actions.className = 'field-pending-actions field-pending-actions-overlay';
+        } else {
+          wrap.className = 'field-pending-wrap';
+          actions.className = 'field-pending-actions';
+        }
         actions.appendChild(approveBtn);
         actions.appendChild(rejectBtn);
+        wrap.appendChild(inner);
         wrap.appendChild(actions);
         return wrap;
       };
@@ -1060,11 +1090,21 @@ const dataCols = colonnes.map(col => {
   return [checkboxCol, ...dataCols];
 }
 
+// ── Marqueur pending générique (mode revue) — mirroir client de hasPendingMarker
+// côté sessionManager.js. Utilisé pour savoir si une ligne mérite les commandes de
+// revue (icônes de ligne, icônes d'en-tête, barre globale).
+function hasPendingMarkerClient(row) {
+  return !!(row && (row.__pendingInsert || row.__pendingDelete
+    || (row.__pendingFields && Object.keys(row.__pendingFields).length > 0)));
+}
+
 // ── En-tête fusionné sélection + revue (mode revueParPending) ─────────────────
 // Remplace le simple headerCheckboxSelection natif : garde la case "tout sélectionner"
 // (implémentée nous-mêmes pour pouvoir lui adjoindre les icônes) + deux icônes ✓/✗ qui
 // valident/rejettent TOUTES les lignes actuellement cochées (pas automatiquement toutes
-// les lignes en attente — l'utilisateur coche "tout" lui-même s'il le souhaite).
+// les lignes en attente — l'utilisateur coche "tout" lui-même s'il le souhaite). Les
+// icônes restent masquées tant que la sélection ne contient aucune ligne en attente —
+// rien à valider/rejeter sinon.
 function ReviewHeaderComponent() {}
 ReviewHeaderComponent.prototype.init = function(params) {
   this.params = params;
@@ -1081,33 +1121,38 @@ ReviewHeaderComponent.prototype.init = function(params) {
     params.api.forEachNodeAfterFilterAndSort(node => node.setSelected(checked));
   });
 
-  const approveBtn = document.createElement('button');
-  approveBtn.type = 'button';
-  approveBtn.className = 'row-review-btn row-review-approve';
-  approveBtn.title = 'Valider les lignes sélectionnées';
-  approveBtn.textContent = '✓';
-  approveBtn.onclick = () => this.bulkAction('review:approveRows');
+  this.approveBtn = document.createElement('button');
+  this.approveBtn.type = 'button';
+  this.approveBtn.className = 'row-review-btn row-review-approve';
+  this.approveBtn.title = 'Valider les lignes sélectionnées';
+  this.approveBtn.textContent = '✓';
+  this.approveBtn.onclick = () => this.bulkAction('review:approveRows');
 
-  const rejectBtn = document.createElement('button');
-  rejectBtn.type = 'button';
-  rejectBtn.className = 'row-review-btn row-review-reject';
-  rejectBtn.title = 'Rejeter les lignes sélectionnées';
-  rejectBtn.textContent = '✗';
-  rejectBtn.onclick = () => this.bulkAction('review:rejectRows');
+  this.rejectBtn = document.createElement('button');
+  this.rejectBtn.type = 'button';
+  this.rejectBtn.className = 'row-review-btn row-review-reject';
+  this.rejectBtn.title = 'Rejeter les lignes sélectionnées';
+  this.rejectBtn.textContent = '✗';
+  this.rejectBtn.onclick = () => this.bulkAction('review:rejectRows');
 
   this.eGui.appendChild(this.checkbox);
-  this.eGui.appendChild(approveBtn);
-  this.eGui.appendChild(rejectBtn);
+  this.eGui.appendChild(this.approveBtn);
+  this.eGui.appendChild(this.rejectBtn);
 
   // Reflète l'état de la sélection courante sur la case "tout sélectionner"
-  // (cochée/indéterminée/vide), comme le ferait le headerCheckboxSelection natif.
+  // (cochée/indéterminée/vide), comme le ferait le headerCheckboxSelection natif, et
+  // masque les icônes ✓/✗ tant que rien de sélectionné n'a de proposition en attente.
   this.onSelectionChanged = () => {
     const total    = params.api.getDisplayedRowCount();
-    const selected = params.api.getSelectedNodes().length;
-    this.checkbox.checked      = total > 0 && selected === total;
-    this.checkbox.indeterminate = selected > 0 && selected < total;
+    const selectedNodes = params.api.getSelectedNodes();
+    this.checkbox.checked      = total > 0 && selectedNodes.length === total;
+    this.checkbox.indeterminate = selectedNodes.length > 0 && selectedNodes.length < total;
+    const hasPendingSelected = selectedNodes.some(n => hasPendingMarkerClient(n.data));
+    this.approveBtn.style.display = hasPendingSelected ? '' : 'none';
+    this.rejectBtn.style.display  = hasPendingSelected ? '' : 'none';
   };
   params.api.addEventListener('selectionChanged', this.onSelectionChanged);
+  this.onSelectionChanged(); // état initial : rien sélectionné → icônes masquées
 };
 ReviewHeaderComponent.prototype.bulkAction = function(type) {
   const ids = this.params.api.getSelectedRows().map(r => r._id).filter(id => id !== undefined);
@@ -1374,7 +1419,7 @@ function onRowValidate(msg) {
   // "Valider et exporter".
   if (typeof pendingCount === 'number') {
     state.pendingCount = pendingCount;
-    updateValidateButtonVisibility();
+    updateReviewToolbar();
   }
   // Redraw seulement si la grille existe déjà (sinon les overrides sont stockés pour onGridReady)
   if (state.gridApi) {
@@ -1384,6 +1429,9 @@ function onRowValidate(msg) {
       // Filet de sécurité (cf. onActDone/onReviewSync) : redrawRows seul ne réexécute pas
       // toujours cellStyle/cellRenderer de façon fiable dans cette version d'AG Grid.
       state.gridApi.refreshCells({ rowNodes: [node], force: true });
+      // Une édition manuelle peut faire passer cette ligne en pending sans changer la
+      // sélection — recalcule la visibilité des icônes d'en-tête.
+      if (Array.isArray(pendingFields)) state.gridApi.refreshHeader();
     }
   }
   if (message) addMessage('error', `⚠ ${message}`);
@@ -1430,7 +1478,12 @@ function onActDone(updatedRows, pendingCount) {
     state.gridApi.redrawRows();
     // Filet de sécurité (cf. onCellValueChanged) : redrawRows seul ne réexécute pas
     // toujours les cellRenderer personnalisés (ex: colonne "Revue" sans field/valueGetter).
-    if (state.reviewMode) state.gridApi.refreshCells({ force: true });
+    if (state.reviewMode) {
+      state.gridApi.refreshCells({ force: true });
+      // Le contenu a changé sans forcément que la sélection change (ex: une ligne
+      // sélectionnée vient d'être validée) — recalcule la visibilité des icônes d'en-tête.
+      state.gridApi.refreshHeader();
+    }
   }
   updateRowCount();
   addMessage('system', `✓ Terminé — ${state.updatedCells} cellule(s) mise(s) à jour.`);
@@ -1438,7 +1491,7 @@ function onActDone(updatedRows, pendingCount) {
   setStatusMessage(state.reviewMode ? 'Vérifie et valide les propositions IA ci-dessous.' : 'Vérifie et valide ou continue.');
   setAiRunning(false);
   hideProgress();
-  updateValidateButtonVisibility();
+  updateReviewToolbar();
 }
 
 // ── Revue par pending — synchronisation après approve/reject (mode revueParPending) ──
@@ -1451,19 +1504,31 @@ function onReviewSync(msg) {
     // Filet de sécurité (cf. onCellValueChanged / onActDone) : redrawRows seul ne
     // réexécute pas toujours les cellRenderer personnalisés sans field/valueGetter.
     state.gridApi.refreshCells({ force: true });
+    // Le contenu a changé sans forcément que la sélection change — recalcule la
+    // visibilité des icônes d'en-tête.
+    state.gridApi.refreshHeader();
   }
   updateRowCount();
-  updateValidateButtonVisibility();
+  updateReviewToolbar();
 }
 
-// ── Visibilité du bouton "Valider et exporter" (mode revue) ───────────────────
-// Masqué tant qu'il reste des propositions IA en attente — la validation/rejet se
-// fait ligne par ligne, par champ, ou par sélection multiple via l'en-tête fusionné
-// sélection+revue (cf. ReviewHeaderComponent), plus de barre globale séparée.
-function updateValidateButtonVisibility() {
+// ── Barre de revue globale + bouton "Valider et exporter" (mode revue) ────────
+// "Valider et exporter" masqué tant qu'il reste des propositions en attente — la
+// validation/rejet se fait ligne par ligne, par champ, par sélection multiple via
+// l'en-tête fusionné sélection+revue (ReviewHeaderComponent, agit sur la sélection),
+// ou via la barre globale ci-dessous (agit sur TOUT le pending, sans rien cocher).
+function updateReviewToolbar() {
   if (!state.reviewMode) return;
-  if ((state.pendingCount || 0) > 0) hide('btn-validate');
-  else show('btn-validate');
+  const count = state.pendingCount || 0;
+  if (count > 0) {
+    hide('btn-validate');
+    show('review-bar');
+    const counter = el('review-counter');
+    if (counter) counter.textContent = `${count} ligne${count > 1 ? 's' : ''} en attente`;
+  } else {
+    show('btn-validate');
+    hide('review-bar');
+  }
 }
 
 // ── Export prêt ───────────────────────────────────────────────────────────────
@@ -1592,6 +1657,22 @@ function bindUI() {
     if (!confirm('Annuler la session ?')) return;
     sendWS({ type: 'session:cancel' });
     setTimeout(() => window.close(), 800);
+  });
+
+  // Barre de revue globale (mode revueParPending) — agit sur TOUT le pending, pas
+  // seulement la sélection courante (complément de l'en-tête ReviewHeaderComponent).
+  const btnReviewApproveAll = el('btn-review-approve-all');
+  if (btnReviewApproveAll) btnReviewApproveAll.addEventListener('click', () => {
+    const ids = state.rows.filter(hasPendingMarkerClient).map(r => r._id).filter(id => id !== undefined);
+    if (!ids.length) return;
+    sendWS({ type: 'review:approveRows', ids });
+  });
+  const btnReviewRejectAll = el('btn-review-reject-all');
+  if (btnReviewRejectAll) btnReviewRejectAll.addEventListener('click', () => {
+    const ids = state.rows.filter(hasPendingMarkerClient).map(r => r._id).filter(id => id !== undefined);
+    if (!ids.length) return;
+    if (!confirm('Rejeter toutes les modifications en attente ?')) return;
+    sendWS({ type: 'review:rejectRows', ids });
   });
 
   // Actions grille

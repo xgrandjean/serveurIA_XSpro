@@ -133,6 +133,16 @@
         </span>
       </div>
 
+      <!-- Barre de revue globale (mode revueParPending) — visible seulement s'il reste
+           des propositions en attente (manuelles ou IA) ; agit sur TOUT le pending,
+           en complément des commandes de l'en-tête (qui agissent sur la sélection) -->
+      <div id="review-bar" class="hidden">
+        <span id="review-counter"></span>
+        <div style="flex:1"></div>
+        <button id="btn-review-reject-all" class="btn-danger btn-sm">✗ Tout rejeter</button>
+        <button id="btn-review-approve-all" class="btn-primary btn-sm">✓ Tout valider</button>
+      </div>
+
       <!-- AG Grid -->
       <div id="grid-wrapper">
         <div id="grid-container" class="ag-theme-alpine"></div>
