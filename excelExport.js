@@ -23,7 +23,12 @@ try {
 }
 
 // ── Dossier de sortie ─────────────────────────────────────────────────────────
-const EXPORTS_DIR = path.join(__dirname, 'exports');
+// AI_WORKER_DATA_DIR : redirection optionnelle vers un dossier utilisateur
+// inscriptible (positionnée par XSpro quand le serveur est compilé en .exe).
+// Absente : dossier de l'exe si compilé via `pkg`, sinon __dirname (lancement
+// manuel `node server.js` depuis les sources — inchangé).
+const _exeDir = (typeof process.pkg !== 'undefined') ? path.dirname(process.execPath) : __dirname;
+const EXPORTS_DIR = path.join(process.env.AI_WORKER_DATA_DIR || _exeDir, 'exports');
 if (!fs.existsSync(EXPORTS_DIR)) {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 }

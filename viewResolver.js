@@ -47,6 +47,12 @@
 const fs   = require('fs');
 const path = require('path');
 
+// AI_WORKER_ASSETS_DIR : redirection optionnelle vers les assets de l'appli
+// (positionnée par XSpro quand le serveur est compilé en .exe). Absente :
+// dossier de l'exe si compilé via `pkg`, sinon __dirname (inchangé).
+const _exeDir = (typeof process.pkg !== 'undefined') ? path.dirname(process.execPath) : __dirname;
+const _assetsRoot = process.env.AI_WORKER_ASSETS_DIR || _exeDir;
+
 // ── Chargement du hook vue ────────────────────────────────────────────────────
 /**
  * Charge le module views/<viewModule>.js si déclaré dans workerConfig.
@@ -60,7 +66,7 @@ function loadViewHook(workerConfig) {
   if (!viewModule) return null;
 
   try {
-    const hookPath = path.join(__dirname, 'views', `${viewModule}.js`);
+    const hookPath = path.join(_assetsRoot, 'views', `${viewModule}.js`);
     delete require.cache[require.resolve(hookPath)];
     const hook = require(hookPath);
     console.log(`[ViewResolver] Hook vue chargé : views/${viewModule}.js`);
@@ -84,7 +90,7 @@ function loadPairedJson(workerConfig) {
   const viewModule = workerConfig?.viewModule;
   if (!viewModule) return null;
 
-  const jsonPath = path.join(__dirname, 'views', `${viewModule}.json`);
+  const jsonPath = path.join(_assetsRoot, 'views', `${viewModule}.json`);
   if (!fs.existsSync(jsonPath)) return null;
 
   try {

@@ -15,7 +15,8 @@
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",
-    "dist:all": "electron-builder --win --mac --linux"
+    "dist:all": "electron-builder --win --mac --linux",
+    "build:for-xspro": "pkg server.js --targets node18-win-x64 --output ../XSpro/assets/model/serveurIA.exe && node scripts/copy-assets-for-xspro.js"
   },
   "build": {
     "appId": "com.worker.ai-worker",
@@ -83,7 +84,13 @@
     "ws": "^8.17.1"
   },
   "devDependencies": {
+    "@yao-pkg/pkg": "^6.3.1",
     "electron": "^31.6.0",
     "electron-builder": "^24.13.3"
+  },
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ]
   }
 }

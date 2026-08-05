@@ -13,20 +13,32 @@ XSpro ◄──POST callback── Worker  (résultat, annulation, ou refus)
 
 ## 1. Démarrage du Worker
 
-XSpro spawne le Worker au démarrage si ce n'est pas déjà actif.
+**Ceci décrit l'intégration réellement implémentée** (voir `XSpro/src/ipc/ipcAI.js`,
+fonctions `startPromptGeneratorServer` / `stopPromptGeneratorServer`).
+
+Le Worker n'est **pas** lancé via `node server.js` : XSpro embarque une version
+**compilée** de `server.js` (via [`pkg`](https://github.com/yao-pkg/pkg), voir §6bis)
+sous forme d'un exécutable autonome `serveurIA.exe`, ne nécessitant pas de Node.js
+installé sur le poste utilisateur.
 
 ```js
-// Côté XSpro — exemple de spawn
-const { spawn } = require('child_process');
-const worker = spawn('node', ['server.js'], {
-  cwd:      '/chemin/vers/ai-worker',
-  detached: true,
-  stdio:    'ignore',
+// XSpro/src/ipc/ipcAI.js — extrait simplifié
+const exePath = Globals.modelServeurIAExe; // copié depuis assets/model/ vers userData
+_promptGeneratorProcess = spawn(exePath, [], {
+  cwd: path.dirname(exePath),
+  env: {
+    ...process.env,
+    AI_WORKER_ASSETS_DIR: assetsDir,        // public/, views/, worker-config.json, standalone/
+    AI_WORKER_DATA_DIR:   assetsDir,        // .worker.lock, exports/
+    AI_WORKER_DISABLE_AUTO_OPEN: '1',       // cf. §6 — XSpro ouvre le navigateur lui-même
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
+  windowsHide: true,
 });
-worker.unref(); // ne bloque pas XSpro
 ```
 
-**Probe de disponibilité** avant tout appel :
+**Probe de disponibilité** avant tout appel (et avant de spawner, pour ne jamais
+dupliquer une instance déjà lancée — manuellement ou non) :
 
 ```
 HEAD http://localhost:8888/view-config/
@@ -36,6 +48,28 @@ HEAD http://localhost:8888/view-config/
 - Timeout ou erreur → Worker absent, traitement local
 
 Le port est configurable dans `ai-worker/worker-config.json` (défaut : `8888`).
+
+### Cycle de vie côté XSpro
+
+- **Contrôle utilisateur** : menu *Préférences → Serveur IA externe → Actif/Inactif*.
+  "Actif" sonde d'abord le port ; si un Worker répond déjà (lancé manuellement, ou par
+  une session XSpro précédente), XSpro s'y raccroche sans spawner de doublon.
+- **Icône de zone de notification** : XSpro affiche sa propre icône (son propre logo,
+  pas de tray Electron dédié au Worker) tant que le Worker est joignable, avec un menu
+  (Ouvrir l'interface / Arrêter le serveur). "Arrêter" est désactivé si XSpro n'a pas
+  lui-même démarré le process (rétrocompatibilité : on ne tue jamais un Worker lancé
+  manuellement).
+- **Auto-démarrage** : si `promptGeneratorAutoStart: true` dans `parametresAi.json`
+  (persisté par le dernier choix "Actif" de l'utilisateur), XSpro relance
+  automatiquement le Worker au démarrage de l'application — sans jamais dupliquer une
+  instance déjà active. Fermer XSpro normalement arrête le process managé mais **ne**
+  désactive **pas** cette option (seul un clic explicite sur "Inactif" le fait).
+- **Fraîcheur du binaire et des assets** : à chaque tentative de démarrage (si aucune
+  instance n'est déjà détectée active), XSpro compare la date de `serveurIA.exe` et du
+  dossier `serveurIA-data/` embarqués dans le bundle applicatif avec leurs copies dans
+  `userData` (où tourne réellement le process, cf. §6bis), et les rafraîchit
+  automatiquement si le bundle est plus récent — inutile de vider `userData` à la main
+  après un `npm run build:for-xspro`.
 
 ---
 
@@ -372,6 +406,23 @@ Le Worker peut configurer un callback local par défaut, avec une option de prio
 | `true` (défaut) | Le Worker ouvre automatiquement le navigateur à chaque `POST /process` |
 | `false` | Le Worker reste silencieux. XSpro appelle `GET /open-ui?sessionId=xxx` pour ouvrir l'UI manuellement |
 
+### Variable d'environnement `AI_WORKER_DISABLE_AUTO_OPEN`
+
+Le paquet npm [`open`](https://www.npmjs.com/package/open), utilisé par `openBrowser()`
+pour ouvrir automatiquement le navigateur, échoue systématiquement
+(`Invalid host defined options`) une fois `server.js` compilé via `pkg` — bug propre à
+cette combinaison, pas à un lancement `node server.js` classique.
+
+Quand XSpro spawne `serveurIA.exe` lui-même, il positionne
+`AI_WORKER_DISABLE_AUTO_OPEN=1` dans l'environnement du process : `server.js` saute
+alors entièrement son propre appel à `openBrowser()` (`if (WORKER_CONFIG.autoOpenUI &&
+process.env.AI_WORKER_DISABLE_AUTO_OPEN !== '1') { ... }`), et c'est **XSpro** qui ouvre
+le navigateur de façon fiable via `shell.openExternal()` (Electron), au moment où il
+reçoit `WORKER:startSession` (voir `XSpro/src/ipc/workerBridge.js`).
+
+**Absente (lancement manuel `node server.js` ou appli Electron autonome) : comportement
+inchangé** — `autoOpenUI` de `worker-config.json` fait foi, comme avant.
+
 **Endpoint d'ouverture à la demande :**
 ```
 GET http://localhost:8888/open-ui?sessionId=detailsDevis_1719300000000
@@ -388,9 +439,65 @@ Ajouter :
 ```json
 {
   "promptGeneratorUrl": "http://localhost:8888",
-  "workerCallbackPort": 3000
+  "workerCallbackPort": 3000,
+  "promptGeneratorAutoStart": false
 }
 ```
+
+| Champ | Type | Description |
+|---|---|---|
+| `promptGeneratorAutoStart` | `boolean` | Persisté par le menu *Préférences → Serveur IA externe*. `true` = XSpro relance le Worker automatiquement à chaque démarrage de l'application (dernier choix "Actif" de l'utilisateur). Non modifié par une fermeture normale de XSpro — seul un clic explicite sur "Inactif" le repasse à `false`. |
+
+---
+
+## 6bis. Compilation et déploiement (`pkg`)
+
+Ce projet (`serveurIA_XSpro`) et l'application XSpro sont deux dépôts distincts, mais
+un seul et même installateur XSpro embarque le Worker compilé. Workflow de
+développement :
+
+```bash
+cd serveurIA_XSpro
+# développement / tests habituels : npm start, npm run standalone, npm run electron...
+
+npm run build:for-xspro
+```
+
+`npm run build:for-xspro` fait deux choses :
+
+1. **Compile `server.js`** (et tout le code JS qu'il requiert statiquement —
+   `sessionManager.js`, `llmClient.js`, `providers.js`, `viewResolver.js`,
+   `excelExport.js`, `fileHandlers.js`, `fileTypes.js`) en un exécutable autonome
+   `node18-win-x64` via [`@yao-pkg/pkg`](https://github.com/yao-pkg/pkg), déposé
+   directement dans `../XSpro/assets/model/serveurIA.exe`.
+2. **Copie les assets non compilables** (`public/`, `views/`, `standalone/`,
+   `worker-config.json`) vers `../XSpro/assets/model/serveurIA-data/`, via
+   `scripts/copy-assets-for-xspro.js`.
+
+### Pourquoi `views/`, `public/`, etc. ne sont pas dans l'exe
+
+`pkg` ne peut embarquer que le code tracé statiquement par `require(...)`. Les hooks
+de vue (`views/<contextName>.js`) sont chargés dynamiquement (`require(hookPath)` où
+`hookPath` dépend de `workerConfig.viewModule`, connu seulement à l'exécution) — `pkg`
+ne peut pas les prévoir. Ils restent donc de vrais fichiers sur disque.
+
+### Résolution des chemins — variables d'environnement
+
+`server.js`, `excelExport.js` et `viewResolver.js` résolvent leurs chemins avec cette
+priorité :
+
+1. `AI_WORKER_ASSETS_DIR` / `AI_WORKER_DATA_DIR` (variables d'environnement) — utilisées
+   par XSpro quand il spawne `serveurIA.exe` (cf. §1), pointant vers un dossier
+   `userData` réellement inscriptible (l'exe ne peut pas lire un `.asar` ni écrire dans
+   le dossier d'installation de l'application).
+2. Dossier de l'exe (`path.dirname(process.execPath)`) si lancé via `pkg` sans ces
+   variables (test manuel du binaire compilé, hors XSpro).
+3. `__dirname` — lancement `node server.js` depuis les sources : **comportement
+   strictement inchangé**, aucune des variables ci-dessus n'est nécessaire.
+
+`ASSETS_DIR` sert aux fichiers en lecture seule (`public/`, `views/`, `standalone/`,
+`worker-config.json`) ; `DATA_DIR` aux fichiers écrits à l'exécution
+(`.worker.lock`, `exports/`).
 
 ---
 

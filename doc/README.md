@@ -20,6 +20,23 @@ npm install
 | `npm run standalone:formulaireGetDetailsTravaux` | Mode test — fiche de travaux |
 | `npm run electron` | Application Electron |
 | `npm run electron:standalone` | Electron en mode standalone |
+| `npm run build:for-xspro` | Compile `server.js` en exécutable (`pkg`) et le déploie directement dans `../XSpro/assets/model/` — voir [`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md) §6bis |
+
+## Intégration XSpro
+
+Ce serveur peut être lancé manuellement (`npm start`, ou l'appli Electron autonome —
+tray icône dans la zone de notification) **ou** géré directement par XSpro (menu
+*Préférences → Serveur IA externe*, sans tray propre puisque c'est alors XSpro qui
+pilote le cycle de vie). Les deux modes sont pleinement rétrocompatibles : un
+lancement manuel n'est jamais perturbé par XSpro (jamais dupliqué, jamais arrêté).
+
+Pour livrer une modification de ce projet à XSpro : `npm run build:for-xspro`, puis
+redémarrer XSpro (ou juste basculer Inactif → Actif dans son menu) — l'exécutable et
+les assets (`public/`, `views/`, `worker-config.json`, `standalone/`) embarqués sont
+rafraîchis automatiquement s'ils sont plus récents que la copie de travail de XSpro.
+
+Détails complets (spawn, variables d'environnement, cycle de vie, `pkg`) :
+[`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md).
 
 ## Structure des dossiers
 

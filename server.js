@@ -22,14 +22,23 @@ const { buildAcceptString }                     = require('./fileTypes');
 const { resolveEffectiveWorkerConfig }          = require('./viewResolver');
 
 // ── Résolution des chemins ────────────────────────────────────────────────────
+// ASSETS_ROOT : base des fichiers statiques en lecture seule (public/, views/,
+// worker-config.json, standalone/). DATA_ROOT : base des fichiers écrits à
+// l'exécution (.worker.lock, exports/). Les deux retombent, par ordre de
+// priorité, sur AI_WORKER_*_DIR (positionnées par XSpro quand il spawn l'exe
+// compilé), puis sur le dossier de l'exe (si lancé via `pkg`), puis sur
+// __dirname (lancement manuel `node server.js` depuis les sources — inchangé).
 const ROOT            = __dirname;
-const PUBLIC_DIR      = path.join(ROOT, 'public');
-const PARAMS_FILE     = path.join(ROOT, 'parametresAi.json');
+const EXE_DIR          = (typeof process.pkg !== 'undefined') ? path.dirname(process.execPath) : ROOT;
+const ASSETS_ROOT      = process.env.AI_WORKER_ASSETS_DIR || EXE_DIR;
+const DATA_ROOT         = process.env.AI_WORKER_DATA_DIR   || EXE_DIR;
+const PUBLIC_DIR      = path.join(ASSETS_ROOT, 'public');
+const PARAMS_FILE     = path.join(ASSETS_ROOT, 'parametresAi.json');
 
 // ── Détection du mode et du payload ───────────────────────────────────────────
 const IS_STANDALONE = process.argv.includes('--standalone');
 const STANDALONE_ARG = process.argv.find(arg => arg.startsWith('--payload='));
-const STANDALONE_DIR = path.join(ROOT, 'standalone');
+const STANDALONE_DIR = path.join(ASSETS_ROOT, 'standalone');
 // Accepte soit un chemin complet, soit un nom de payload (ex: "detailsDevis")
 let STANDALONE_FILE;
 if (STANDALONE_ARG) {
@@ -46,7 +55,7 @@ if (STANDALONE_ARG) {
 }
 
 // ── Configuration Worker (worker-config.json) ────────────────────────────────
-const WORKER_CONFIG_FILE = path.join(ROOT, 'worker-config.json');
+const WORKER_CONFIG_FILE = path.join(ASSETS_ROOT, 'worker-config.json');
 let WORKER_CONFIG = { port: 8888, contexts: { listeBlanche: [], listeNoire: [] } };
 
 if (fs.existsSync(WORKER_CONFIG_FILE)) {
@@ -71,7 +80,7 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
 const PORT = WORKER_CONFIG.port;
 
 // ── Verrou anti-double-instance ───────────────────────────────────────────────
-const LOCK_FILE = path.join(ROOT, '.worker.lock');
+const LOCK_FILE = path.join(DATA_ROOT, '.worker.lock');
 
 function readLockPid() {
   if (!fs.existsSync(LOCK_FILE)) return null;
@@ -148,7 +157,7 @@ app.get('/open-ui', (req, res) => {
 });
 
 // Route exports Excel — lazy require pour ne pas bloquer le démarrage si exceljs absent
-const EXPORTS_DIR_PATH = path.join(ROOT, 'exports');
+const EXPORTS_DIR_PATH = path.join(DATA_ROOT, 'exports');
 if (!fs.existsSync(EXPORTS_DIR_PATH)) fs.mkdirSync(EXPORTS_DIR_PATH, { recursive: true });
 app.use('/exports', express.static(EXPORTS_DIR_PATH, {
   setHeaders: (res, fp) => {
@@ -182,7 +191,7 @@ app.get('/view-config/', (req, res) => {
 // Si le Worker héberge un manifeste local pour ce contextName, il le renvoie.
 // Sinon 404 → XSpro garde sa config locale.
 app.get('/view-config/:contextName', (req, res) => {
-  const configFile = path.join(ROOT, 'view-configs', `${req.params.contextName}.json`);
+  const configFile = path.join(ASSETS_ROOT, 'view-configs', `${req.params.contextName}.json`);
   if (fs.existsSync(configFile)) {
     try {
       const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
@@ -280,8 +289,12 @@ app.post('/process', async (req, res) => {
   // Réponse immédiate → XSpro sait que le Worker a pris en charge la requête
   res.json({ sessionId: session.sessionId, status: 'accepted' });
 
-  // Ouverture de la fenêtre UI dans le navigateur (si activé dans la config)
-  if (WORKER_CONFIG.autoOpenUI) {
+  // Ouverture de la fenêtre UI dans le navigateur (si activé dans la config).
+  // AI_WORKER_DISABLE_AUTO_OPEN=1 : positionné par XSpro quand il pilote ce
+  // process (le paquet `open` échoue une fois compilé via pkg — XSpro ouvre
+  // alors lui-même le navigateur via shell.openExternal, plus fiable).
+  // Absent (lancement manuel/standalone) → comportement inchangé.
+  if (WORKER_CONFIG.autoOpenUI && process.env.AI_WORKER_DISABLE_AUTO_OPEN !== '1') {
     const uiUrl = `http://localhost:${PORT}/index.html?sessionId=${session.sessionId}`;
     openBrowser(uiUrl);
   }
