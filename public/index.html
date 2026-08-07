@@ -119,6 +119,13 @@
       <div id="grid-toolbar">
         <button id="btn-add-row"     class="btn-grid-action" title="Ajouter une ligne après la sélection">+ Ligne</button>
         <button id="btn-delete-rows" class="btn-grid-action btn-grid-danger" title="Supprimer les lignes sélectionnées" disabled>✂️</button>
+        <span class="grid-toolbar-sep">|</span>
+        <!-- Déplacement manuel de la sélection (bloc contigu ou non) — corrige une ligne
+             mal placée (ex: par l'IA) sans changer son contenu, cf. sessionManager.moveRows -->
+        <button id="btn-move-up"    class="btn-grid-action" title="Monter la sélection d'une position" disabled>▲</button>
+        <button id="btn-move-down"  class="btn-grid-action" title="Descendre la sélection d'une position" disabled>▼</button>
+        <button id="btn-move-after" class="btn-grid-action" title="Déplacer la sélection après la ligne cliquée (cellule active)" disabled>⇥ Déplacer ici</button>
+        <span class="grid-toolbar-sep">|</span>
         <!-- Sélecteur de mode de travail (défini par le hook vue) — caché si aucun mode -->
 <select id="work-mode-selector" title="Mode de travail" style="display:none">
          </select>

@@ -98,6 +98,20 @@ const MANIFEST = {
     editionParActions: true,
 
     /**
+     * Mode revue par pending (masque le sélecteur Plan/Act au profit d'un mode unique
+     * direct) : chaque proposition IA (update/insert/delete) — ou modification manuelle,
+     * même traitement — devient un item "en attente" (surlignage + ✓/✗), validable
+     * individuellement (par champ), ligne par ligne, ou globalement, au lieu d'écraser
+     * directement les données. Généralisation du mécanisme mis en place pour
+     * formulaireListeQuestions.js (cf. viewResolver.js session.reviewMode, llmClient.js
+     * applyRowActions, sessionManager.js approveField/rejectField/approveRow/rejectRow/
+     * approveRows/rejectRows/proposeInsertRow/proposeDeleteRows, public/grid.js colonne
+     * "Revue"/barre de revue globale) — moteur déjà générique, ne dépend que de
+     * editionParActions (_id) déjà actif ci-dessus.
+     */
+    revueParPending: true,
+
+    /**
      * Surcharges déclaratives par colonne (UI seulement, jamais readOnly/placeholder/hide).
      * Pour chaque champ, on définit les propriétés à appliquer (pinned, width).
      * viewResolver.js applique ces surcharges automatiquement.

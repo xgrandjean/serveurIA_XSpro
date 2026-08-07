@@ -119,8 +119,11 @@ function buildHistorizedMessages(session, historiqueCfg) {
  * @param {'plan'|'act'} mode
  * @param {Object}       callbacks   — { onPlan, onCellUpdate, onDone }
  *   onDone(updatedRows, meta) — meta.warnings: Array, ex. troncature_historique /
- *   troncature_taille (cf. README-prompts.md §6). meta est un nouveau paramètre,
- *   tout code appelant existant qui l'ignore continue de fonctionner à l'identique.
+ *   troncature_taille (cf. README-prompts.md §6). meta.actionsResume : { inserted,
+ *   updated, deleted } (uniquement en editionParActions — cf. applyRowActions),
+ *   null pour le contrat positionnel historique où onCellUpdate porte déjà le détail.
+ *   meta est un nouveau paramètre, tout code appelant existant qui l'ignore continue
+ *   de fonctionner à l'identique.
  * @param {Array}        files       — [{ name, mimeType, data (base64), size }]
  */
 async function run(session, userPrompt, mode, callbacks, files = []) {
@@ -266,9 +269,18 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   }
 
   // Mode ACT
-  let updatedRows = editionParActions
-    ? applyRowActions(rawResponse, session.rows, colonnes, selectChoix, session)
-    : parseAndMergeRows(rawResponse, session.rows, colonnes, selectChoix);
+  // actionsResume : uniquement renseigné en editionParActions (cf. applyRowActions) —
+  // le contrat positionnel n'a pas besoin d'un résumé séparé, onCellUpdate ci-dessous
+  // porte déjà le détail cellule par cellule pour ce contrat.
+  let updatedRows;
+  let actionsResume = null;
+  if (editionParActions) {
+    const applied = applyRowActions(rawResponse, session.rows, colonnes, selectChoix, session);
+    updatedRows   = applied.rows;
+    actionsResume = applied.resume;
+  } else {
+    updatedRows = parseAndMergeRows(rawResponse, session.rows, colonnes, selectChoix);
+  }
 
   // Hook vue — post-traitement métier après merge
   if (viewHook?.postProcessMerge) {
@@ -295,7 +307,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
     }
   }
 
-  if (onDone) onDone(updatedRows, { warnings });
+  if (onDone) onDone(updatedRows, { warnings, actionsResume });
 }
 
 // ── Valeurs par défaut sur les placeholders ───────────────────────────────────
@@ -887,7 +899,17 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     }
   }
 
-  return result;
+  // Résumé des actions réellement appliquées (ignore les delete/update à _id introuvable,
+  // déjà écartés plus haut) — cf. run() (onDone meta.actionsResume) et grid.js (message de
+  // fin "N ligne(s) ajoutée(s)/modifiée(s)/supprimée(s)"). Nécessaire car le rendu cellule
+  // par cellule (onCellUpdate/state.updatedCells) est désactivé pour ce contrat (cf. run(),
+  // les insert/delete décalent les index) : sans ce résumé, le message de fin affichait
+  // toujours "0 cellule(s) mise(s) à jour" même après des insertions/suppressions réelles.
+  const insertedCount = Array.from(insertionsAfter.values())
+    .reduce((sum, fieldsList) => sum + fieldsList.length, 0);
+  const resume = { inserted: insertedCount, updated: updatesById.size, deleted: deletedIds.size };
+
+  return { rows: result, resume };
 }
 
 function coerceValue(value, col) {

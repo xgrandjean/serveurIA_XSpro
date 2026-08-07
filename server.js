@@ -435,16 +435,7 @@ wss.on('connection', (ws, req) => {
     // Note : le grisage des champs non applicables au type (champsNonApplicables) ne
     // passe pas par ce mécanisme — c'est une map statique consommée directement côté
     // client (public/grid.js), pas besoin de la recalculer par ligne ici.
-    if (Array.isArray(session.rows) && (session.viewHook?.getInvalidFields || session.viewHook?.getMissingFields)) {
-      session.rows.forEach((row, rowIndex) => {
-        const invalidFields = session.viewHook.getInvalidFields?.(row) || [];
-        const missingFields = session.viewHook.getMissingFields?.(row) || [];
-        const combined = Array.from(new Set([...invalidFields, ...missingFields]));
-        if (combined.length > 0) {
-          wsSend(session, { type: 'cell:validate', rowIndex, invalidFields: combined, message: null });
-        }
-      });
-    }
+    revalidateAllRows(session);
 
   // Messages entrants depuis l'UI
   ws.on('message', async (raw) => {
@@ -575,10 +566,10 @@ async function handleUIMessage(session, msg) {
             SM.setCellValue(session, rowIndex, cle, val);
             wsSend(session, { type: 'cell:update', rowIndex, cle, value: val });
           },
-          onDone: (updatedRows) => {
+          onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session) });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null });
           },
         }, files, activeMode);
       } catch (e) {
@@ -610,10 +601,10 @@ async function handleUIMessage(session, msg) {
             SM.setCellValue(session, rowIndex, cle, val);
             wsSend(session, { type: 'cell:update', rowIndex, cle, value: val });
           },
-          onDone: (updatedRows) => {
+          onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session) });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null });
           },
         }, [], session.activeMode);
       } catch (e) {
@@ -716,6 +707,25 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // Déplacement manuel d'un bloc de lignes (boutons ▲/▼/"Déplacer ici") — disponible
+    // en mode direct ET en mode revue : réordonner n'est pas un contenu à valider (cf.
+    // SM.moveRows, pas de marqueur __pending posé). Bloqué si l'IA travaille : un
+    // réordonnancement pendant un run 'act' en cours corromprait les rowIndex que
+    // onCellUpdate envoie de façon incrémentale (cf. server.js case 'prompt:send').
+    case 'rows:move': {
+      if ([SM.STATUS.PLANNING, SM.STATUS.ACTING, SM.STATUS.DELIVERING].includes(session.status)) {
+        wsSend(session, { type: 'error', message: '⚠ Déplacement impossible pendant que l\'IA travaille.' });
+        break;
+      }
+      const ids = Array.isArray(msg.ids) ? msg.ids : [];
+      const moved = SM.moveRows(session, ids, msg.apres);
+      if (moved) {
+        wsSend(session, { type: 'rows:moved', rows: session.rows, pendingCount: SM.countPendingRows(session) });
+        revalidateAllRows(session);
+      }
+      break;
+    }
+
     // Nouvelle tâche : vide l'historique et le plan, garde les données modifiées
     case 'session:newtask': {
       session.history = [];
@@ -754,6 +764,26 @@ function sendReviewSync(session) {
     type:         'review:sync',
     rows:         session.rows,
     pendingCount: SM.countPendingRows(session),
+  });
+}
+
+// ── Revalidation en masse (recalcule cell:validate pour toutes les lignes) ────
+// Un rowIndex associé à un état invalide/manquant devient faux dès que l'ORDRE des
+// lignes change (ex: 'rows:move') — il faut le recalculer intégralement à la position
+// ACTUELLE, jamais le patcher. getInvalidFields/getMissingFields sont des règles PAR
+// LIGNE (pas croisées), donc le statut de chaque ligne ne change pas en soi — seul son
+// rowIndex change, d'où la nécessité de renvoyer un cell:validate frais pour chaque
+// ligne encore fautive. Appelée aussi à la connexion WS (état initial).
+function revalidateAllRows(session) {
+  if (!Array.isArray(session.rows)) return;
+  if (!session.viewHook?.getInvalidFields && !session.viewHook?.getMissingFields) return;
+  session.rows.forEach((row, rowIndex) => {
+    const invalidFields = session.viewHook.getInvalidFields?.(row) || [];
+    const missingFields = session.viewHook.getMissingFields?.(row) || [];
+    const combined = Array.from(new Set([...invalidFields, ...missingFields]));
+    if (combined.length > 0) {
+      wsSend(session, { type: 'cell:validate', rowIndex, invalidFields: combined, message: null });
+    }
   });
 }
 

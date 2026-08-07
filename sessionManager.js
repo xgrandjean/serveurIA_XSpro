@@ -424,6 +424,52 @@ function proposeDeleteRows(session, ids) {
   touchSession(session);
 }
 
+// ── Déplacement manuel de lignes/blocs (boutons ▲/▼/"Déplacer ici") ───────────
+/**
+ * Déplace un ensemble de lignes (bloc contigu ou non) juste après la ligne _id=apres.
+ * Disponible dans toutes les vues (tout objet ligne a un _id, cf. createSession) et
+ * dans les deux modes (direct et revue) — un déplacement n'est jamais mis en attente :
+ * réordonner ne change aucun contenu, c'est l'outil même destiné à corriger un
+ * placement, y compris sur des lignes encore __pendingInsert. Comme les OBJETS ligne
+ * existants sont déplacés sans être recréés, tout marqueur __pendingFields/
+ * __pendingInsert/__pendingDelete déjà présent survit intact au déplacement.
+ *
+ * @param {Object} session
+ * @param {Array<number>} ids — _id des lignes à déplacer ; réinsérées dans l'ordre où
+ *                              elles apparaissent ACTUELLEMENT dans session.rows (pas
+ *                              l'ordre de `ids`), pour préserver l'ordre interne du bloc.
+ * @param {number|null|'fin'} apres — _id après lequel réinsérer ; null = tête ; 'fin' = fin.
+ *                              Doit être hors de `ids` (auto-référence interdite).
+ * @returns {boolean} true si au moins une ligne a été déplacée
+ */
+function moveRows(session, ids, apres) {
+  const idSet = new Set(ids);
+  if (apres !== null && apres !== undefined && apres !== 'fin' && idSet.has(apres)) {
+    console.warn(`[SessionManager] moveRows refusé — _apres (${apres}) fait partie du bloc déplacé`);
+    return false;
+  }
+  const moving = session.rows.filter(r => idSet.has(r._id));
+  if (!moving.length) return false;
+
+  session.rows = session.rows.filter(r => !idSet.has(r._id));
+
+  if (apres === null || apres === undefined) {
+    session.rows.unshift(...moving);
+  } else if (apres === 'fin') {
+    session.rows.push(...moving);
+  } else {
+    const idx = session.rows.findIndex(r => r._id === apres);
+    if (idx === -1) {
+      console.warn(`[SessionManager] moveRows — _apres introuvable (${apres}), déplacé en fin par sécurité`);
+      session.rows.push(...moving);
+    } else {
+      session.rows.splice(idx + 1, 0, ...moving);
+    }
+  }
+  touchSession(session);
+  return true;
+}
+
 // ── Reset des rows vers les données source ────────────────────────────────────
 /**
  * Remet les rows à l'état initial (données d'entrée de XSpro).
@@ -520,4 +566,5 @@ module.exports = {
   rejectRows,
   proposeInsertRow,
   proposeDeleteRows,
+  moveRows,
 };

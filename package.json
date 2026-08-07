@@ -12,6 +12,8 @@
     "standalone:listeQuestions": "node server.js --standalone --payload=listeQuestions",
     "standalone:formulaireGetDetailsFichesTechniques": "node server.js --standalone --payload=formulaireGetDetailsFichesTechniques",
     "standalone:formulaireGetDetailsTravaux": "node server.js --standalone --payload=formulaireGetDetailsTravaux",
+    "standalone:formulaireGetDetailsAF": "node server.js --standalone --payload=formulaireGetDetailsAF",
+    "standalone:formulaireGetDetailsFacturationClient": "node server.js --standalone --payload=formulaireGetDetailsFacturationClient",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",

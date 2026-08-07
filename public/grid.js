@@ -125,8 +125,9 @@ function handleWSMessage(msg) {
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
     case 'cell:rowStyle':     onRowStyle(msg.rowIndex, msg.style);           break;
     case 'cell:validate':    onRowValidate(msg);                           break;
-    case 'act:done':          onActDone(msg.rows, msg.pendingCount);         break;
+    case 'act:done':          onActDone(msg.rows, msg.pendingCount, msg.actionsResume); break;
     case 'review:sync':      onReviewSync(msg);                            break;
+    case 'rows:moved':       onRowsMoved(msg);                             break;
     case 'export:ready':      onExportReady(msg);                            break;
     case 'session:done':      onSessionDone(msg.exportFallback);            break;
     case 'session:cancelled': onSessionCancelled();                         break;
@@ -324,6 +325,15 @@ function initGrid(colonnes, rows) {
   const gridOptions = {
     columnDefs:   buildColDefs(colonnes),
     rowData:      rows,
+    // Identité stable par _id (présent sur toute row, cf. sessionManager.createSession) :
+    // sans ça, chaque remplacement de rowData (onReviewSync/onActDone/onRowsMoved — le
+    // serveur renvoie systématiquement des OBJETS RECRÉÉS via JSON, jamais les mêmes
+    // références) fait perdre la sélection et le focus, puisqu'AG Grid ne peut alors
+    // matcher les nouvelles lignes aux anciens row nodes que par référence d'objet.
+    // Cf. déplacement de lignes (▲/▼/"Déplacer ici") : sans getRowId, la sélection
+    // déplacée disparaissait à chaque clic, rendant impossible de suivre un bloc sur
+    // plusieurs crans.
+    getRowId: (params) => String(params.data._id),
     rowHeight:    40,  // Hauteur fixe pour toutes les lignes (1,5x la hauteur standard)
     headerHeight: 32,
     defaultColDef: {
@@ -434,6 +444,7 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
     onSelectionChanged: () => {
       const selected = state.gridApi.getSelectedRows();
       el('btn-delete-rows').disabled = selected.length === 0 || state.isAiRunning;
+      updateMoveButtonsState();
     },
 
     getRowStyle: (params) => {
@@ -1164,6 +1175,98 @@ ReviewHeaderComponent.prototype.destroy = function() {
   this.params.api.removeEventListener('selectionChanged', this.onSelectionChanged);
 };
 
+// ── Déplacement manuel de lignes/blocs (boutons ▲/▼/"Déplacer ici") ───────────
+// Corrige une ligne (ou un bloc de lignes) mal placée sans changer son contenu — ex:
+// un chapitre entier inséré au mauvais endroit par l'IA. Ciblage par _id (jamais par
+// rowIndex) pour rester valide côté serveur quel que soit l'ordre affiché au moment
+// de l'envoi. Fonctionne en mode direct ET en mode revue (cf. sessionManager.moveRows,
+// aucun marqueur __pending posé — un déplacement n'est pas un contenu à valider).
+
+/**
+ * Lit la sélection courante (checkboxes AG Grid), triée par position affichée.
+ * @returns {{ids:Array<number>, firstIndex:number, lastIndex:number}|null}
+ */
+function getMoveSelection() {
+  if (!state.gridApi) return null;
+  const nodes = state.gridApi.getSelectedNodes();
+  if (!nodes.length) return null;
+  const sorted = nodes.slice().sort((a, b) => a.rowIndex - b.rowIndex);
+  return {
+    ids:        sorted.map(n => n.data._id),
+    firstIndex: sorted[0].rowIndex,
+    lastIndex:  sorted[sorted.length - 1].rowIndex,
+  };
+}
+
+function moveSelectionUp() {
+  const sel = getMoveSelection();
+  if (!sel || sel.firstIndex <= 0) return;
+  const apres = sel.firstIndex >= 2 ? state.rows[sel.firstIndex - 2]._id : null;
+  sendWS({ type: 'rows:move', ids: sel.ids, apres });
+}
+
+function moveSelectionDown() {
+  const sel = getMoveSelection();
+  if (!sel || sel.lastIndex >= state.rows.length - 1) return;
+  sendWS({ type: 'rows:move', ids: sel.ids, apres: state.rows[sel.lastIndex + 1]._id });
+}
+
+function moveSelectionAfterFocused() {
+  const sel = getMoveSelection();
+  if (!sel) return;
+  const focused = state.gridApi.getFocusedCell();
+  if (!focused || focused.rowIndex < 0) {
+    addMessage('error', '⚠ Clique d\'abord sur la ligne cible, puis "Déplacer ici".');
+    return;
+  }
+  const targetId = state.gridApi.getDisplayedRowAtIndex(focused.rowIndex)?.data?._id;
+  if (targetId === undefined || sel.ids.includes(targetId)) {
+    addMessage('error', '⚠ La ligne ciblée doit être hors de la sélection.');
+    return;
+  }
+  sendWS({ type: 'rows:move', ids: sel.ids, apres: targetId });
+}
+
+/**
+ * Active/désactive les 3 boutons selon la sélection courante, les bornes du tableau,
+ * et l'état isAiRunning — appelée après tout événement qui change la sélection ou
+ * l'ensemble des rows (onSelectionChanged, setAiRunning, onReviewSync, onActDone,
+ * onRowsMoved).
+ */
+function updateMoveButtonsState() {
+  const sel = getMoveSelection();
+  const running = state.isAiRunning;
+  el('btn-move-up').disabled    = !sel || sel.firstIndex === 0 || running;
+  el('btn-move-down').disabled  = !sel || sel.lastIndex === state.rows.length - 1 || running;
+  el('btn-move-after').disabled = !sel || running;
+}
+
+/**
+ * Réception de la confirmation serveur après un déplacement ('rows:moved').
+ * Reset impératif de styleOverrides/cellStyleOverrides AVANT tout redraw : ces caches
+ * sont indexés par rowIndex POSITIONNEL (cf. state déclaré plus haut) et n'ont plus de
+ * sens après un réordonnancement — sans ce reset, une surcharge de style resterait
+ * accrochée à l'ancien numéro de position et s'appliquerait à la MAUVAISE ligne. Les
+ * cell:validate envoyés dans la foulée par le serveur (revalidateAllRows) repeuplent
+ * cellStyleOverrides proprement à la bonne position via onRowValidate.
+ */
+function onRowsMoved(msg) {
+  state.rows = msg.rows || [];
+  state.styleOverrides     = {};
+  state.cellStyleOverrides = {};
+  if (typeof msg.pendingCount === 'number') state.pendingCount = msg.pendingCount;
+  if (state.gridApi) {
+    state.gridApi.setGridOption('rowData', [...state.rows]);
+    state.gridApi.redrawRows();
+    state.gridApi.refreshCells({ force: true });
+    if (state.reviewMode) state.gridApi.refreshHeader();
+  }
+  updateRowCount();
+  updateReviewToolbar();
+  updateMoveButtonsState();
+  addMessage('system', '↕ Ordre des lignes mis à jour.');
+}
+
 // ── Ajout de lignes ───────────────────────────────────────────────────────────
 function addRowAfterSelected() {
   const colonnes  = state.workerConfig?.colonnes || [];
@@ -1469,7 +1572,20 @@ function onPlanReceived(planText) {
 }
 
 // ── Act terminé ───────────────────────────────────────────────────────────────
-function onActDone(updatedRows, pendingCount) {
+// actionsResume { inserted, updated, deleted } : uniquement fourni en editionParActions
+// (cf. llmClient.js applyRowActions) — le rendu cellule par cellule (state.updatedCells)
+// est désactivé pour ce contrat (insert/delete décaleraient les index), donc sans ce
+// résumé le message de fin affichait toujours "0 cellule(s) mise(s) à jour" même après
+// de vraies insertions/suppressions.
+function buildActionsResumeText(resume) {
+  const parts = [];
+  if (resume.inserted) parts.push(`${resume.inserted} ligne${resume.inserted > 1 ? 's' : ''} ajoutée${resume.inserted > 1 ? 's' : ''}`);
+  if (resume.updated)  parts.push(`${resume.updated} ligne${resume.updated > 1 ? 's' : ''} modifiée${resume.updated > 1 ? 's' : ''}`);
+  if (resume.deleted)  parts.push(`${resume.deleted} ligne${resume.deleted > 1 ? 's' : ''} supprimée${resume.deleted > 1 ? 's' : ''}`);
+  return parts.length ? parts.join(', ') : 'aucune modification';
+}
+
+function onActDone(updatedRows, pendingCount, actionsResume) {
   state.rows = updatedRows;
   if (typeof pendingCount === 'number') state.pendingCount = pendingCount;
   if (state.gridApi) {
@@ -1486,7 +1602,8 @@ function onActDone(updatedRows, pendingCount) {
     }
   }
   updateRowCount();
-  addMessage('system', `✓ Terminé — ${state.updatedCells} cellule(s) mise(s) à jour.`);
+  const resumeText = actionsResume ? buildActionsResumeText(actionsResume) : `${state.updatedCells} cellule(s) mise(s) à jour`;
+  addMessage('system', `✓ Terminé — ${resumeText}.`);
   setStatusBadge('paused', 'Terminé');
   setStatusMessage(state.reviewMode ? 'Vérifie et valide les propositions IA ci-dessous.' : 'Vérifie et valide ou continue.');
   setAiRunning(false);
@@ -1510,6 +1627,7 @@ function onReviewSync(msg) {
   }
   updateRowCount();
   updateReviewToolbar();
+  updateMoveButtonsState();
 }
 
 // ── Barre de revue globale + bouton "Valider et exporter" (mode revue) ────────
@@ -1622,6 +1740,11 @@ function bindUI() {
       el('prompt-input').value = e.target.value;
       e.target.value = '';
       el('prompt-input').focus();
+      // Affectation directe de .value → ne déclenche pas l'event 'input' dont dépend
+      // updateSendButtonState (cf. écouteur plus bas) : sans cet appel explicite, le
+      // bouton d'envoi restait grisé après le choix d'une suggestion tant que le champ
+      // était vide auparavant, jusqu'à une frappe manuelle supplémentaire.
+      updateSendButtonState();
     }
   });
 
@@ -1678,6 +1801,9 @@ function bindUI() {
   // Actions grille
   el('btn-add-row').addEventListener('click', () => addRowAfterSelected());
   el('btn-delete-rows').addEventListener('click', () => deleteSelectedRows());
+  el('btn-move-up').addEventListener('click', () => moveSelectionUp());
+  el('btn-move-down').addEventListener('click', () => moveSelectionDown());
+  el('btn-move-after').addEventListener('click', () => moveSelectionAfterFocused());
 
   // Download bar
   el('btn-download-close').addEventListener('click', () => hide('download-bar'));
@@ -2221,6 +2347,9 @@ function setAiRunning(running) {
   el('prompt-input').disabled     = running;
 el('btn-send-label').innerHTML = running ? '…' : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6 Q5 12 4 18"/><path d="M20 12 L4 6"/><path d="M20 12 L4 18"/><line x1="4" y1="12" x2="14" y2="12"/></svg>';
   el('btn-send-spinner').classList.toggle('hidden', !running);
+  // Boutons de déplacement : NE PAS les ajouter au forEach générique ci-dessus — il les
+  // réactiverait aveuglément (running=false) sans revérifier les bornes de sélection.
+  updateMoveButtonsState();
 }
 
 function disableAllControls() {
@@ -2233,6 +2362,9 @@ function disableAllControls() {
   el('prompt-input').disabled = true;
   el('btn-add-row').disabled  = true;
   el('btn-delete-rows').disabled = true;
+  el('btn-move-up').disabled    = true;
+  el('btn-move-down').disabled  = true;
+  el('btn-move-after').disabled = true;
 }
 
 function sendWS(data) {
