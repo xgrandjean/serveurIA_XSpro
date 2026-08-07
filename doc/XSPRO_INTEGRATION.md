@@ -499,6 +499,10 @@ priorité :
 `worker-config.json`) ; `DATA_DIR` aux fichiers écrits à l'exécution
 (`.worker.lock`, `exports/`).
 
+> Cette étape n'est que la 1ʳᵉ d'une checklist plus large avant de livrer un
+> nouvel installateur XSpro (serveur Python local, `coursInteractifs`,
+> `electron-builder`) — voir [`XSpro/docs/mise-en-production.md`](../../XSpro/docs/mise-en-production.md).
+
 ---
 
 ## 7. Séquence complète

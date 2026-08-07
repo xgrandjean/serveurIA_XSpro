@@ -36,7 +36,9 @@ les assets (`public/`, `views/`, `worker-config.json`, `standalone/`) embarqués
 rafraîchis automatiquement s'ils sont plus récents que la copie de travail de XSpro.
 
 Détails complets (spawn, variables d'environnement, cycle de vie, `pkg`) :
-[`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md).
+[`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md). Cette étape n'est qu'une partie
+de la checklist complète avant de livrer un nouvel installateur XSpro : voir
+[`XSpro/docs/mise-en-production.md`](../../XSpro/docs/mise-en-production.md).
 
 ## Structure des dossiers
 
