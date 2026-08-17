@@ -56,14 +56,28 @@ Le port est configurable dans `ai-worker/worker-config.json` (défaut : `8888`).
   une session XSpro précédente), XSpro s'y raccroche sans spawner de doublon.
 - **Icône de zone de notification** : XSpro affiche sa propre icône (son propre logo,
   pas de tray Electron dédié au Worker) tant que le Worker est joignable, avec un menu
-  (Ouvrir l'interface / Arrêter le serveur). "Arrêter" est désactivé si XSpro n'a pas
-  lui-même démarré le process (rétrocompatibilité : on ne tue jamais un Worker lancé
-  manuellement).
+  (Ouvrir l'interface / Arrêter le serveur).
+  > **Mise à jour (17/08/2026)** : "Arrêter"/"Inactif" fonctionne désormais **quelle que
+  > soit l'instance XSpro qui a démarré le Worker** — plusieurs fenêtres/instances XSpro
+  > peuvent partager le même Worker sans que chacune connaisse forcément son propre
+  > historique de démarrage. Si l'instance courante n'a pas elle-même le handle du
+  > process (ex: Worker démarré par une autre fenêtre, ou lancé manuellement), XSpro
+  > retrouve le process réel via le PID inscrit dans `.worker.lock` (§ci-dessous) et
+  > l'arrête directement (`taskkill /F /PID`, plus fiable que `process.kill` sur Windows
+  > pour un process qu'on ne possède pas). Ancien comportement (avant cette date) :
+  > "Arrêter" était désactivé et sans effet si ce n'était pas *cette même instance* qui
+  > avait spawné le Worker.
 - **Auto-démarrage** : si `promptGeneratorAutoStart: true` dans `parametresAi.json`
   (persisté par le dernier choix "Actif" de l'utilisateur), XSpro relance
   automatiquement le Worker au démarrage de l'application — sans jamais dupliquer une
-  instance déjà active. Fermer XSpro normalement arrête le process managé mais **ne**
-  désactive **pas** cette option (seul un clic explicite sur "Inactif" le fait).
+  instance déjà active.
+  > **Mise à jour (17/08/2026)** : fermer XSpro (n'importe quelle instance) **n'arrête
+  > plus jamais** le process Worker managé, même si c'est cette instance qui l'avait
+  > démarré — décision explicite pour ne pas couper un Worker encore utilisé par
+  > d'autres instances XSpro éventuellement ouvertes. Seul un clic explicite sur
+  > "Inactif" (menu Préférences ou tray, n'importe quelle instance) arrête le process.
+  > `promptGeneratorAutoStart` (la persistance du choix "Actif"/"Inactif" pour le
+  > prochain démarrage) n'est, comme avant, jamais modifié par une fermeture normale.
 - **Fraîcheur du binaire et des assets** : à chaque tentative de démarrage (si aucune
   instance n'est déjà détectée active), XSpro compare la date de `serveurIA.exe` et du
   dossier `serveurIA-data/` embarqués dans le bundle applicatif avec leurs copies dans
@@ -209,7 +223,6 @@ Si XSpro ne répond pas dans **5 secondes** → le Worker génère un export `.x
 - `contextName` absent de la liste blanche (si liste blanche non vide)
 - `workerConfig.colonnes` manquant ou vide
 - `workerConfig.copyToClipBoard === true` (fonctionnalité non supportée par ce Worker)
-- `workerConfig.exportExcel === false` (requête standard sans export, le Worker ne produit qu'un export Excel)
 - Payload structurellement invalide
 
 ```json
@@ -228,16 +241,24 @@ Si XSpro ne répond pas dans **5 secondes** → le Worker génère un export `.x
 
 ### Flags de capacité `workerConfig`
 
-Le Worker inspecte deux flags optionnels dans `workerConfig` pour valider sa capacité à traiter la requête :
+Le Worker inspecte un flag optionnel dans `workerConfig` pour valider sa capacité à traiter la requête :
 
 | Flag | Valeur bloquante | Raison du refus | Message renvoyé |
 |---|---|---|---|
 | `copyToClipBoard` | `true` | Copie au presse-papier non supportée par ce Worker | `"copyToClipBoard demandé mais non supporté par ce Worker"` |
-| `exportExcel` | `false` | Requête standard sans export — le Worker ne produit qu'un export Excel comme résultat | `"exportExcel=false — requête standard sans export non gérée par ce Worker"` |
 
-Ces vérifications sont effectuées **après** la validation structurelle et **avant** le filtrage par liste blanche/noire.
+Cette vérification est effectuée **après** la validation structurelle et **avant** le filtrage par liste blanche/noire.
 
-> **Note** : En mode standalone (`callbackUrl: null`), ces flags sont ignorés car le Worker utilise toujours le fallback Excel.
+> **Note** : En mode standalone (`callbackUrl: null`), ce flag est ignoré car le Worker utilise toujours le fallback Excel.
+
+> **Mise à jour (17/08/2026)** : `workerConfig.exportExcel === false` **ne rejette plus** la
+> requête (ancien comportement, avant cette date : rejet avec le message "exportExcel=false —
+> requête standard sans export non gérée par ce Worker"). Le flag `exportExcel` reste transmis
+> tel quel dans `workerConfig` (usage cosmétique résiduel côté Worker, ex. choix des prompts
+> suggérés dans sa propre UI), mais ne conditionne plus l'acceptation de la requête — la
+> destination du résultat (export Excel ou autre) se décide désormais côté XSpro, **après**
+> réception du résultat, pas avant l'envoi (voir `XSpro/docs/contrat_generateur_prompt_externe.md`
+> §2.1.2 et §3.2).
 
 ---
 

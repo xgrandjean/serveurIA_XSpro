@@ -27,8 +27,15 @@ npm install
 Ce serveur peut être lancé manuellement (`npm start`, ou l'appli Electron autonome —
 tray icône dans la zone de notification) **ou** géré directement par XSpro (menu
 *Préférences → Serveur IA externe*, sans tray propre puisque c'est alors XSpro qui
-pilote le cycle de vie). Les deux modes sont pleinement rétrocompatibles : un
-lancement manuel n'est jamais perturbé par XSpro (jamais dupliqué, jamais arrêté).
+pilote le cycle de vie). Un lancement manuel n'est **jamais dupliqué** par XSpro
+(probe avant de spawner).
+
+> **Mise à jour (17/08/2026)** : un lancement manuel peut désormais être **arrêté**
+> explicitement depuis XSpro (menu *Préférences → Serveur IA externe → Inactif*, ou
+> tray) — XSpro retrouve le process réel via le PID inscrit dans `.worker.lock` et
+> l'arrête, même s'il ne l'a pas lui-même démarré. Avant cette date, "Inactif" restait
+> sans effet sur un process lancé manuellement. Voir `XSPRO_INTEGRATION.md` pour le
+> détail complet du cycle de vie.
 
 Pour livrer une modification de ce projet à XSpro : `npm run build:for-xspro`, puis
 redémarrer XSpro (ou juste basculer Inactif → Actif dans son menu) — l'exécutable et
