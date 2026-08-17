@@ -93,6 +93,18 @@
    pendingCount:       0,       // nombre de lignes portant une proposition IA en attente (mode revue)
  };
 
+// Comparaison de valeur "légère" (pas de deep-equal générique) — traite le cas des champs array
+// (choix, choixCorrect) élément par élément plutôt que par référence : un tableau reconstruit par
+// le cellEditor avec exactement le même contenu qu'avant n'est JAMAIS === à l'ancien tableau, ce
+// qui ferait sinon considérer à tort qu'un simple clic entrer/sortir d'une cellule sans rien
+// modifier est une vraie édition. Miroir de la même comparaison côté serveur (sessionManager.js).
+function valuesEqual(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 console.log('[Grisage] grid.js chargé — build avec grisage des champs non applicables (2026-07-30)');
 
@@ -413,8 +425,12 @@ function initGrid(colonnes, rows) {
 
     onCellValueChanged: (params) => {
       console.log(`[DEBUG-GRID] onCellValueChanged source="${params.source}" cle="${params.column.getColId()}" newValue="${JSON.stringify(params.newValue)}" oldValue="${JSON.stringify(params.oldValue)}"`);
-      // Ne pas traiter les changements émis par node.setDataValue() (source 'api')
-      if (params.source !== 'api') {
+      // Ne pas traiter les changements émis par node.setDataValue() (source 'api'), ni un
+      // "changement" qui n'en est pas un (entrer/sortir d'une cellule sans rien modifier —
+      // cf. valuesEqual : comparaison élément-par-élément pour les champs array comme
+      // choix/choixCorrect, qui sont reconstruits en un nouvel objet à chaque édition et ne
+      // sont donc jamais === à l'ancien même à contenu identique).
+      if (params.source !== 'api' && !valuesEqual(params.newValue, params.oldValue)) {
         const rowIndex = params.node.rowIndex;
         const cle      = params.column.getColId();
         if (state.rows[rowIndex]) {
@@ -431,7 +447,7 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
           state.gridApi.refreshCells({ rowNodes: [params.node], columns: [cle], force: true });
         }
       } else {
-        console.log(`[DEBUG-GRID] source="api" ignoré (programmatique)`);
+        console.log(`[DEBUG-GRID] source="${params.source}" ou valeur inchangée → cell:edit non envoyé`);
       }
       // Callback défini par la vue (ex: recalcule du style après édition)
       if (state.onCellEdit) state.onCellEdit(params);
@@ -1091,7 +1107,10 @@ const dataCols = colonnes.map(col => {
         const row = params.data;
         const isPending = !!(row?.__pendingFields && (col.cle in row.__pendingFields));
         if (!isPending) return base;
-        return { ...base, background: '#FFF8E1', boxShadow: 'inset 0 0 0 1px #F5A623' };
+        // backgroundColor (propriété longue), pas background (raccourcie) : le raccourci
+        // réinitialiserait background-image/-position/-repeat hérités de `base` — effaçant
+        // le triangle ⚠ d'une cellule à la fois invalide ET en attente de revue.
+        return { ...base, backgroundColor: '#FFF8E1', boxShadow: 'inset 0 0 0 1px #F5A623' };
       };
     }
 
@@ -1500,8 +1519,17 @@ function onRowValidate(msg) {
     if (k.startsWith(keyPrefix)) delete state.cellStyleOverrides[k];
   });
   if (invalidFields.length > 0) {
-// Style rouge pour chaque champ invalide
-    const invalidStyle = { background: '#FFEBEE', color: '#B71C1C', textDecoration: 'line-through' };
+// Style rouge pour chaque champ invalide, plus un repère triangle ⚠ en coin (superposé via
+// background-image, indépendant de backgroundColor) — la couleur seule peut passer inaperçue
+// (daltonisme, cellule déjà colorée pour une autre raison), le repère reste sans équivoque.
+    const invalidStyle = {
+      backgroundColor: '#FFEBEE',
+      color: '#B71C1C',
+      textDecoration: 'line-through',
+      backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='11' height='11'><path fill='%23e67e22' d='M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'/></svg>\")",
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'top 2px right 2px',
+    };
     invalidFields.forEach(cle => {
       state.cellStyleOverrides[`${rowIndex}:${cle}`] = invalidStyle;
     });

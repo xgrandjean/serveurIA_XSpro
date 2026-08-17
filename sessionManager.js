@@ -147,6 +147,17 @@ function setStatus(session, newStatus) {
   console.log(`[SessionManager] ${session.sessionId} → ${newStatus}`);
 }
 
+// Comparaison de valeur "légère" (miroir de la même fonction côté client, public/grid.js) — les
+// champs array (choix, choixCorrect) sont reconstruits en un nouveau tableau à chaque édition ;
+// une comparaison === les considérerait toujours différents même à contenu strictement identique,
+// empêchant le nettoyage de __pendingFields ci-dessous de fonctionner pour ces deux colonnes.
+function valuesEqual(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
+
 // ── Mise à jour d'une cellule ─────────────────────────────────────────────────
 /**
  * Modifie une valeur dans session.rows et met à jour lastActivityAt.
@@ -176,7 +187,7 @@ function setCellValue(session, rowIndex, cle, value) {
     if (!row.__pendingFields) row.__pendingFields = {};
     if (!(cle in row.__pendingFields)) row.__pendingFields[cle] = row[cle];
     row[cle] = value;
-    if (row.__pendingFields[cle] === value) {
+    if (valuesEqual(row.__pendingFields[cle], value)) {
       delete row.__pendingFields[cle];
       if (Object.keys(row.__pendingFields).length === 0) delete row.__pendingFields;
     }
