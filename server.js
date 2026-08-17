@@ -232,7 +232,7 @@ app.post('/process', async (req, res) => {
   }
 
   // ── Vérification des flags de capacité workerConfig ─────────────────────────
-  const { copyToClipBoard, exportExcel } = payload.workerConfig || {};
+  const { copyToClipBoard } = payload.workerConfig || {};
 
   // copyToClipBoard === true → XSpro demande une fonctionnalité non supportée
   if (copyToClipBoard === true) {
@@ -246,17 +246,10 @@ app.post('/process', async (req, res) => {
     return res.status(422).json({ status: 'unknown', message: 'copyToClipBoard non supporté' });
   }
 
-  // exportExcel === false → requête standard sans export, ce Worker ne produit qu'un export Excel comme résultat
-  if (exportExcel === false) {
-    await notifyXSpro(payload.callbackUrl, {
-      sessionId:   payload.sessionId,
-      contextName: payload.contextName,
-      status:      'unknown',
-      rows:        [],
-      message:     'exportExcel=false — requête standard sans export non gérée par ce Worker',
-    });
-    return res.status(422).json({ status: 'unknown', message: 'exportExcel=false non supporté (ce Worker produit un export Excel)' });
-  }
+  // exportExcel : n'est plus une condition d'acceptation de la requête — XSpro décide de la
+  // destination du résultat (copie presse-papier systématique, puis raccourcis optionnels) une
+  // fois le résultat reçu, pas avant l'envoi. La génération d'un Excel par CE Worker reste gérée
+  // ailleurs, uniquement en secours quand XSpro est injoignable (cf. deliverResult ci-dessous).
 
   // ── Vérification liste blanche / liste noire ────────────────────────────────
   if (!isContextAllowed(payload.contextName)) {
@@ -312,7 +305,9 @@ async function notifyXSpro(callbackUrl, payload) {
   if (!callbackUrl) return false;
 
   try {
-    const { default: fetch } = await import('node-fetch');
+    // Pas d'import dynamique ici : `open` a déjà cassé de cette façon une fois compilé
+    // via pkg (cf. ipcAI.js côté XSpro) — on utilise le fetch global natif (Node 18+,
+    // déjà la cible pkg de ce build), qui ne dépend d'aucune résolution ESM dynamique.
     const response = await fetch(callbackUrl, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
