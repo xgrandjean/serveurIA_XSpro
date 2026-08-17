@@ -672,7 +672,15 @@ const REQUIRED_FIELDS_BY_TYPE = {
 function getMissingFields(row) {
   const typeKey = valueToLabel('type', row.type);
   if (!typeKey) return [];
-  const required = REQUIRED_FIELDS_BY_TYPE[typeKey] || [];
+  let required = REQUIRED_FIELDS_BY_TYPE[typeKey] || [];
+  // "courte" + correction "manuel" : choixCorrect ne doit PAS être requis — cf. la règle déjà
+  // en place dans validateFieldAgainstType (~ligne 798) : "manuel" implique justement que
+  // choixCorrect reste vide (un humain juge la réponse libre), "auto"/"semi" l'exigent rempli.
+  // Sans cette exception, une ligne courte+manuel correctement vide serait quand même signalée
+  // "champ manquant", en contradiction directe avec la règle qui l'impose vide.
+  if (typeKey === 'courte' && valueToLabel('correction', row.correction) === 'manuel') {
+    required = required.filter(f => f !== 'choixCorrect');
+  }
   return required.filter(f => isEmptyVal(row[f]));
 }
 

@@ -30,7 +30,7 @@
         "regle": ["texte", "nombre"],
         "correction": ["auto", "semi", "manuel"],
         "choix": "Vide — laisser [].",
-        "choixCorrect": "Array de strings : toutes les réponses acceptables. Ex: [\"herbivore\", \"végétarien\"]. Respecte la casse exacte.",
+        "choixCorrect": "Dépend de \"correction\". Si correction=\"auto\" ou \"semi\" : requis, array de strings avec toutes les réponses acceptables. Ex: [\"herbivore\", \"végétarien\"]. Respecte la casse exacte. Si correction=\"manuel\" : vide ([]) — un correcteur humain juge la réponse librement, aucune réponse de référence n'est nécessaire ni attendue.",
         "ordre_choix": [" "],
         "points": "Entier 1-3 selon difficulté."
       },
