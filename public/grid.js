@@ -181,6 +181,44 @@ function handleWSMessage(msg) {
   }
 }
 
+// ── Normalisation des lignes reçues du serveur ────────────────────────────────
+// XSpro envoie certains champs à liste de choix en CODE TEXTE ("cours", "qcm"), voire
+// en libellé d'affichage ("Cours"), alors que l'UI les manipule en INDICE numérique :
+// c'est l'indice que reconnaissent les dropdowns AG Grid, et surtout les tables
+// champsNonApplicables / champsRestreints, toutes deux indexées par la valeur numérique
+// du type (cf. isFieldNonApplicable).
+// À rejouer sur CHAQUE lot de lignes reçu, pas seulement à l'init : le serveur renvoie
+// `type` en code texte (il ne le normalise plus, pour ne pas écraser les types non-QCM
+// proposés par l'IA), donc sans cette passe le grisage, la restriction des listes
+// déroulantes et les rowStyles cessaient de fonctionner dès la première requête IA.
+const STR_TO_IDX_PAR_CHAMP = {
+  type: {
+    'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5,
+    'QCM': 1, 'Réponse courte': 2, 'Texte long': 3, 'Liste de choix': 4, 'Cours': 5,
+    '': 0, ' ': 0
+  },
+  regle:       { 'validation': 1, 'unique': 2, 'multiple': 3, 'texte': 4, 'texte(10)': 5, 'nombre': 6, '': 0, ' ': 0 },
+  correction:  { 'auto': 1, 'manuel': 2, 'semi': 3, '': 0, ' ': 0 },
+  ordre_choix: { 'aleatoire': 1, 'fixe': 2, '': 0, ' ': 0 },
+};
+
+function normaliserLignesEntrantes(rows) {
+  // On MÉMORISE quels champs ont réellement été convertis : cette conversion n'existe
+  // que pour l'affichage, et doit être défaite symétriquement avant tout renvoi au
+  // serveur — sans quoi XSpro reçoit un indice là où il a envoyé un code texte, et son
+  // parse() le rejette (cf. valeurPourServeur/rowsPourServeur plus bas).
+  if (!state.champsConvertisEnIndice) state.champsConvertisEnIndice = new Set();
+  for (const row of rows || []) {
+    for (const [cle, strToIdx] of Object.entries(STR_TO_IDX_PAR_CHAMP)) {
+      if (row[cle] !== undefined && typeof row[cle] === 'string' && strToIdx[row[cle]] !== undefined) {
+        row[cle] = strToIdx[row[cle]];
+        state.champsConvertisEnIndice.add(cle);
+      }
+    }
+  }
+  return rows;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 function onInit(msg) {
   state.workerConfig = msg.workerConfig;
@@ -243,29 +281,7 @@ function onInit(msg) {
   // XSpro envoie des strings comme "cours", "qcm" ou aussi les labels français
   // (ex: "Cours" depuis le payload), il faut les convertir en indices numériques
   // pour que AG Grid les reconnaisse dans les dropdowns.
-  const typeStrToIdx = {
-    'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5,
-    'QCM': 1, 'Réponse courte': 2, 'Texte long': 3, 'Liste de choix': 4, 'Cours': 5,
-    '': 0, ' ': 0
-  };
-  const regleStrToIdx = { 'validation': 1, 'unique': 2, 'multiple': 3, 'texte': 4, 'texte(10)': 5, 'nombre': 6, '': 0, ' ': 0 };
-  const correctionStrToIdx = { 'auto': 1, 'manuel': 2, 'semi': 3, '': 0, ' ': 0 };
-  const ordreStrToIdx = { 'aleatoire': 1, 'fixe': 2, '': 0, ' ': 0 };
-  const allStrToIdx = { type: typeStrToIdx, regle: regleStrToIdx, correction: correctionStrToIdx, ordre_choix: ordreStrToIdx };
-
-  // On MÉMORISE quels champs ont réellement été convertis : cette conversion n'existe
-  // que pour l'affichage (dropdowns AG Grid), et doit être défaite symétriquement avant
-  // tout renvoi au serveur — sans quoi XSpro reçoit un indice là où il a envoyé un code
-  // texte, et son parse() le rejette (cf. valeurPourServeur/rowsPourServeur plus bas).
-  state.champsConvertisEnIndice = new Set();
-  for (const row of state.rows) {
-    for (const [cle, strToIdx] of Object.entries(allStrToIdx)) {
-      if (row[cle] !== undefined && typeof row[cle] === 'string' && strToIdx[row[cle]] !== undefined) {
-        row[cle] = strToIdx[row[cle]];
-        state.champsConvertisEnIndice.add(cle);
-      }
-    }
-  }
+  normaliserLignesEntrantes(state.rows);
 
   // Colonnes dérivées (formules de calcul)
   state.colonnesDerivees = msg.colonnesDerivees || {};
@@ -1338,7 +1354,7 @@ function updateMoveButtonsState() {
  * cellStyleOverrides proprement à la bonne position via onRowValidate.
  */
 function onRowsMoved(msg) {
-  state.rows = msg.rows || [];
+  state.rows = normaliserLignesEntrantes(msg.rows || []);
   state.styleOverrides     = {};
   state.cellStyleOverrides = {};
   if (typeof msg.pendingCount === 'number') state.pendingCount = msg.pendingCount;
@@ -1721,8 +1737,54 @@ function buildActionsResumeText(resume) {
   return parts.length ? parts.join(', ') : 'aucune modification';
 }
 
+// ── Trace de diagnostic du mode revue ─────────────────────────────────────────
+// Le chemin "retour d'IA" n'avait aucune trace, ce qui rendait impossible de dire, face
+// à un marquage absent, si les marqueurs manquaient a l'arrivee ou si seul le rendu
+// echouait. On mesure les deux : ce que portent les donnees, et ce qui est reellement
+// peint dans le DOM. La mesure DOM est differee d'un tick, les cellules n'etant pas
+// encore rendues au retour de refreshCells().
+function tracerEtatRevue(origine, pendingCount, actionsResume) {
+  if (!state.reviewMode) return;
+  const rows = state.rows || [];
+  // Les trois marqueurs comptent pour countPendingRows cote serveur : ne regarder que
+  // __pendingFields donnait un "0 en attente" trompeur face a un pendingCount non nul,
+  // alors qu'une ligne inseree ou proposee a la suppression se marque au niveau LIGNE
+  // (fond vert / rouge barre) et non cellule par cellule.
+  const champsEnAttente = rows.filter(r => r.__pendingFields && Object.keys(r.__pendingFields).length);
+  const inseres   = rows.filter(r => r.__pendingInsert).length;
+  const supprimes = rows.filter(r => r.__pendingDelete).length;
+  const champs = [...new Set(champsEnAttente.flatMap(r => Object.keys(r.__pendingFields)))];
+  const typesNonNumeriques = rows.filter(r => r.type !== undefined && typeof r.type !== 'number').length;
+  const resume = actionsResume
+    ? `+${actionsResume.inserted || 0}/~${actionsResume.updated || 0}/-${actionsResume.deleted || 0}`
+    : 'n/a';
+  setTimeout(() => {
+    const ambre = document.querySelectorAll('.field-pending-wrap, .field-pending-wrap-multiline').length;
+    // Dedoublonnage par row-index : AG Grid rend chaque ligne DEUX fois (conteneur des
+    // colonnes epinglees + conteneur central), ce qui doublerait le compte.
+    const lignesMarquees = new Set(
+      Array.from(document.querySelectorAll('.ag-row')).filter(l => {
+        const bg = getComputedStyle(l).backgroundColor;
+        return bg === 'rgb(198, 246, 213)' || bg === 'rgb(254, 215, 215)';
+      }).map(l => l.getAttribute('row-index'))
+    ).size;
+    console.log(`[Revue] ${origine} — ${rows.length} ligne(s) | actions IA (ins/maj/suppr): ${resume} `
+      + `| marqueurs: champs=${champsEnAttente.length} inseres=${inseres} supprimes=${supprimes} `
+      + `| pendingCount=${pendingCount} | champs marques: ${champs.join(', ') || '(aucun)'} `
+      + `| cellules ambre: ${ambre} | lignes colorees: ${lignesMarquees}`);
+    if (pendingCount > 0 && champsEnAttente.length + inseres + supprimes === 0) {
+      console.warn("[Revue] Le serveur annonce des propositions en attente mais AUCUN marqueur n'est arrive — copier ce log.");
+    } else if (champsEnAttente.length > 0 && ambre === 0) {
+      console.warn("[Revue] Marqueurs de champs recus mais AUCUNE cellule marquee a l'ecran — copier ce log.");
+    }
+    if (typesNonNumeriques > 0) {
+      console.warn(`[Revue] ${typesNonNumeriques} ligne(s) avec un type non numerique — grisage et listes restreintes inoperants.`);
+    }
+  }, 0);
+}
+
 function onActDone(updatedRows, pendingCount, actionsResume) {
-  state.rows = updatedRows;
+  state.rows = normaliserLignesEntrantes(updatedRows);
   if (typeof pendingCount === 'number') state.pendingCount = pendingCount;
   if (state.gridApi) {
     state.gridApi.setGridOption('rowData', [...updatedRows]);
@@ -1745,11 +1807,12 @@ function onActDone(updatedRows, pendingCount, actionsResume) {
   setAiRunning(false);
   hideProgress();
   updateReviewToolbar();
+  tracerEtatRevue('act:done', pendingCount, actionsResume);
 }
 
 // ── Revue par pending — synchronisation après approve/reject (mode revueParPending) ──
 function onReviewSync(msg) {
-  state.rows        = msg.rows || [];
+  state.rows        = normaliserLignesEntrantes(msg.rows || []);
   state.pendingCount = msg.pendingCount || 0;
   if (state.gridApi) {
     state.gridApi.setGridOption('rowData', [...state.rows]);
