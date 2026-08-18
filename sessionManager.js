@@ -272,11 +272,22 @@ function deleteSession(sessionId) {
  * Retourne une copie profonde des rows courants.
  * Utilisé avant export ou renvoi à XSpro.
  *
+ * `_id` est VOLONTAIREMENT conservé (il était retiré ici jusqu'au 18/08/2026) : il vaut
+ * index+1 dans data.lignes et reste stable toute la session, ce qui en fait le seul lien
+ * entre une ligne renvoyée et la ligne d'origine côté XSpro. Ce dernier s'en sert pour
+ * réattacher les champs qu'il ne nous transmet jamais — l'image des questions
+ * (imageQuestion, base64 volumineux) est gardée chez lui et réassociée au retour.
+ * Sans identifiant, un « Remplacer toute la vue » perdait toutes les images.
+ * Il ne pollue rien : l'export Excel de secours n'écrit que colonnesExport, et le parse()
+ * de XSpro ne recopie que les colonnes attendues — `_id` y est ignoré, jamais écrit en base.
+ * Les lignes créées par l'IA reçoivent un `_id` neuf (consumeNextId) sans ligne source
+ * correspondante, ce qui est correct : elles n'ont pas d'image à retrouver.
+ *
  * @param {Object} session
  * @returns {Array}
  */
 function snapshotRows(session) {
-  return session.rows.map(({ _id, __pendingFields, __pendingInsert, __pendingDelete, ...rest }) => ({ ...rest }));
+  return session.rows.map(({ __pendingFields, __pendingInsert, __pendingDelete, ...rest }) => ({ ...rest }));
 }
 
 // ── Revue des propositions (IA + manuelles, mode revueParPending) ─────────────

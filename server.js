@@ -512,12 +512,16 @@ async function handleUIMessage(session, msg) {
       // état final après commit et effets de bord. pendingCount permet au client de
       // mettre à jour la visibilité de "Valider et exporter" sans repasser par
       // review:sync (édition manuelle = pas de changement de rows, juste de champ).
+      // pendingFields transporte l'OBJET complet { champ: valeurOrigine } et non ses
+      // seules clés : le client s'en sert pour afficher l'ancienne valeur au survol, et
+      // n'a aucun autre moyen de la connaître (review:sync n'est pas émis ici). N'envoyer
+      // que les clés écrasait les valeurs d'origine déjà reçues pour cette ligne.
       const finalRow = session.rows[rowIndex];
       wsSend(session, {
         type: 'cell:validate',
         rowIndex,
         invalidFields,
-        pendingFields: session.reviewMode ? Object.keys(finalRow?.__pendingFields || {}) : [],
+        pendingFields: session.reviewMode ? { ...(finalRow?.__pendingFields || {}) } : {},
         pendingCount: session.reviewMode ? SM.countPendingRows(session) : undefined,
         message: validateMessage,
       });

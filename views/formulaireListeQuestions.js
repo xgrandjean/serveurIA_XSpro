@@ -255,9 +255,13 @@ const MANIFEST = {
 /**
  * Deux modes de travail.
  *
- * analyse  : l'utilisateur consulte et améliore des questions existantes.
+ * analyse  : l'utilisateur corrige et améliore des questions existantes.
  *            Le LLM voit l'intégralité des données — il modifie, corrige,
  *            complète ou restructure ce qui lui est soumis.
+ *            La clé du mode reste 'analyse' (compatibilité de l'historique de
+ *            session et du JSON pairé), mais son libellé ne parle plus d'analyse :
+ *            ce mode ÉCRIT dans les lignes, il ne produit aucun bilan rédigé —
+ *            l'ancien libellé « Analyse / Modification » le laissait croire.
  *
  * creation : l'utilisateur génère de nouvelles questions depuis le contenu
  *            des cours du chapitre ou depuis des documents joints (PDF, ZIP).
@@ -267,8 +271,8 @@ const MANIFEST = {
 const MODES = {
 
   analyse: {
-    label: 'Analyse / Modification',
-    description: 'Consulter et améliorer des questions existantes — corriger, reformuler, compléter les champs annexes notamment (indication, consigne de correction à donner à l\'IA pour cette ligne)',
+    label: 'Correction / Amélioration',
+    description: 'Corriger et améliorer des questions existantes — reformuler, ajuster, compléter les champs annexes notamment (indication, consigne de correction à donner à l\'IA pour cette ligne). Modifie les lignes, ne produit pas de bilan rédigé.',
 
     surchargesColonnes: {
       type:                  { width: 90 ,pinned:     'left'},
@@ -359,8 +363,31 @@ function buildSelectChoix(workerConfig, data, xsproPayload) {
   // (identique au comportement de niveauListe dans detailsDevis.js).
   return {
 
+    // ── 'type' : PAS de sendLabel, contrairement aux trois champs suivants ──────
+    // Pour regle/correction/ordre_choix, `label` est À LA FOIS le texte affiché ET le
+    // mot du vocabulaire imposé au LLM (regles.valeursPossibles) : les deux coïncident,
+    // donc l'aller-retour indice↔libellé de normalizeSelectChoixValue fonctionne.
+    //
+    // Pour 'type' ils DIVERGENT : le vocabulaire du prompt est ['qcm','courte',
+    // 'ouverte','selection','cours'] alors que les libellés d'affichage sont 'Réponse
+    // courte', 'Texte long', 'Liste de choix', 'Cours'. Avec sendLabel:true, la
+    // normalisation du retour comparait la réponse du LLM aux LIBELLÉS : seul 'qcm'
+    // coïncidait, et 'courte'/'ouverte'/'selection'/'cours' tombaient tous dans le
+    // fallback `sinon: 1` — donc TOUTE question non-QCM proposée par l'IA devenait un
+    // QCM. La corruption était même double : XSpro recevait alors l'entier 1, que son
+    // _normaliserLigne() convertit en "1", absent de typesValides, puis rapproche par
+    // Levenshtein (distance 3, dans le seuil) de… "qcm".
+    //
+    // XSpro envoie ce champ en CODE TEXTE (data.lignes → session.rows) et son parse()
+    // exige un code de typesValides = ['cours','qcm','courte','ouverte','selection'] :
+    // la bonne valeur stockée est donc le code lui-même, jamais un indice. Sans
+    // sendLabel, normalizeSelectChoixRow() ignore ce champ et la proposition de l'IA est
+    // conservée telle quelle — les fautes de frappe restent rattrapées en aval par le
+    // _closestMatch() de XSpro, et signalées visuellement par getInvalidFields() ici.
+    // L'export Excel reste correct : la valeur EST déjà le libellé attendu (identique à
+    // exportFormat.type.labels ci-dessus), que convertValueForExport laisse passer.
+    // Les `choix` restent nécessaires au dropdown et à l'affichage de la grille Worker.
     type: {
-      sendLabel: true,
       choix: [
         { valeur: 0, label: ' ' },
         { valeur: 1, label: 'qcm' },
@@ -369,11 +396,6 @@ function buildSelectChoix(workerConfig, data, xsproPayload) {
         { valeur: 4, label: 'Liste de choix' },
         { valeur: 5, label: 'Cours' },
       ],
-      fallback: {
-        siCondition: { champ: 'type', op: 'empty' },
-        alors: 0,
-        sinon: 1,
-      },
     },
 
     regle: {

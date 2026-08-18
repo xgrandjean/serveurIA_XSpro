@@ -611,7 +611,34 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   font-size: 12px;
   font-weight: 700;
   color: #8A5A00;
+  /* Largeur minimale : le libellé alterne entre "Ligne X sur Y en attente" et
+     "Y lignes en attente" selon la position du focus — sans ça, les contrôles
+     voisins se décaleraient à chaque déplacement dans la grille. */
+  min-width: 190px;
 }
+/* Navigation d'une proposition à l'autre + filtre, dans la barre de revue */
+#btn-review-prev,
+#btn-review-next {
+  background: #FFF;
+  border: 1px solid #F5A623;
+  color: #8A5A00;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 3px 7px;
+}
+#btn-review-prev:hover,
+#btn-review-next:hover { background: #FFF3D6; }
+#review-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #8A5A00;
+  cursor: pointer;
+  user-select: none;
+}
+#review-filter input { cursor: pointer; }
 
 /* Cellule en attente (champ) — surlignage + mini ✓/✗ (validation "individuellement") */
 .field-pending-wrap {

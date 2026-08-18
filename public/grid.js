@@ -91,6 +91,7 @@
    onCellEdit:         null,    // callback(rowIndex, cle, newValue) définie par la vue
    reviewMode:         false,   // mode revue par pending actif pour cette vue (cf. MANIFEST.revueParPending)
    pendingCount:       0,       // nombre de lignes portant une proposition IA en attente (mode revue)
+   reviewFiltrePendingSeul: false, // filtre "en attente seulement" de la barre de revue
  };
 
 // Comparaison de valeur "légère" (pas de deep-equal générique) — traite le cas des champs array
@@ -252,10 +253,16 @@ function onInit(msg) {
   const ordreStrToIdx = { 'aleatoire': 1, 'fixe': 2, '': 0, ' ': 0 };
   const allStrToIdx = { type: typeStrToIdx, regle: regleStrToIdx, correction: correctionStrToIdx, ordre_choix: ordreStrToIdx };
 
+  // On MÉMORISE quels champs ont réellement été convertis : cette conversion n'existe
+  // que pour l'affichage (dropdowns AG Grid), et doit être défaite symétriquement avant
+  // tout renvoi au serveur — sans quoi XSpro reçoit un indice là où il a envoyé un code
+  // texte, et son parse() le rejette (cf. valeurPourServeur/rowsPourServeur plus bas).
+  state.champsConvertisEnIndice = new Set();
   for (const row of state.rows) {
     for (const [cle, strToIdx] of Object.entries(allStrToIdx)) {
       if (row[cle] !== undefined && typeof row[cle] === 'string' && strToIdx[row[cle]] !== undefined) {
         row[cle] = strToIdx[row[cle]];
+        state.champsConvertisEnIndice.add(cle);
       }
     }
   }
@@ -413,6 +420,12 @@ function initGrid(colonnes, rows) {
       }
     },
     
+    // Filtre "en attente seulement" de la barre de revue (mode revueParPending).
+    // API de filtre externe d'AG Grid — aucun autre filtre n'est utilisé dans ce
+    // projet, donc pas de conflit possible avec un filtre de colonne.
+    isExternalFilterPresent: () => state.reviewMode && state.reviewFiltrePendingSeul,
+    doesExternalFilterPass: (node) => hasPendingMarkerClient(node.data),
+
     onCellFocused: (params) => {
       // Rediriger le focus si on arrive sur le header (rowIndex négatif)
       const colId = params.previousColumn?.getColId() || params.column?.getColId() || state.workerConfig?.colonnes?.[0]?.cle;
@@ -421,6 +434,9 @@ function initGrid(colonnes, rows) {
           state.gridApi.setFocusedCell(0, colId);
         }, 0);
       }
+      // Compteur positionnel "Ligne X sur Y" — doit suivre aussi les clics directs
+      // dans la grille, pas seulement les boutons ⏮/⏭.
+      if (state.reviewMode) updateReviewToolbar();
     },
 
     onCellValueChanged: (params) => {
@@ -434,8 +450,11 @@ function initGrid(colonnes, rows) {
         const rowIndex = params.node.rowIndex;
         const cle      = params.column.getColId();
         if (state.rows[rowIndex]) {
-          console.log(`[DEBUG-GRID] envoie cell:edit rowIndex=${rowIndex} cle="${cle}" value="${JSON.stringify(params.newValue)}"`);
-          sendWS({ type: 'cell:edit', rowIndex, cle, value: params.newValue });
+          // Le dropdown produit l'indice d'affichage : le reconvertir en code texte pour
+          // le serveur si ce champ avait été converti à l'entrée (cf. valeurPourServeur).
+          const valeurServeur = valeurPourServeur(cle, params.newValue);
+          console.log(`[DEBUG-GRID] envoie cell:edit rowIndex=${rowIndex} cle="${cle}" value="${JSON.stringify(valeurServeur)}"`);
+          sendWS({ type: 'cell:edit', rowIndex, cle, value: valeurServeur });
 state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuration: 150, fadeDuration: 400 });
 
           // Plus besoin de recalcul de hauteur - hauteur fixe de 40px pour toutes les lignes
@@ -1073,6 +1092,19 @@ const dataCols = colonnes.map(col => {
         }
         if (!isPending) return inner;
 
+        // Tooltip "Avant / Après" — la valeur d'origine est conservée dans __pendingFields
+        // (posée par applyRowActions pour l'IA, par setCellValue pour une édition manuelle)
+        // mais seule sa PRÉSENCE servait jusqu'ici, pour le surlignage ; sa valeur n'était
+        // jamais affichée, ce qui obligeait à valider/rejeter sans voir ce qu'on remplace.
+        const rowAvant = { ...row, ...row.__pendingFields };
+        const avant = formatValeurPourRevue(row.__pendingFields[col.cle], col, params, baseValueFormatter, rowAvant);
+        const apres = formatValeurPourRevue(params.value, col, params, baseValueFormatter, row);
+        const infobulle = `Avant : ${avant}\n──────────\nAprès : ${apres}`;
+        inner.title = infobulle;
+        // Les cellRenderer array et multiligne posent leur propre title sur un span ENFANT,
+        // qui l'emporterait au survol (le title le plus profond gagne) — on l'aligne.
+        inner.querySelectorAll('[title]').forEach(elt => { elt.title = infobulle; });
+
         const approveBtn = document.createElement('button');
         approveBtn.type = 'button';
         approveBtn.className = 'field-pending-btn field-pending-approve';
@@ -1126,6 +1158,42 @@ const dataCols = colonnes.map(col => {
 function hasPendingMarkerClient(row) {
   return !!(row && (row.__pendingInsert || row.__pendingDelete
     || (row.__pendingFields && Object.keys(row.__pendingFields).length > 0)));
+}
+
+// ── Rendu texte d'une valeur pour le tooltip de revue "Avant / Après" ─────────
+// Réutilise le valueFormatter de la colonne quand il existe (selectChoix → libellé,
+// numérique → format fr-FR) ; reproduit sinon ce que font les cellRenderer array et
+// multiligne, qui ne sont pas réutilisables ici (ils produisent des noeuds DOM).
+// `rowPourRefs` sert à résoudre les colonnes d'indices (champsIndexRef, ex.
+// choixCorrect → choix) : on lui passe la ligne AVANT pour l'ancienne valeur et la
+// ligne courante pour la nouvelle, sans quoi d'anciens indices seraient résolus
+// contre une liste de choix déjà remplacée — et afficheraient de faux libellés.
+const TOOLTIP_REVUE_MAX = 300;
+function formatValeurPourRevue(value, col, params, baseValueFormatter, rowPourRefs) {
+  const tronquer = (s) => (s.length > TOOLTIP_REVUE_MAX ? s.slice(0, TOOLTIP_REVUE_MAX) + '…' : s);
+  if (value === null || value === undefined || value === '') return '(vide)';
+
+  const refField = state.workerConfig?.champsIndexRef?.[col.cle];
+  if (refField) {
+    const refArray = Array.isArray(rowPourRefs?.[refField]) ? rowPourRefs[refField] : [];
+    const items = (Array.isArray(value) ? value : [])
+      .map(v => (typeof v === 'number' ? refArray[v] : undefined) ?? v)
+      .filter(v => v !== undefined && v !== null);
+    return items.length ? tronquer(items.join(' ⏎ ')) : '(vide)';
+  }
+
+  if (Array.isArray(value)) {
+    const items = value.flatMap(v => String(v).split(/\r?\n/)).map(s => s.trim()).filter(Boolean);
+    return items.length ? tronquer(items.join(' ⏎ ')) : '(vide)';
+  }
+
+  if (baseValueFormatter) {
+    const formate = baseValueFormatter({ ...params, value });
+    if (formate === null || formate === undefined || formate === '') return '(vide)';
+    return tronquer(String(formate));
+  }
+
+  return tronquer(String(value).replace(/<br\s*\/?>/gi, '\n'));
 }
 
 // ── En-tête fusionné sélection + revue (mode revueParPending) ─────────────────
@@ -1442,9 +1510,45 @@ function restoreDeletedRows(deletedRows) {
   addMessage('system', `↺ Ligne${deletedRows.length > 1 ? 's' : ''} restaurée${deletedRows.length > 1 ? 's' : ''}`);
 }
 
+// ── Frontière de sortie : indice d'affichage → code texte ────────────────────
+// Inverse exact de la conversion faite à l'init (cf. onInit, allStrToIdx). XSpro envoie
+// certains champs selectChoix en CODE TEXTE (`type` = "cours") et les attend sous cette
+// même forme au retour : son _normaliserLigne() les valide contre typesValides
+// (['cours','qcm','courte','ouverte','selection']) et ne connaît pas les indices. Pire,
+// un indice y est rattrapé par un rapprochement de Levenshtein — "1" est à distance 3 de
+// "qcm", dans le seuil — donc TOUTE ligne renvoyée avec un type numérique redevenait
+// silencieusement un QCM. La conversion en indice sert uniquement aux dropdowns AG Grid :
+// elle ne doit jamais franchir cette frontière.
+// Seuls les champs RÉELLEMENT convertis à l'entrée sont réinversés (champsConvertisEnIndice) :
+// regle/correction/ordre_choix arrivent déjà en indices depuis XSpro et doivent le rester.
+const CODES_PAR_INDICE = {
+  type:        ['', 'qcm', 'courte', 'ouverte', 'selection', 'cours'],
+  regle:       ['', 'validation', 'unique', 'multiple', 'texte', 'texte(10)', 'nombre'],
+  correction:  ['', 'auto', 'manuel', 'semi'],
+  ordre_choix: ['', 'aleatoire', 'fixe'],
+};
+
+function valeurPourServeur(cle, valeur) {
+  if (!state.champsConvertisEnIndice?.has(cle)) return valeur;
+  const codes = CODES_PAR_INDICE[cle];
+  // typeof number : une valeur déjà en texte (ex. restaurée par un rejet de proposition,
+  // qui renvoie la valeur d'origine telle quelle) passe inchangée.
+  if (!codes || typeof valeur !== 'number') return valeur;
+  return codes[valeur] ?? valeur;
+}
+
+function rowsPourServeur(rows) {
+  if (!state.champsConvertisEnIndice?.size) return rows;
+  return rows.map(row => {
+    const copie = { ...row };
+    for (const cle of state.champsConvertisEnIndice) copie[cle] = valeurPourServeur(cle, copie[cle]);
+    return copie;
+  });
+}
+
 // ── Sync rows → serveur ───────────────────────────────────────────────────────
 function syncRowsToServer() {
-  sendWS({ type: 'rows:sync', rows: state.rows });
+  sendWS({ type: 'rows:sync', rows: rowsPourServeur(state.rows) });
 }
 
 // ── Helper : conversion valeur selon le type de colonne (fallback sécurité) ───────────
@@ -1538,10 +1642,14 @@ function onRowValidate(msg) {
   // lit directement le wrapper cellRenderer/cellStyle du mode revue (cf. buildColDefs)
   // pour surligner ✓/✗ un champ en attente, que le changement vienne de l'IA ou d'une
   // édition manuelle (décision du 2026-07-30 : même traitement quelle que soit l'origine).
-  if (Array.isArray(pendingFields)) {
+  // Objet { champ: valeurOrigine } recopié tel quel : les valeurs d'origine alimentent le
+  // tooltip "Avant" et doivent survivre à une édition manuelle sur une ligne déjà
+  // retouchée par l'IA (cf. server.js, message cell:validate).
+  const aPendingFields = pendingFields && typeof pendingFields === 'object';
+  if (aPendingFields) {
     const row = state.rows[rowIndex];
     if (row) {
-      if (pendingFields.length > 0) row.__pendingFields = Object.fromEntries(pendingFields.map(k => [k, true]));
+      if (Object.keys(pendingFields).length > 0) row.__pendingFields = { ...pendingFields };
       else delete row.__pendingFields;
     }
   }
@@ -1562,7 +1670,7 @@ function onRowValidate(msg) {
       state.gridApi.refreshCells({ rowNodes: [node], force: true });
       // Une édition manuelle peut faire passer cette ligne en pending sans changer la
       // sélection — recalcule la visibilité des icônes d'en-tête.
-      if (Array.isArray(pendingFields)) state.gridApi.refreshHeader();
+      if (aPendingFields) state.gridApi.refreshHeader();
     }
   }
   if (message) addMessage('error', `⚠ ${message}`);
@@ -1663,6 +1771,56 @@ function onReviewSync(msg) {
 // validation/rejet se fait ligne par ligne, par champ, par sélection multiple via
 // l'en-tête fusionné sélection+revue (ReviewHeaderComponent, agit sur la sélection),
 // ou via la barre globale ci-dessous (agit sur TOUT le pending, sans rien cocher).
+// Index AFFICHÉS (et non index dans state.rows) des lignes portant une proposition en
+// attente, dans l'ordre de la grille. La distinction est essentielle : dès que le filtre
+// "en attente seulement" est actif, les deux numérotations divergent, et c'est l'index
+// affiché qu'attendent ensuite ensureIndexVisible/setFocusedCell/getFocusedCell.
+function indexLignesEnAttente() {
+  if (!state.gridApi) {
+    const out = [];
+    state.rows.forEach((row, i) => { if (hasPendingMarkerClient(row)) out.push(i); });
+    return out;
+  }
+  const out = [];
+  state.gridApi.forEachNodeAfterFilterAndSort((node) => {
+    if (node.rowIndex !== null && node.rowIndex !== undefined && hasPendingMarkerClient(node.data)) {
+      out.push(node.rowIndex);
+    }
+  });
+  return out;
+}
+
+// Première colonne AFFICHÉE portant une proposition sur cette ligne (à défaut, la
+// première colonne de données) — viser directement le champ modifié évite d'atterrir
+// sur une cellule intacte, et place le curseur là où sont les ✓/✗ et le tooltip.
+function colonneCiblePourLigne(rowIndexAffiche) {
+  if (!state.gridApi) return null;
+  const affichees = state.gridApi.getAllDisplayedColumns()
+    .map(c => c.getColId())
+    .filter(id => id !== '__select');
+  const node = state.gridApi.getDisplayedRowAtIndex(rowIndexAffiche);
+  const enAttente = node?.data?.__pendingFields ? Object.keys(node.data.__pendingFields) : [];
+  return affichees.find(id => enAttente.includes(id)) || affichees[0] || null;
+}
+
+// Déplace le focus vers la proposition en attente suivante (sens > 0) ou précédente,
+// en bouclant en fin de liste. Le compteur se met à jour via onCellFocused.
+function allerLigneEnAttente(sens) {
+  const indices = indexLignesEnAttente();
+  if (!indices.length || !state.gridApi) return;
+  const courant = state.gridApi.getFocusedCell()?.rowIndex ?? -1;
+  const cible = sens > 0
+    ? (indices.find(i => i > courant) ?? indices[0])
+    : ([...indices].reverse().find(i => i < courant) ?? indices[indices.length - 1]);
+  const cle = colonneCiblePourLigne(cible);
+  state.gridApi.ensureIndexVisible(cible);
+  if (cle) state.gridApi.setFocusedCell(cible, cle);
+  // Rafraîchir explicitement : onCellFocused ne se déclenche pas de façon synchrone
+  // sur un setFocusedCell programmatique (vérifié), le compteur resterait donc sur la
+  // position précédente jusqu'au prochain clic de l'utilisateur dans la grille.
+  updateReviewToolbar();
+}
+
 function updateReviewToolbar() {
   if (!state.reviewMode) return;
   const count = state.pendingCount || 0;
@@ -1670,10 +1828,29 @@ function updateReviewToolbar() {
     hide('btn-validate');
     show('review-bar');
     const counter = el('review-counter');
-    if (counter) counter.textContent = `${count} ligne${count > 1 ? 's' : ''} en attente`;
+    if (counter) {
+      // X et Y sont dérivés de la MÊME liste, pour qu'ils ne puissent pas se contredire
+      // le temps qu'un review:sync rafraîchisse state.pendingCount (repli sur ce dernier
+      // si la grille n'est pas encore prête).
+      const indices = indexLignesEnAttente();
+      const total   = indices.length || count;
+      const focus   = state.gridApi?.getFocusedCell?.()?.rowIndex ?? -1;
+      const rang    = indices.indexOf(focus) + 1; // 0 si le focus n'est pas sur une ligne en attente
+      counter.textContent = rang > 0
+        ? `Ligne ${rang} sur ${total} en attente`
+        : `${total} ligne${total > 1 ? 's' : ''} en attente`;
+    }
   } else {
     show('btn-validate');
     hide('review-bar');
+    // Plus rien en attente : désarmer le filtre, sinon la grille resterait vide et
+    // l'utilisateur n'aurait plus la barre de revue pour décocher la case.
+    if (state.reviewFiltrePendingSeul) {
+      state.reviewFiltrePendingSeul = false;
+      const chk = el('chk-review-filter');
+      if (chk) chk.checked = false;
+      state.gridApi?.onFilterChanged();
+    }
   }
 }
 
@@ -1824,6 +2001,20 @@ function bindUI() {
     if (!ids.length) return;
     if (!confirm('Rejeter toutes les modifications en attente ?')) return;
     sendWS({ type: 'review:rejectRows', ids });
+  });
+
+  // Navigation d'une proposition à l'autre + filtre "en attente seulement" — pensés
+  // pour un lot volumineux (dérouler 30 propositions sans les chercher à la souris).
+  const btnReviewPrev = el('btn-review-prev');
+  if (btnReviewPrev) btnReviewPrev.addEventListener('click', () => allerLigneEnAttente(-1));
+  const btnReviewNext = el('btn-review-next');
+  if (btnReviewNext) btnReviewNext.addEventListener('click', () => allerLigneEnAttente(1));
+
+  const chkReviewFilter = el('chk-review-filter');
+  if (chkReviewFilter) chkReviewFilter.addEventListener('change', () => {
+    state.reviewFiltrePendingSeul = chkReviewFilter.checked;
+    state.gridApi?.onFilterChanged();
+    updateReviewToolbar(); // les index affichés changent → le rang "X sur Y" aussi
   });
 
   // Actions grille
