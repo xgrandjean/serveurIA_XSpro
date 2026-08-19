@@ -274,10 +274,12 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   // porte déjà le détail cellule par cellule pour ce contrat.
   let updatedRows;
   let actionsResume = null;
+  let rapportIA     = null;   // synthese redigee par le LLM (contrat { rapport, actions })
   if (editionParActions) {
     const applied = applyRowActions(rawResponse, session.rows, colonnes, selectChoix, session);
     updatedRows   = applied.rows;
     actionsResume = applied.resume;
+    rapportIA     = applied.rapport;
   } else {
     updatedRows = parseAndMergeRows(rawResponse, session.rows, colonnes, selectChoix);
   }
@@ -307,7 +309,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
     }
   }
 
-  if (onDone) onDone(updatedRows, { warnings, actionsResume });
+  if (onDone) onDone(updatedRows, { warnings, actionsResume, rapport: rapportIA });
 }
 
 // ── Valeurs par défaut sur les placeholders ───────────────────────────────────
@@ -787,8 +789,42 @@ function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}
  * @param {Object} session        — session courante (pour SM.consumeNextId)
  * @returns {Array} — tableau de rows final, à plat (comme parseAndMergeRows)
  */
+/**
+ * Parse la reponse du contrat "edition par actions".
+ * Accepte DEUX formes, volontairement :
+ *   - { "rapport": "...", "actions": [...] }  — forme demandee : le rapport est le seul
+ *     canal ou le modele s'adresse a l'utilisateur (sans lui, il ecrivait ses observations
+ *     dans une colonne de donnees, faute de mieux).
+ *   - [ ... ]                                  — tableau nu : forme historique, conservee
+ *     pour qu'un modele qui ignore la consigne continue d'etre exploite normalement.
+ * @returns {{actions: Array, rapport: string|null}}
+ */
+function parseActionsResponse(rawResponse) {
+  const clean = String(rawResponse || '').replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(clean);
+  } catch {
+    // Repli : extraire le premier objet OU tableau complet noye dans du texte parasite.
+    const m = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (!m) throw new Error(`Reponse LLM sans JSON exploitable : ${clean.slice(0, 300)}`);
+    try { parsed = JSON.parse(m[0]); }
+    catch { throw new Error(`Impossible de parser la reponse LLM : ${clean.slice(0, 300)}`); }
+  }
+
+  if (Array.isArray(parsed)) return { actions: parsed, rapport: null };
+
+  if (parsed && typeof parsed === 'object' && Array.isArray(parsed.actions)) {
+    const r = typeof parsed.rapport === 'string' ? parsed.rapport.trim() : '';
+    return { actions: parsed.actions, rapport: r || null };
+  }
+
+  throw new Error("Reponse LLM : ni tableau d'actions, ni objet { rapport, actions }");
+}
+
 function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, session) {
-  const actions = parseJsonArrayResponse(rawResponse);
+  const { actions, rapport } = parseActionsResponse(rawResponse);
   const placeholderKeys = new Set(colonnes.filter(c => c.placeholder).map(c => c.cle));
   // Mode revue (cf. viewResolver.js MANIFEST.revueParPending) : les actions ne sont plus
   // committées directement — elles sont marquées "en attente" sur les rows elles-mêmes
@@ -843,7 +879,14 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     const pendingFields = reviewMode ? { ...(orig.__pendingFields || {}) } : null;
     for (const [key, val] of Object.entries(fields)) {
       if (placeholderKeys.has(key)) continue;
-      if (pendingFields && !(key in pendingFields)) pendingFields[key] = orig[key];
+      // Jamais `undefined` comme valeur d'origine : JSON.stringify SUPPRIME les cles dont
+      // la valeur est undefined. La ligne partait alors avec un __pendingFields vide, alors
+      // que countPendingRows (qui lit Object.keys avant serialisation) en comptait bien un —
+      // le client recevait {} et n'affichait aucun marquage. Le cas est courant : compactRows
+      // omet les champs vides de la ligne envoyee, donc tout champ complete par l'IA
+      // (indication, explicationCorrection...) est absent de `orig`. '' est aussi la valeur
+      // correcte a restaurer en cas de rejet : le champ etait vide.
+      if (pendingFields && !(key in pendingFields)) pendingFields[key] = orig[key] === undefined ? '' : orig[key];
       const col = colonnes.find(c => c.cle === key);
       result[key] = coerceValue(val, col);
     }
@@ -909,7 +952,7 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     .reduce((sum, fieldsList) => sum + fieldsList.length, 0);
   const resume = { inserted: insertedCount, updated: updatesById.size, deleted: deletedIds.size };
 
-  return { rows: result, resume };
+  return { rows: result, resume, rapport };
 }
 
 function coerceValue(value, col) {

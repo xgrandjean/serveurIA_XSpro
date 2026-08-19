@@ -138,7 +138,7 @@ function handleWSMessage(msg) {
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
     case 'cell:rowStyle':     onRowStyle(msg.rowIndex, msg.style);           break;
     case 'cell:validate':    onRowValidate(msg);                           break;
-    case 'act:done':          onActDone(msg.rows, msg.pendingCount, msg.actionsResume); break;
+    case 'act:done':          onActDone(msg.rows, msg.pendingCount, msg.actionsResume, msg.rapport); break;
     case 'review:sync':      onReviewSync(msg);                            break;
     case 'rows:moved':       onRowsMoved(msg);                             break;
     case 'export:ready':      onExportReady(msg);                            break;
@@ -450,8 +450,11 @@ function initGrid(colonnes, rows) {
           state.gridApi.setFocusedCell(0, colId);
         }, 0);
       }
-      // Compteur positionnel "Ligne X sur Y" — doit suivre aussi les clics directs
-      // dans la grille, pas seulement les boutons ⏮/⏭.
+      // Indicateur "Ligne X / N" de la barre d'outils — c'est ici qu'il se met a jour,
+      // au clic comme aux fleches du clavier.
+      updateRowCount();
+      // Compteur positionnel "Ligne X sur Y" du bandeau de revue — doit suivre aussi les
+      // clics directs dans la grille, pas seulement les boutons ⏮/⏭.
       if (state.reviewMode) updateReviewToolbar();
     },
 
@@ -1748,8 +1751,7 @@ function tracerEtatRevue(origine, pendingCount, actionsResume) {
   const rows = state.rows || [];
   // Les trois marqueurs comptent pour countPendingRows cote serveur : ne regarder que
   // __pendingFields donnait un "0 en attente" trompeur face a un pendingCount non nul,
-  // alors qu'une ligne inseree ou proposee a la suppression se marque au niveau LIGNE
-  // (fond vert / rouge barre) et non cellule par cellule.
+  // alors qu'une ligne inseree ou proposee a la suppression se marque au niveau LIGNE.
   const champsEnAttente = rows.filter(r => r.__pendingFields && Object.keys(r.__pendingFields).length);
   const inseres   = rows.filter(r => r.__pendingInsert).length;
   const supprimes = rows.filter(r => r.__pendingDelete).length;
@@ -1759,23 +1761,35 @@ function tracerEtatRevue(origine, pendingCount, actionsResume) {
     ? `+${actionsResume.inserted || 0}/~${actionsResume.updated || 0}/-${actionsResume.deleted || 0}`
     : 'n/a';
   setTimeout(() => {
-    const ambre = document.querySelectorAll('.field-pending-wrap, .field-pending-wrap-multiline').length;
-    // Dedoublonnage par row-index : AG Grid rend chaque ligne DEUX fois (conteneur des
-    // colonnes epinglees + conteneur central), ce qui doublerait le compte.
+    const affichees = state.gridApi ? state.gridApi.getAllDisplayedColumns().map(c => c.getColId()) : [];
+    // AG Grid VIRTUALISE les colonnes : celles hors du champ de vision horizontal ne sont
+    // pas dans le DOM. Compter les seules cellules peintes laissait croire a une absence
+    // de marquage alors que les colonnes concernees etaient simplement a droite de l'ecran.
+    const rendues = [...new Set(Array.from(document.querySelectorAll('.ag-cell')).map(c => c.getAttribute('col-id')))];
+    const ambre = Array.from(document.querySelectorAll('.ag-cell'))
+      .filter(c => getComputedStyle(c).backgroundColor === 'rgb(255, 248, 225)').length;
     const lignesMarquees = new Set(
       Array.from(document.querySelectorAll('.ag-row')).filter(l => {
         const bg = getComputedStyle(l).backgroundColor;
         return bg === 'rgb(198, 246, 213)' || bg === 'rgb(254, 215, 215)';
       }).map(l => l.getAttribute('row-index'))
     ).size;
+    const champsVisibles  = champs.filter(c => rendues.includes(c));
+    const champsHorsEcran = champs.filter(c => affichees.includes(c) && !rendues.includes(c));
+    const champsMasques   = champs.filter(c => !affichees.includes(c));
     console.log(`[Revue] ${origine} — ${rows.length} ligne(s) | actions IA (ins/maj/suppr): ${resume} `
       + `| marqueurs: champs=${champsEnAttente.length} inseres=${inseres} supprimes=${supprimes} `
       + `| pendingCount=${pendingCount} | champs marques: ${champs.join(', ') || '(aucun)'} `
-      + `| cellules ambre: ${ambre} | lignes colorees: ${lignesMarquees}`);
+      + `| cellules ambre rendues: ${ambre} | lignes colorees: ${lignesMarquees}`);
+    if (champsHorsEcran.length || champsMasques.length) {
+      console.info(`[Revue] Colonnes marquees non visibles — defiler horizontalement pour les voir : `
+        + `hors ecran: ${champsHorsEcran.join(', ') || 'aucune'}`
+        + (champsMasques.length ? ` | masquees dans ce mode: ${champsMasques.join(', ')}` : ''));
+    }
     if (pendingCount > 0 && champsEnAttente.length + inseres + supprimes === 0) {
       console.warn("[Revue] Le serveur annonce des propositions en attente mais AUCUN marqueur n'est arrive — copier ce log.");
-    } else if (champsEnAttente.length > 0 && ambre === 0) {
-      console.warn("[Revue] Marqueurs de champs recus mais AUCUNE cellule marquee a l'ecran — copier ce log.");
+    } else if (champsVisibles.length > 0 && ambre === 0) {
+      console.warn("[Revue] Des colonnes marquees sont a l'ecran mais AUCUNE cellule n'est peinte — copier ce log.");
     }
     if (typesNonNumeriques > 0) {
       console.warn(`[Revue] ${typesNonNumeriques} ligne(s) avec un type non numerique — grisage et listes restreintes inoperants.`);
@@ -1783,7 +1797,7 @@ function tracerEtatRevue(origine, pendingCount, actionsResume) {
   }, 0);
 }
 
-function onActDone(updatedRows, pendingCount, actionsResume) {
+function onActDone(updatedRows, pendingCount, actionsResume, rapport) {
   state.rows = normaliserLignesEntrantes(updatedRows);
   if (typeof pendingCount === 'number') state.pendingCount = pendingCount;
   if (state.gridApi) {
@@ -1800,6 +1814,10 @@ function onActDone(updatedRows, pendingCount, actionsResume) {
     }
   }
   updateRowCount();
+  // Synthese redigee par le LLM, avant le decompte : c'est la reponse a une demande du
+  // type "fais un rapport de ce que tu as vu", que le contrat d'actions seul ne permettait
+  // pas d'exprimer (le modele la logeait alors dans une colonne de donnees).
+  if (rapport) addMessage('ai', rapport);
   const resumeText = actionsResume ? buildActionsResumeText(actionsResume) : `${state.updatedCells} cellule(s) mise(s) à jour`;
   addMessage('system', `✓ Terminé — ${resumeText}.`);
   setStatusBadge('paused', 'Terminé');
@@ -2078,6 +2096,7 @@ function bindUI() {
     state.reviewFiltrePendingSeul = chkReviewFilter.checked;
     state.gridApi?.onFilterChanged();
     updateReviewToolbar(); // les index affichés changent → le rang "X sur Y" aussi
+    updateRowCount();      // ...et le dénominateur de "Ligne X / N" 
   });
 
   // Actions grille
@@ -2596,8 +2615,29 @@ function computeDerivedValue(champ, row, selectChoix) {
 }
 
 // ── Helpers UI ────────────────────────────────────────────────────────────────
+// Indicateur de position dans la barre d'outils : "N lignes" tant qu'aucune cellule n'a
+// le focus, puis "Ligne X / N" des qu'on clique une cellule (ou qu'on navigue au clavier).
+// Distinct du compteur du bandeau de revue, qui situe la proposition courante dans le lot
+// en attente : l'un repond a "ou suis-je dans la grille", l'autre a "quelle proposition
+// je regarde". Les deux coexistent volontairement.
 function updateRowCount() {
-  el('status-rows').textContent = `${state.rows.length} ligne${state.rows.length > 1 ? 's' : ''}`;
+  const cible = el('status-rows');
+  if (!cible) return;
+  const total = state.rows.length;
+  const focus = state.gridApi?.getFocusedCell?.();
+  // getFocusedCell renvoie un index AFFICHE : avec le filtre "en attente seulement",
+  // numerateur et denominateur parlent donc du meme ensemble, celui que l'utilisateur a
+  // sous les yeux. La mention "filtrees" signale que ce n'est pas la numerotation complete.
+  const affichees = state.gridApi?.getDisplayedRowCount?.() ?? total;
+  // La borne haute est indispensable : en activant le filtre, la ligne focalisee peut
+  // sortir de l'ensemble affiche et l'on afficherait un "Ligne 4 / 2" absurde.
+  if (focus && focus.rowIndex >= 0 && focus.rowIndex < affichees) {
+    cible.textContent = `Ligne ${focus.rowIndex + 1} / ${affichees}${affichees !== total ? ' filtrées' : ''}`;
+  } else if (affichees !== total) {
+    cible.textContent = `${affichees} ligne${affichees > 1 ? 's' : ''} sur ${total}`;
+  } else {
+    cible.textContent = `${total} ligne${total > 1 ? 's' : ''}`;
+  }
 }
 
 function setStatusBadge(cls, label) {

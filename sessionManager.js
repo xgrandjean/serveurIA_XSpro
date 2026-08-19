@@ -185,7 +185,9 @@ function setCellValue(session, rowIndex, cle, value) {
   }
   if (session.reviewMode && !row.__pendingInsert) {
     if (!row.__pendingFields) row.__pendingFields = {};
-    if (!(cle in row.__pendingFields)) row.__pendingFields[cle] = row[cle];
+    // Idem chemin IA (cf. llmClient.js) : une valeur d'origine `undefined` disparaitrait
+    // a la serialisation JSON, laissant un marqueur compte cote serveur mais invisible.
+    if (!(cle in row.__pendingFields)) row.__pendingFields[cle] = row[cle] === undefined ? '' : row[cle];
     row[cle] = value;
     if (valuesEqual(row.__pendingFields[cle], value)) {
       delete row.__pendingFields[cle];

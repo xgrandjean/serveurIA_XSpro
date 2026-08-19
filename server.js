@@ -568,7 +568,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
           },
         }, files, activeMode);
       } catch (e) {
@@ -603,7 +603,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null });
+            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
           },
         }, [], session.activeMode);
       } catch (e) {
