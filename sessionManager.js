@@ -88,7 +88,13 @@ function createSession(payload) {
 
     // ── État de travail ───────────────────────────────────────────────────────
     rows,           // copie mutable — modifiée au fil du remplissage
-    _nextId: rows.length + 1,  // prochain _id disponible pour une insertion LLM
+    // Derive du plus grand _id existant, et non du nombre de lignes : une ligne source
+    // portant deja un _id l'emporte sur celui genere ci-dessus (la diffusion est apres),
+    // et sur une numerotation a trous — [1,2,4,5,6] — `length + 1` designait un id deja
+    // pris. L'insertion suivante creait un doublon, et un update visant cet id touchait
+    // alors DEUX lignes. Inatteignable depuis XSpro (compactRows n'emet pas _id), mais
+    // le payload est une entree externe : mieux vaut ne pas dependre de cette propriete.
+    _nextId: rows.reduce((max, r) => Math.max(max, Number(r._id) || 0), 0) + 1,
     status:  STATUS.IDLE,
 
     // ── Historique conversationnel (isolé par session) ────────────────────────
@@ -503,7 +509,7 @@ function moveRows(session, ids, apres) {
  */
 function resetRows(session) {
   session.rows = session.data.lignes.map((r, i) => ({ _id: i + 1, ...r }));
-  session._nextId = session.rows.length + 1;
+  session._nextId = session.rows.reduce((max, r) => Math.max(max, Number(r._id) || 0), 0) + 1;
   session.history   = [];
   session.llmTurns  = [];
   session.currentPlan = null;

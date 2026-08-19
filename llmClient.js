@@ -871,8 +871,12 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
       // Meme normalisation pour `_apres` : sans elle l'insertion n'etait pas perdue, mais
       // repoussee en fin par le filet de securite plus bas — donc placee ailleurs que la ou
       // le modele l'avait demandee, sans que rien ne le signale a l'utilisateur.
+      // "fin" compare sans tenir compte de la casse : un modele ecrivant "Fin" retombait
+      // sur le chemin des identifiants, produisant un avertissement "_apres introuvable"
+      // trompeur pour un placement pourtant conforme a ce qu'il demandait.
+      const apresTexte = (typeof _apres === 'string') ? _apres.trim().toLowerCase() : null;
       const afterKey = (_apres === null || _apres === undefined) ? '__start__'
-                      : (_apres === 'fin')                        ? '__end__'
+                      : (apresTexte === 'fin')                    ? '__end__'
                       : cleId(_apres);
       addInsertion(afterKey, fields);
 
