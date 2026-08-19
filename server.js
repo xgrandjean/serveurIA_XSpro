@@ -410,6 +410,10 @@ wss.on('connection', (ws, req) => {
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},
        providerId,
+       // Modele LLM reellement utilise pour l'appel (cf. callLLM : `model: ia.model`).
+       // Nomme `modeleIA` et non `modele` : `data.modele` designe deja les lignes-modele
+       // fournies par XSpro, la collision aurait ete difficile a demeler.
+       modeleIA:     session.ia?.model || null,
        acceptString,
        supportedTypes,
        xsproPayload: session.xsproPayload,
@@ -693,7 +697,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
       break;
     }
 

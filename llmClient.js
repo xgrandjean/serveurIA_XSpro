@@ -832,7 +832,12 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   // via sessionManager.js (approveField/rejectField/approveRow/rejectRow/approveAll/rejectAll).
   const reviewMode = !!session?.reviewMode;
 
-  const byId          = new Map(originalRows.map(r => [r._id, r]));
+  // Les donnees partent au LLM en TSV (cf. buildDataCSV) : il y relit `_id` comme du texte
+  // et le renvoie volontiers en chaine — "3" au lieu de 3. Indexer par une cle normalisee
+  // plutot que par la valeur brute evite que TOUTES les actions soient rejetees en
+  // "_id introuvable" selon la facon dont le modele a serialise sa reponse.
+  const cleId = (v) => (v === null || v === undefined) ? null : String(v).trim();
+  const byId          = new Map(originalRows.map(r => [cleId(r._id), r]));
   const deletedIds     = new Set();
   const updatesById     = new Map();  // _id → champs modifiés (bruts, avant coerce)
   const insertionsAfter = new Map();  // clé (_id | '__start__' | '__end__') → array de champs bruts
@@ -846,24 +851,29 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     if (!action || typeof action !== 'object') continue;
     const { _action, _id, _apres, ...fields } = action;
 
+    const idAction = cleId(_id);
+
     if (_action === 'delete') {
-      if (_id === undefined || !byId.has(_id)) {
+      if (idAction === null || !byId.has(idAction)) {
         console.warn(`[LLM] Action "delete" ignorée — _id introuvable : ${_id}`);
         continue;
       }
-      deletedIds.add(_id);
+      deletedIds.add(idAction);
 
     } else if (_action === 'update') {
-      if (_id === undefined || !byId.has(_id)) {
+      if (idAction === null || !byId.has(idAction)) {
         console.warn(`[LLM] Action "update" ignorée — _id introuvable : ${_id}`);
         continue;
       }
-      updatesById.set(_id, fields);
+      updatesById.set(idAction, fields);
 
     } else if (_action === 'insert') {
+      // Meme normalisation pour `_apres` : sans elle l'insertion n'etait pas perdue, mais
+      // repoussee en fin par le filet de securite plus bas — donc placee ailleurs que la ou
+      // le modele l'avait demandee, sans que rien ne le signale a l'utilisateur.
       const afterKey = (_apres === null || _apres === undefined) ? '__start__'
                       : (_apres === 'fin')                        ? '__end__'
-                      : _apres;
+                      : cleId(_apres);
       addInsertion(afterKey, fields);
 
     } else {
@@ -931,14 +941,15 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   // Lignes existantes (conservées, mises à jour, ou omises si supprimées)
   // + insertions positionnées juste après chaque ligne
   for (const orig of originalRows) {
-    if (deletedIds.has(orig._id)) {
+    const idOrig = cleId(orig._id);
+    if (deletedIds.has(idOrig)) {
       // Mode revue : la ligne reste affichée (barrée côté UI), en attente de validation
       // de la suppression — retirée seulement via SM.approveRow/approveAll.
       if (reviewMode) result.push({ ...orig, __pendingDelete: true });
       continue;
     }
 
-    const fields = updatesById.get(orig._id);
+    const fields = updatesById.get(idOrig);
     if (fields) {
       const { row, aChange } = buildUpdatedRow(orig, fields);
       if (aChange) lignesReellementModifiees++;
@@ -948,7 +959,7 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
       result.push({ ...orig });
     }
 
-    for (const insFields of insertionsAfter.get(orig._id) || []) {
+    for (const insFields of insertionsAfter.get(idOrig) || []) {
       result.push(buildInsertedRow(insFields));
     }
   }

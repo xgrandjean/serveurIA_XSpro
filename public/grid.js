@@ -242,6 +242,10 @@ function onInit(msg) {
   if (p.affaire) el('info-affaire').textContent = `📁 ${p.affaire}`;
   if (p.client && p.affaire) show('info-sep');
 
+  // Modele LLM annonce par le serveur — sert a nommer l'auteur du traitement dans le
+  // bandeau et le fil de conversation, comme le fait XSpro dans son spinner.
+  state.modeleIA      = msg.modeleIA      || null;
+
   // Provider et types de fichiers acceptés
   state.providerId    = msg.providerId    || 'openai';
   state.acceptString  = msg.acceptString  || '*/*';
@@ -1715,7 +1719,7 @@ function onPlanReceived(planText) {
     initProgress();
     sendWS({ type: 'plan:validate' });
     addMessage('system', 'Plan validé — exécution…');
-    setStatusBadge('acting', 'Traitement IA…');
+    setStatusBadge('acting', libelleTraitement());
     setAiRunning(true);
   });
 
@@ -2038,7 +2042,7 @@ function onStatusChange(status) {
     idle:       ['idle',      'En attente'],
     connected:  ['connected', 'Connecté'],
     planning:   ['planning',  'Planification…'],
-    acting:     ['acting',    'Traitement IA…'],
+    acting:     ['acting',    libelleTraitement()],
     paused:     ['paused',    'En pause'],
     delivering: ['delivering','Envoi…'],
     done:       ['done',      'Terminé'],
@@ -2307,7 +2311,9 @@ function sendPrompt() {
   state.attachedFiles = [];
   renderChips();
   setAiRunning(true);
-  addMessage('system', state.reviewMode ? 'Traitement…' : `Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}…`);
+  addMessage('system', state.reviewMode
+    ? libelleTraitement()
+    : libelleTraitement(`Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}`));
 }
 
 // ── Modes de travail ────────────────────────────────────────────────────────────
@@ -2686,6 +2692,15 @@ function setStatusBadge(cls, label) {
   const b = el('status-badge');
   b.className   = `badge-status status-${cls}`;
   b.textContent = label;
+  // Le badge est etroit : si le nom du modele deborde, il reste lisible au survol.
+  b.title       = state.modeleIA ? `Modele : ${state.modeleIA}` : '';
+}
+
+// Nomme le modele qui travaille, quand le serveur l'a annonce. Repli sur le libelle
+// generique : une session ouverte avant l'ajout de `modeleIA` ne doit pas afficher
+// "Traitement par null".
+function libelleTraitement(prefixe = 'Traitement') {
+  return state.modeleIA ? `${prefixe} par ${state.modeleIA}…` : `${prefixe} IA…`;
 }
 
 function setStatusMessage(msg) { el('status-message').textContent = msg; }
