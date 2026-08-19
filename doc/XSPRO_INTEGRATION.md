@@ -173,6 +173,40 @@ Content-Type: application/json
 }
 ```
 
+### D'où vient le bloc `ia`, et pourquoi il diffère de la config interne de XSpro
+
+> **Note (19/08/2026)** : point de contrat resté implicite jusqu'ici, à connaître avant de
+> s'étonner que le Worker n'utilise pas le même fournisseur que XSpro.
+
+XSpro dispose de deux configurations IA dans son `parametresAi.json` — `config_or` et
+`config_hf`, chacune avec un drapeau `START`. Le bloc `ia` du payload est produit par son
+handler `AI:getWorkerIaConfig`, dont la **priorité est l'inverse** de celle qu'il applique à
+son propre traitement :
+
+| | Ordre de priorité | Retenu si les deux sont actifs |
+|---|---|---|
+| Traitement interne de XSpro | `config_or` (serveur Python local, puis HTTP direct) → `config_hf` en dernier recours | `config_or` |
+| **Worker externe (ce projet)** | `config_hf` → `config_or` seulement si le premier est inactif | **`config_hf`** |
+
+**C'est délibéré.** Les deux canaux actifs, XSpro et le Worker interrogent des fournisseurs
+différents, ce qui rend le traitement externe réellement indépendant de l'interne : modèle et
+fournisseur distincts de part et d'autre, panne ou quota atteint d'un côté sans effet sur
+l'autre, et charge non concentrée sur une seule clé.
+
+Deux limites à garder en tête :
+
+- **L'indépendance n'est acquise que si les deux canaux sont configurés.** Un seul actif, les
+  deux chemins retombent dessus et partagent le même fournisseur.
+- **L'inversion est codée en dur** côté XSpro (`config_hf` d'abord) ; elle n'est pas déduite de
+  l'ordre interne. Si celui-ci changeait, l'inversion cesserait sans qu'aucun code ne proteste.
+
+Le Worker n'a rien à faire de tout cela : il consomme le bloc `ia` tel quel. `provider` n'est
+d'ailleurs pas déduit du nom de la clé de configuration mais de l'URL de l'`endpoint` — d'où
+un `provider: "albert"` alors que la configuration s'appelle `config_hf`.
+
+Enfin, si **aucun** des deux canaux n'est actif, XSpro n'appelle pas le Worker : il interrompt
+la demande et l'annonce à l'utilisateur, plutôt que d'émettre un payload avec un `ia` vide.
+
 ### Clés spécifiques de `workerConfig`
 
 Le `workerConfig` peut contenir, en plus des colonnes et règles, les clés suivantes :

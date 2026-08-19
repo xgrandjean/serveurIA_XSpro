@@ -871,8 +871,12 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     }
   }
 
+  const valuesEqualPending = SM.valuesEqual;
+  let lignesReellementModifiees = 0;   // cf. resume ci-dessous : on ne compte pas les faux changements
+  const idsSansEffet = [];             // _id declares en 'update' par le LLM mais sans changement reel
   const buildUpdatedRow = (orig, fields) => {
     const result = { ...orig };
+    let aChange = false;
     // En mode revue, snapshot de la valeur d'ORIGINE de chaque champ touché — une seule
     // fois par champ (si un 2e run IA retouche un champ déjà en attente, on ne doit pas
     // écraser la vraie baseline avec la valeur intermédiaire déjà proposée).
@@ -886,13 +890,28 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
       // omet les champs vides de la ligne envoyee, donc tout champ complete par l'IA
       // (indication, explicationCorrection...) est absent de `orig`. '' est aussi la valeur
       // correcte a restaurer en cas de rejet : le champ etait vide.
-      if (pendingFields && !(key in pendingFields)) pendingFields[key] = orig[key] === undefined ? '' : orig[key];
       const col = colonnes.find(c => c.cle === key);
-      result[key] = coerceValue(val, col);
+      const nouvelle = coerceValue(val, col);
+
+      // Une "modification" qui ne modifie rien ne doit ni etre marquee ni etre comptee :
+      // sinon l'utilisateur lit "N lignes modifiees" alors que rien n'a bouge, et voit des
+      // cellules ambre dont le "Avant" et le "Apres" sont identiques. Meme regle que
+      // l'edition manuelle (sessionManager.setCellValue), d'ou le meme comparateur.
+      const valeurOrigine = orig[key] === undefined ? '' : orig[key];
+      if (SM.valuesEqual(valeurOrigine, nouvelle)) continue;
+
+      if (pendingFields && !(key in pendingFields)) pendingFields[key] = valeurOrigine;
+      result[key] = nouvelle;
+      aChange = true;
+
+      // Retour a la valeur d'origine apres un precedent run : le champ n'est plus en attente.
+      if (pendingFields && valuesEqualPending(pendingFields[key], nouvelle)) {
+        delete pendingFields[key];
+      }
     }
     if (pendingFields && Object.keys(pendingFields).length) result.__pendingFields = pendingFields;
     normalizeSelectChoixRow(result, selectChoix);
-    return result;
+    return { row: result, aChange };
   };
 
   const buildInsertedRow = (fields) => {
@@ -920,7 +939,14 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
     }
 
     const fields = updatesById.get(orig._id);
-    result.push(fields ? buildUpdatedRow(orig, fields) : { ...orig });
+    if (fields) {
+      const { row, aChange } = buildUpdatedRow(orig, fields);
+      if (aChange) lignesReellementModifiees++;
+      else idsSansEffet.push(orig._id);
+      result.push(row);
+    } else {
+      result.push({ ...orig });
+    }
 
     for (const insFields of insertionsAfter.get(orig._id) || []) {
       result.push(buildInsertedRow(insFields));
@@ -950,7 +976,24 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   // toujours "0 cellule(s) mise(s) à jour" même après des insertions/suppressions réelles.
   const insertedCount = Array.from(insertionsAfter.values())
     .reduce((sum, fieldsList) => sum + fieldsList.length, 0);
-  const resume = { inserted: insertedCount, updated: updatesById.size, deleted: deletedIds.size };
+  // `updated` compte les lignes REELLEMENT changees, et non les actions "update" declarees
+  // par le LLM : celui-ci en emet volontiers qui reecrivent une valeur a l'identique, et
+  // annoncer "N lignes modifiees" sans que rien ne bouge a l'ecran est precisement ce qu'il
+  // faut eviter. Le decompte correspond donc exactement aux lignes qui porteront un marqueur.
+  const resume = { inserted: insertedCount, updated: lignesReellementModifiees, deleted: deletedIds.size };
+
+  // Trace persistante de l'ecart entre ce que le LLM DECLARE et ce qui est REELLEMENT retenu.
+  // Le message affiche dans l'UI disparait avec la session ; ce log-ci reste dans la sortie du
+  // Worker (relayee dans le terminal XSpro sous le prefixe [serveurIA]) et permet, apres coup,
+  // de savoir si un "N lignes modifiees" surprenant venait du modele ou du traitement.
+  if (updatesById.size !== lignesReellementModifiees) {
+    console.warn(
+      `[LLM] Ecart actions/effet — ${updatesById.size} action(s) "update" declaree(s) par le modele, `
+      + `${lignesReellementModifiees} ligne(s) reellement modifiee(s). `
+      + `Sans effet (valeur identique a l'existante) : _id ${idsSansEffet.join(', ') || '(aucun)'}.`
+    );
+  }
+  console.log(`[LLM] Actions appliquees — inserees:${resume.inserted} modifiees:${resume.updated} supprimees:${resume.deleted}`);
 
   return { rows: result, resume, rapport };
 }

@@ -1786,6 +1786,17 @@ function tracerEtatRevue(origine, pendingCount, actionsResume) {
         + `hors ecran: ${champsHorsEcran.join(', ') || 'aucune'}`
         + (champsMasques.length ? ` | masquees dans ce mode: ${champsMasques.join(', ')}` : ''));
     }
+    // Ecart entre ce que le modele annonce et ce qui est reellement marque : signale ici en
+    // plus du message affiche dans le fil, pour en garder une trace dans la console meme
+    // apres que l'utilisateur a valide ou ferme la session.
+    if (actionsResume) {
+      const ecarts = [['inserted', inseres], ['updated', champsEnAttente.length], ['deleted', supprimes]]
+        .filter(([cle, reel]) => (actionsResume[cle] || 0) !== reel)
+        .map(([cle, reel]) => `${cle}: annonce ${actionsResume[cle] || 0} / marque ${reel}`);
+      if (ecarts.length) {
+        console.warn(`[Revue] Ecart annonce/marquage — ${ecarts.join(' | ')}`);
+      }
+    }
     if (pendingCount > 0 && champsEnAttente.length + inseres + supprimes === 0) {
       console.warn("[Revue] Le serveur annonce des propositions en attente mais AUCUN marqueur n'est arrive — copier ce log.");
     } else if (champsVisibles.length > 0 && ambre === 0) {
@@ -1795,6 +1806,19 @@ function tracerEtatRevue(origine, pendingCount, actionsResume) {
       console.warn(`[Revue] ${typesNonNumeriques} ligne(s) avec un type non numerique — grisage et listes restreintes inoperants.`);
     }
   }, 0);
+}
+
+// Décompte construit a partir des marqueurs presents dans state.rows — donc de ce qui sera
+// effectivement peint. Sert de source de verite pour le message "✓ Terminé", a la place du
+// resume declaratif du LLM.
+function _resumeDepuisMarqueurs() {
+  const rows = state.rows || [];
+  return {
+    inserted: rows.filter(r => r.__pendingInsert).length,
+    deleted:  rows.filter(r => r.__pendingDelete).length,
+    updated:  rows.filter(r => !r.__pendingInsert && !r.__pendingDelete
+                            && r.__pendingFields && Object.keys(r.__pendingFields).length).length,
+  };
 }
 
 function onActDone(updatedRows, pendingCount, actionsResume, rapport) {
@@ -1818,8 +1842,26 @@ function onActDone(updatedRows, pendingCount, actionsResume, rapport) {
   // type "fais un rapport de ce que tu as vu", que le contrat d'actions seul ne permettait
   // pas d'exprimer (le modele la logeait alors dans une colonne de donnees).
   if (rapport) addMessage('ai', rapport);
-  const resumeText = actionsResume ? buildActionsResumeText(actionsResume) : `${state.updatedCells} cellule(s) mise(s) à jour`;
+  // Le décompte annoncé est DÉRIVÉ des marqueurs réellement reçus, pas de ce que le LLM
+  // déclare avoir fait : c'est la seule façon de garantir qu'il corresponde toujours à ce
+  // qui est marqué à l'écran, puisque ce sont exactement les mêmes données qui pilotent le
+  // rendu. Annoncer "30 lignes modifiées" sans rien de visible n'est alors plus possible.
+  const resumeText = state.reviewMode
+    ? buildActionsResumeText(_resumeDepuisMarqueurs())
+    : (actionsResume ? buildActionsResumeText(actionsResume) : `${state.updatedCells} cellule(s) mise(s) à jour`);
   addMessage('system', `✓ Terminé — ${resumeText}.`);
+  // Écart entre l'annonce du LLM et l'état réellement reçu : ne pas le masquer.
+  if (state.reviewMode && actionsResume) {
+    const reel = _resumeDepuisMarqueurs();
+    const ecarts = ['inserted', 'updated', 'deleted']
+      .filter(k => (actionsResume[k] || 0) !== (reel[k] || 0))
+      .map(k => `${k} annoncé ${actionsResume[k] || 0} / retenu ${reel[k] || 0}`);
+    if (ecarts.length) {
+      addMessage('system', `ℹ️ L'assistant annonçait : ${buildActionsResumeText(actionsResume)} — `
+        + `écart avec ce qui est marqué (${ecarts.join(', ')}). `
+        + `Les propositions sans effet réel ne sont pas retenues.`);
+    }
+  }
   setStatusBadge('paused', 'Terminé');
   setStatusMessage(state.reviewMode ? 'Vérifie et valide les propositions IA ci-dessous.' : 'Vérifie et valide ou continue.');
   setAiRunning(false);

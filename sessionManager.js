@@ -568,6 +568,7 @@ function listSessions() {
 // ── Exports ───────────────────────────────────────────────────────────────────
 module.exports = {
   STATUS,
+  valuesEqual,   // reutilise par llmClient (chemin IA) pour ignorer les faux changements
   createSession,
   getSession,
   setStatus,
