@@ -245,6 +245,19 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   console.log(`[LLM] Timeout config : ${mode === 'act' ? Math.max((ia.timeoutMs || 30000) * 4, 120000) : (ia.timeoutMs || 30000)}ms (mode ${mode})`);
   const rawResponse = await callLLM(ia, truncated, mode);
 
+  // Trace de ce qui a REELLEMENT ete transmis, enregistree ici et nulle part ailleurs :
+  // c'est le seul point ou `truncated` est la valeur envoyee (apres troncature) et non une
+  // reconstitution. session.history ne garde que le prompt utilisateur et la reponse, pas
+  // le prompt systeme assemble ; l'apercu (buildPromptPreview) reconstruit, lui, ce qui
+  // SERAIT envoyé maintenant — les deux ne se substituent pas l'un a l'autre.
+  session.dernierEnvoi = {
+    messages:   truncated,
+    reponse:    rawResponse,
+    modele:     ia.model || null,
+    mode,
+    horodatage: Date.now(),
+  };
+
   // ── 10. Historique ─────────────────────────────────────────────────────────
   SM.pushHistory(session, 'assistant', rawResponse);
 

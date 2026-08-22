@@ -550,6 +550,23 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // Consultation de l'echange reellement transmis au LLM lors du dernier appel.
+    // Distinct de 'prompt:preview', qui reconstruit ce qui PARTIRAIT maintenant : ici on
+    // restitue ce qui EST parti, reponse comprise, sans rien recalculer.
+    case 'prompt:dernierEnvoi': {
+      const env = session.dernierEnvoi;
+      wsSend(session, {
+        type:       'prompt:dernierEnvoi',
+        present:    !!env,
+        messages:   env ? env.messages : null,
+        reponse:    env ? env.reponse  : null,
+        modele:     env ? env.modele   : null,
+        mode:       env ? env.mode     : null,
+        horodatage: env ? env.horodatage : null,
+      });
+      break;
+    }
+
     // L'utilisateur lance un prompt (mode Plan ou Act direct)
     case 'prompt:send': {
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'

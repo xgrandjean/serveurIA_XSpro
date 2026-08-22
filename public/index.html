@@ -66,7 +66,7 @@
           <select id="prompt-suggestions" title="Prompts suggérés">
             <option value="">— Suggestions —</option>
           </select>
-          <button id="btn-copy-prompt" class="btn-tool" title="Copier la requête dans le presse-papier (clic=système, double=complet)">📋 </button>
+          <button id="btn-copy-prompt" class="btn-tool" title="Consulter le prompt et la réponse">📋 </button>
         </div>
 
         <!-- Fichiers joints -->
@@ -170,6 +170,30 @@
     </section>
 
   </main>
+
+  <!-- Choix de ce que l'on veut consulter — remplace l'ancienne distinction
+       clic/double-clic (« prompt système » vs « requête complète »), qui n'était
+       ni devinable ni annoncée. -->
+  <div id="prompt-menu" class="popover hidden">
+    <button class="popover-item" data-vue="envoye">📤 Prompt envoyé et réponse</button>
+    <button class="popover-item" data-vue="pret">📝 Prompt prêt à être envoyé</button>
+  </div>
+
+  <!-- Consultation : on AFFICHE le contenu, la copie devient un geste explicite. -->
+  <div id="prompt-viewer" class="overlay hidden">
+    <div class="overlay-panel">
+      <div class="overlay-head">
+        <span id="prompt-viewer-title"></span>
+        <span id="prompt-viewer-meta"></span>
+        <span class="overlay-head-spacer"></span>
+        <button id="btn-prompt-copy" class="btn-primary btn-sm">📋 Copier</button>
+        <button id="btn-prompt-close" class="btn-secondary btn-sm">✕</button>
+      </div>
+      <pre id="prompt-viewer-body"></pre>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>

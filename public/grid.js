@@ -84,8 +84,10 @@
    colonnesDerivees: {},        // { [modeId]: { [champ]: { libelle } } } — reçu du serveur (sans les fonctions)
    derivedFormulas: {},         // formules du mode actif : { [champ]: formatter } — définies localement
    colonnesDeriveesKeys: null,  // Set des clés des colonnes dérivées du mode actif
-   pendingCopy:        null,    // 'system' | 'full' — type de copie en attente de l'aperçu serveur
-   lastPromptPreview:  null,    // { system, full } — dernier aperçu reçu du serveur
+   vuePromptDemandee:  null,    // 'envoye' | 'pret' — consultation demandee, en attente du serveur
+   vuePromptCourante:  null,    // { libelle, texte } — ce qu'affiche la fenetre, donc ce que copie le bouton
+   unEnvoiAEuLieu:     false,   // conditionne l'entree « prompt envoye » du menu (rien a montrer avant)
+   lastPromptPreview:  null,    // { system, full } — dernier apercu recu du serveur
    styleOverrides:     {},      // { [rowIndex]: { color?, bgColor?, className? } } — surcharge via cell:rowStyle
    cellStyleOverrides: {},      // { "rowIndex:cle": { ... } } — surcharge cellule via cell:validate
    onCellEdit:         null,    // callback(rowIndex, cle, newValue) définie par la vue
@@ -158,6 +160,7 @@ function handleWSMessage(msg) {
       inner.insertBefore(welcome, inner.firstChild);
       break;
     case 'prompt:preview':    onPromptPreview(msg);                         break;
+    case 'prompt:dernierEnvoi': onPromptDernierEnvoi(msg);                  break;
     case 'error': {
       // Message d'erreur enrichi avec cause, suggestion, httpStatus
       let displayMsg = `⚠ ${msg.message}`;
@@ -2105,6 +2108,9 @@ function bindUI() {
   el('btn-reset').addEventListener('click', () => {
     if (!confirm('Réinitialiser toutes les données ?')) return;
     sendWS({ type: 'session:reset' });
+    // Le serveur remet dernierEnvoi a null (resetRows) : l'entree du menu doit se
+    // refermer en meme temps, sinon elle promettrait un contenu disparu.
+    state.unEnvoiAEuLieu = false;
     addMessage('system', '↺ Données réinitialisées.');
   });
 
@@ -2184,93 +2190,201 @@ function bindUI() {
   bindConversationScroll();
 }
 
-// ── Copier la requête envoyée au LLM ───────────────────────────────────────────
+// ── Consultation du prompt et de la réponse ────────────────────────────────────
 /**
- * Clic simple  → copie le system prompt (bloc A) seul
- * Double-clic  → copie l'intégralité des messages qui seraient envoyés
- * Le prompt réel est reconstruit côté serveur (buildPromptPreview) pour être
- * identique à ce qui serait réellement transmis au LLM.
+ * Le bouton 📋 ouvre un menu à deux entrées :
+ *   - « Prompt envoyé et réponse » : ce qui a RÉELLEMENT été transmis au dernier appel,
+ *     réponse comprise, restitué par le serveur (session.dernierEnvoi) sans recalcul ;
+ *   - « Prompt prêt à être envoyé » : l'aperçu de ce qui partirait maintenant, avec la
+ *     saisie et les fichiers en cours (buildPromptPreview).
+ *
+ * Remplace la distinction clic simple / double-clic (« prompt système » / « requête
+ * complète ») : elle n'était pas devinable, le prompt système seul n'avait pas d'usage
+ * propre, et elle copiait sans jamais rien montrer. Ici on affiche d'abord ; la copie
+ * devient un geste explicite, confirmé par un toast qui nomme ce qui a été copié.
  */
 function bindCopyPromptButton() {
   const btn = el('btn-copy-prompt');
   if (!btn) return;
 
-  let clickTimer = null;
-
-  btn.addEventListener('click', () => {
-    if (clickTimer) return; // un double-clic est déjà en cours
-    clickTimer = setTimeout(() => {
-      clickTimer = null;
-      requestPromptPreview('system');
-    }, 220);
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    basculerMenuPrompt(btn);
   });
 
-  btn.addEventListener('dblclick', () => {
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
-    requestPromptPreview('full');
+  el('prompt-menu').querySelectorAll('.popover-item').forEach(item => {
+    item.addEventListener('click', () => {
+      fermerMenuPrompt();
+      demanderVuePrompt(item.dataset.vue);
+    });
+  });
+
+  // Fermetures : clic ailleurs et Échap — sans quoi le menu resterait ouvert
+  // par-dessus la grille.
+  document.addEventListener('click', (e) => {
+    if (!el('prompt-menu').contains(e.target)) fermerMenuPrompt();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    fermerMenuPrompt();
+    if (!el('prompt-viewer').classList.contains('hidden')) fermerVuePrompt();
+  });
+
+  el('btn-prompt-close').addEventListener('click', fermerVuePrompt);
+  el('prompt-viewer').addEventListener('click', (e) => {
+    if (e.target === el('prompt-viewer')) fermerVuePrompt();   // clic sur le fond
+  });
+  el('btn-prompt-copy').addEventListener('click', () => {
+    const v = state.vuePromptCourante;
+    if (!v) return;
+    copierAvecToast(v.texte, v.libelle);
   });
 }
 
-// Demande au serveur l'aperçu du prompt réellement envoyé
-function requestPromptPreview(kind) {
-  state.pendingCopy = kind;
-  sendWS({
-    type:       'prompt:preview',
-    prompt:     el('prompt-input').value,
-    mode:       state.mode,
-    files:      [...state.attachedFiles],
-    activeMode: state.activeWorkMode,
-  });
+function basculerMenuPrompt(btn) {
+  const menu = el('prompt-menu');
+  if (!menu.classList.contains('hidden')) { fermerMenuPrompt(); return; }
+
+  menu.classList.remove('hidden');
+
+  // L'entrée « prompt envoyé » n'a de sens qu'après un appel : on la désactive plutôt
+  // que de la masquer, pour que son existence reste visible.
+  const envoye = menu.querySelector('[data-vue="envoye"]');
+  envoye.disabled = !state.unEnvoiAEuLieu;
+  envoye.title    = state.unEnvoiAEuLieu ? '' : "Aucune requête envoyée pour l'instant";
+
+  // Positionné AU-DESSUS du bouton : la barre de saisie est en bas de la fenêtre, un
+  // menu déroulant vers le bas sortirait du cadre. La hauteur n'est mesurable qu'une
+  // fois le menu affiché, d'où l'ordre : retirer .hidden, puis positionner.
+  const r = btn.getBoundingClientRect();
+  const h = menu.offsetHeight;
+  menu.style.left = Math.max(8, r.left) + 'px';
+  menu.style.top  = Math.max(8, r.top - h - 6) + 'px';
 }
 
-// Réception de l'aperçu depuis le serveur → déclenche la copie
+function fermerMenuPrompt() { el('prompt-menu').classList.add('hidden'); }
+
+function demanderVuePrompt(vue) {
+  state.vuePromptDemandee = vue;
+  if (vue === 'envoye') {
+    sendWS({ type: 'prompt:dernierEnvoi' });
+  } else {
+    sendWS({
+      type:       'prompt:preview',
+      prompt:     el('prompt-input').value,
+      mode:       state.mode,
+      files:      [...state.attachedFiles],
+      activeMode: state.activeWorkMode,
+    });
+  }
+}
+
+// Réception de l'aperçu « prêt à être envoyé »
 function onPromptPreview(msg) {
   state.lastPromptPreview = { system: msg.system, full: msg.full };
-  const kind = state.pendingCopy || 'system';
-  state.pendingCopy = null;
+  afficherVuePrompt({
+    libelle: 'Prompt prêt à être envoyé',
+    meta:    state.modeleIA ? 'destination : ' + state.modeleIA : '',
+    texte:   formatFullPromptForDisplay(msg.full),
+  });
+}
 
-  // Pour 'system' : texte seul ; pour 'full' : affichage lisible du tableau de messages
-  const textToCopy = kind === 'system'
-    ? msg.system
-    : formatFullPromptForDisplay(msg.full);
+// Réception de l'échange réellement transmis
+function onPromptDernierEnvoi(msg) {
+  if (!msg.present) {
+    afficherToast("Aucune requête n'a encore été envoyée", true);
+    return;
+  }
+  const heure = new Date(msg.horodatage).toLocaleTimeString();
+  const corps = formatFullPromptForDisplay(msg.messages)
+    + '\n\n=== RÉPONSE DU MODÈLE ===\n' + (msg.reponse || '(vide)');
+  afficherVuePrompt({
+    libelle: 'Prompt envoyé et réponse',
+    meta:    (msg.modele || 'modèle inconnu') + ' · mode ' + (msg.mode || '?') + ' · ' + heure,
+    texte:   corps,
+  });
+}
 
-  copyToClipboard(textToCopy, kind === 'system'
-    ? '✓ Prompt (system) copié dans le presse-papier'
-    : '✓ Requête complète copiée dans le presse-papier');
+function afficherVuePrompt({ libelle, meta, texte }) {
+  state.vuePromptCourante = { libelle, texte };
+  el('prompt-viewer-title').textContent = libelle;
+  el('prompt-viewer-meta').textContent  = meta || '';
+  el('prompt-viewer-body').textContent  = texte;
+  el('prompt-viewer').classList.remove('hidden');
+}
+
+function fermerVuePrompt() {
+  el('prompt-viewer').classList.add('hidden');
+  state.vuePromptCourante = null;
 }
 
 // Formate un tableau de messages OpenAI au format lisible pour humain
 function formatFullPromptForDisplay(messages) {
   if (!Array.isArray(messages)) return String(messages);
-  
-  return messages.map((m, idx) => {
+
+  return messages.map((m) => {
     const roleHeader = {
       system: '=== SYSTEM PROMPT ===',
       user: '=== USER MESSAGE ===',
       assistant: '=== ASSISTANT RESPONSE ==='
-    }[m.role] || `=== ${m.role?.toUpperCase() || 'MESSAGE'} ===`;
-    
+    }[m.role] || ('=== ' + (m.role ? m.role.toUpperCase() : 'MESSAGE') + ' ===');
+
+    // Le contenu peut être multi-part (texte + fichiers routés) : le rendre lisible
+    // plutôt que d'afficher "[object Object]". Le cas se présente dès qu'un fichier
+    // est joint, et c'est précisément là qu'on veut relire ce qui est parti.
     let content = m.content || '';
-    
-    // Formater les fichiers joints avec leurs noms et types
-    if (m.role === 'user' && Array.isArray(m.files) && m.files.length > 0) {
-      const filesInfo = m.files.map(f => `${f.name} (${f.mimeType})`).join('\n');
-      return `${roleHeader}\n${content}\n\n📎 Fichiers joints :\n${filesInfo}`;
+    if (Array.isArray(content)) {
+      content = content.map(part => {
+        if (typeof part === 'string')  return part;
+        if (part && part.type === 'text')      return part.text || '';
+        if (part && part.type === 'image_url') return '[image jointe]';
+        return '[' + ((part && part.type) || 'partie') + ' jointe]';
+      }).join('\n');
+    } else if (typeof content !== 'string') {
+      content = JSON.stringify(content, null, 2);
     }
-    
-    return `${roleHeader}\n${content}`;
+
+    if (m.role === 'user' && Array.isArray(m.files) && m.files.length > 0) {
+      const filesInfo = m.files.map(f => f.name + ' (' + f.mimeType + ')').join('\n');
+      return roleHeader + '\n' + content + '\n\n📎 Fichiers joints :\n' + filesInfo;
+    }
+
+    return roleHeader + '\n' + content;
   }).join('\n\n');
 }
 
-// Copie un texte dans le presse-papier puis affiche une confirmation en conversation
-async function copyToClipboard(text, confirmMsg) {
+// ── Toasts ─────────────────────────────────────────────────────────────────────
+// Confirmation éphémère, là où se fait l'action. Elle partait auparavant dans le fil
+// de conversation, mêlée aux messages de l'IA.
+function afficherToast(message, estErreur = false) {
+  const zone = el('toasts');
+  if (!zone) return;
+  const t = document.createElement('div');
+  t.className = 'toast' + (estErreur ? ' toast-error' : '');
+  t.textContent = message;
+  zone.appendChild(t);
+  // Lecture forcee du layout plutot que requestAnimationFrame : celui-ci ne se declenche
+  // PAS tant que la page est masquee (onglet en arriere-plan). Le toast restait alors a
+  // opacite 0 puis etait retire par son setTimeout, qui lui continue de tourner — donc
+  // rien de visible au retour de l'utilisateur. Le reflow suffit a faire partir la
+  // transition depuis l'etat initial.
+  void t.offsetHeight;
+  t.classList.add('visible');
+  setTimeout(() => {
+    t.classList.remove('visible');
+    setTimeout(() => t.remove(), 240);
+  }, 2600);
+}
+
+// Copie un texte dans le presse-papier et nomme ce qui a été copié
+async function copierAvecToast(texte, quoi) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(texte);
     } else {
-      // Fallback (anciens navigateurs / contexte non sécurisé)
+      // Repli (navigateur ancien, ou contexte non sécurisé)
       const ta = document.createElement('textarea');
-      ta.value = text;
+      ta.value = texte;
       ta.style.position = 'fixed';
       ta.style.opacity = '0';
       document.body.appendChild(ta);
@@ -2278,9 +2392,9 @@ async function copyToClipboard(text, confirmMsg) {
       document.execCommand('copy');
       document.body.removeChild(ta);
     }
-    addMessage('system', confirmMsg);
+    afficherToast('✓ ' + quoi + ' copié — ' + texte.length.toLocaleString('fr-FR') + ' caractères');
   } catch (e) {
-    addMessage('error', `⚠ Copie impossible : ${e.message}`);
+    afficherToast('⚠ Copie impossible : ' + e.message, true);
   }
 }
 
@@ -2307,6 +2421,9 @@ function sendPrompt() {
   state.userScrolled = false;
   initProgress();
   sendWS({ type: 'prompt:send', prompt, mode: state.mode, files: [...state.attachedFiles], activeMode: state.activeWorkMode });
+  // Ouvre l'entree « prompt envoye » du menu. Le serveur reste seul juge : si l'appel
+  // echoue, dernierEnvoi restera null et onPromptDernierEnvoi le dira par un toast.
+  state.unEnvoiAEuLieu = true;
   el('prompt-input').value = '';
   state.attachedFiles = [];
   renderChips();

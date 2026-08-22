@@ -111,6 +111,12 @@ function createSession(payload) {
     // sans JSON pairé (session.promptPolicy === null) — comportement inchangé.
     llmTurns: [],
 
+    // Dernier echange REELLEMENT transmis au LLM : { messages, reponse, modele, mode,
+    // horodatage }. Renseigne par llmClient au point d'appel (seul endroit ou la valeur
+    // envoyee est connue apres troncature). Sert a l'UI, qui propose de consulter soit cet
+    // envoi-la, soit l'apercu de ce qui partirait maintenant.
+    dernierEnvoi: null,
+
     // ── Plan en cours (mode Plan/Act) ─────────────────────────────────────────
     currentPlan: null,
 
@@ -512,6 +518,7 @@ function resetRows(session) {
   session._nextId = session.rows.reduce((max, r) => Math.max(max, Number(r._id) || 0), 0) + 1;
   session.history   = [];
   session.llmTurns  = [];
+  session.dernierEnvoi = null;   // un reset efface aussi la trace du dernier envoi
   session.currentPlan = null;
   setStatus(session, STATUS.CONNECTED);
   console.log(`[SessionManager] Rows réinitialisés : ${session.sessionId}`);
