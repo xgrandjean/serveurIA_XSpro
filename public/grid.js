@@ -50,7 +50,6 @@
  *    sans connaître les noms de champs non plus. Si un besoin similaire apparaît pour
  *    un autre champ, il se déclare dans le hook (ex: MANIFEST.champsIndexRef), jamais
  *    par un `if (cle === '...')` ici. Un tel code a été introduit puis retiré le
- *    par un `if (cle === '...')` ici. Un tel code a été introduit puis retiré le
  *    2026-07-15 — ne pas le réintroduire sans passer par ce mécanisme.
  * 6. `labelParType` — surcharge d'AFFICHAGE d'un libellé selectChoix selon le type de la ligne.
  *    Un choix peut déclarer `labelParType: { <indice type>: <libellé> }` (déclaré par la vue dans
@@ -702,6 +701,91 @@ TextareaCellEditor.prototype.destroy = function() {
   this.textarea = null;
 };
 
+// ── Éditeur personnalisé pour dropdowns dont le libellé dépend du type de ligne ──
+// Remplace agSelectCellEditor sur les colonnes selectChoix qui portent au moins une
+// surcharge `labelParType` (aujourd'hui la règle 'texte' → 'Atelier' sur les questions
+// ouvertes).
+//
+// Pourquoi un éditeur maison ? Dans AG Grid 31.3.2, agSelectCellEditor construit ses
+// options en appelant valueService.formatValue(column, null, value) — node = null :
+// sans la ligne de données, la résolution d'un libellé dépendant du type (row.type)
+// est impossible (on retomberait systématiquement sur le label de base 'texte'). Un
+// éditeur personnalisé, lui, reçoit params.data (la ligne) dans init(), exactement
+// comme TextareaCellEditor recevra params.data pour champsIndexRef.
+//
+// PUR visuel : getValue() renvoie la VALEUR d'origine (l'indice, ex 4), jamais le
+// libellé affiché ('Atelier') — le stockage, l'envoi LLM (sendLabel) et l'export
+// restent strictement inchangés.
+function SelectLibelleCellEditor() {}
+SelectLibelleCellEditor.prototype.init = function(params) {
+  const cle = params.colDef?.field;
+  const sc = (cle && state.selectChoix[cle]) || null;
+  const rowType = params.data?.type;
+  this.initialValue = params.value;
+
+  this.select = document.createElement('select');
+  this.select.className = 'ag-cell-editor ag-select-custom';
+  this.select.style.width = '100%';
+  this.select.style.boxSizing = 'border-box';
+  this.select.style.fontSize = '12px';
+  this.select.style.padding = '4px';
+
+  // Valeurs proposées : celles fournies par cellEditorParams (déjà restreintes par le
+  // type de la ligne via champsRestreints), sinon la liste complète du dropdown.
+  const values = Array.isArray(params.values)
+    ? params.values
+    : (sc ? sc.choix.map(c => c.valeur) : []);
+
+  this.options = [];
+  values.forEach((v) => {
+    const entry = sc ? sc.choix.find(c => c.valeur === v) : null;
+    let label = entry ? entry.label : String(v);
+    if (entry) {
+      const surcharge = libelleChoixPourType(entry, rowType);
+      if (surcharge !== null) label = surcharge;
+    }
+    const opt = document.createElement('option');
+    opt.value = String(v);
+    opt.textContent = label;
+    this.options.push({ value: v, label });
+    this.select.appendChild(opt);
+  });
+
+  // Pré-sélection de la valeur courante (comparaison sur la valeur originale).
+  let found = false;
+  this.options.forEach((o, i) => {
+    if (String(o.value) === String(this.initialValue) && !found) {
+      this.select.selectedIndex = i;
+      found = true;
+    }
+  });
+
+  // Choisir une option → committer l'édition (le changement est propagé par
+  // onCellValueChanged côté AG Grid).
+  this.select.addEventListener('change', () => params.stopEditing());
+
+  // Focus différé (rendu), et tentative d'ouverture du menu si l'édition a démarré au
+  // clavier (Entrée) — comme agSelectCellEditor. showPicker() peut ne pas être
+  // supporté ou refuser sans geste utilisateur : on reste silencieux si ça échoue,
+  // le menu s'ouvrant alors au focus/au clic.
+  this.startedByEnter = params.eventKey === 'Enter';
+  setTimeout(() => {
+    if (!this.select) return;
+    this.select.focus();
+    if (this.startedByEnter && typeof this.select.showPicker === 'function') {
+      try { this.select.showPicker(); } catch (e) { /* ignoré */ }
+    }
+  }, 0);
+};
+SelectLibelleCellEditor.prototype.afterGuiAttached = function() {};
+SelectLibelleCellEditor.prototype.getGui = function() { return this.select; };
+SelectLibelleCellEditor.prototype.getValue = function() {
+  const opt = this.options[this.select.selectedIndex];
+  return opt ? opt.value : this.initialValue;
+};
+SelectLibelleCellEditor.prototype.isPopup = function() { return false; };
+SelectLibelleCellEditor.prototype.focusIn = function() { if (this.select) this.select.focus(); };
+
 // ── Champs non applicables au type de la ligne (grisage + blocage édition) ───────
 // state.champsNonApplicables = { [valeurType]: [champs] }, reçu une fois à l'init
 // (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES) — ne dépend que du
@@ -790,6 +874,12 @@ const dataCols = colonnes.map(col => {
     // Vérifier si cette colonne a un selectChoix
     const sc = state.selectChoix[col.cle];
     const hasSelectChoix = sc && Array.isArray(sc.choix) && sc.choix.length > 0;
+    // Une colonne dropdown dont au moins un choix porte `labelParType` (libellé
+    // d'affichage dépendant du type de la ligne) doit utiliser l'éditeur personnalisé
+    // SelectLibelleCellEditor : agSelectCellEditor construit ses options sans la ligne
+    // (valueService.formatValue(..., node=null)), il ne pourrait pas résoudre la
+    // surcharge. Les autres dropdowns (type, correction, ...) gardent agSelectCellEditor.
+    const hasLabelParType = hasSelectChoix && sc.choix.some(c => c && !!c.labelParType);
 
     const def = {
       field:      col.cle,
@@ -854,8 +944,12 @@ const dataCols = colonnes.map(col => {
 
        // agSelectCellEditor - ouvre avec Entrée en mode clavier, affiche les labels, stocke les valeurs
        // permet la navigation gauche/droite même hors édition
+       // Si la colonne porte des libellés surchargés par type (labelParType), on utilise
+       // notre éditeur SelectLibelleCellEditor à la place : agSelectCellEditor construit
+       // ses options sans la ligne (node=null, cf. SelectCellEditor.init), il ne pourrait
+       // pas résoudre la surcharge par type. Les autres dropdowns sont inchangés.
        ...(hasSelectChoix ? {
-         cellEditor: 'agSelectCellEditor',
+         cellEditor: hasLabelParType ? SelectLibelleCellEditor : 'agSelectCellEditor',
          cellEditorParams: (params) => {
            // Restreint les valeurs proposées selon le type de la ligne courante, si le
            // hook a déclaré une restriction pour ce champ (state.champsRestreints) —
@@ -872,16 +966,12 @@ const dataCols = colonnes.map(col => {
            }
            const allowedValeurs = restrictMap?.[typeValeur];
            const values = Array.isArray(allowedValeurs) ? allowedValeurs : sc.choix.map(entry => entry.valeur);
-           return {
-             values,
-             getOptionValue: (value) => value,
-             getOptionLabel: (value) => {
-               const entry = sc.choix.find(c => c.valeur === value);
-               if (!entry) return value;
-               const surcharge = libelleChoixPourType(entry, params.data?.type);
-               return (surcharge !== null) ? surcharge : entry.label;
-             },
-           };
+           // NB: on ne fournit QUE les valeurs (restreintes). Les getOptionValue/
+           // getOptionLabel n'existent pas dans agSelectCellEditor d'AG Grid 31.3.2
+           // (ce ne sont pas des params reconnus) ; le libellé des options d'un dropdown
+           // à libellé par type est géré par notre SelectLibelleCellEditor, celui des
+           // autres dropdowns par le valueFormatter (comportement historique).
+           return { values };
          },
         suppressKeyboardEvent: (params) => {
           const currentRowIndex = params.node?.rowIndex ?? params.api.getFocusedCell()?.rowIndex;
