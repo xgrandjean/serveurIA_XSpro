@@ -249,6 +249,11 @@ function onInit(msg) {
   // bandeau et le fil de conversation, comme le fait XSpro dans son spinner.
   state.modeleIA      = msg.modeleIA      || null;
 
+  // Affiche des l'ouverture le nom du LLM dans un badge permanent de l'en-tete,
+  // pas uniquement pendant/reve en cours de requete. onInit etant aussi appele
+  // sur session:reset, le badge reste syncronise si le modele change.
+  updateModelBadge();
+
   // Provider et types de fichiers acceptés
   state.providerId    = msg.providerId    || 'openai';
   state.acceptString  = msg.acceptString  || '*/*';
@@ -2811,6 +2816,24 @@ function setStatusBadge(cls, label) {
   b.textContent = label;
   // Le badge est etroit : si le nom du modele deborde, il reste lisible au survol.
   b.title       = state.modeleIA ? `Modele : ${state.modeleIA}` : '';
+}
+
+// Affiche le nom du LLM dans le badge permanent de l'en-tete, des l'ouverture
+// (appele par onInit), et non uniquement en cours de requete. Sans modele connu
+// on cache le badge plutot que d'afficher "🤖 null" — meme repli que
+// libelleTraitement ci-dessous.
+function updateModelBadge() {
+  const b = el('model-badge');
+  if (!b) return;
+  if (state.modeleIA) {
+    b.textContent = `🤖 ${state.modeleIA}`;
+    b.title       = `Modèle IA : ${state.modeleIA}`;
+    b.classList.remove('hidden');
+  } else {
+    b.textContent = '';
+    b.title       = '';
+    b.classList.add('hidden');
+  }
 }
 
 // Nomme le modele qui travaille, quand le serveur l'a annonce. Repli sur le libelle

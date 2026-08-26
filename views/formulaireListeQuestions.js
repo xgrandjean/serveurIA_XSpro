@@ -273,7 +273,7 @@ const MODES = {
 
   analyse: {
     label: 'Correction / Amélioration',
-    description: 'Corriger et améliorer des questions existantes — reformuler, ajuster, compléter les champs annexes notamment (indication, consigne de correction à donner à l\'IA pour cette ligne). Modifie les lignes, ne produit pas de bilan rédigé.',
+    description: 'Corriger et améliorer des questions existantes — reformuler, ajuster, compléter sur demande les champs annexes (indication, consigne de correction à donner à l\'IA pour cette ligne). Modifie les lignes, ne produit pas de bilan rédigé.',
 
     surchargesColonnes: {
       type:                  { width: 90 ,pinned:     'left'},
@@ -620,8 +620,20 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
 
     // Gestion des incohérences spécifiques qcm (1) et Liste de choix (4)
     if (type === 1 || type === 4) {
-      // Normaliser les indices en nombres
-      r.choixCorrect = r.choixCorrect.map(v => Number(v)).filter(v => !isNaN(v));
+      // Normaliser les indices : une valeur déjà numérique (ou une string d'indice,
+      // ex: "0") devient un indice ; un texte qui correspond exactement à un élément
+      // de "choix" (cas où le LLM renvoie la réponse en toutes lettres au lieu de son
+      // indice, malgré la consigne) est résolu en indice ; un texte sans correspondance
+      // est conservé TEL QUEL — jamais abandonné en silence (même politique que
+      // computeIndexRefSideEffects) : getInvalidFields le signale ensuite en rouge
+      // (hasUnresolvedText) plutôt que de faire disparaître la réponse du LLM.
+      r.choixCorrect = r.choixCorrect.map(v => {
+        if (typeof v === 'number') return v;
+        const n = Number(v);
+        if (!isNaN(n) && String(v).trim() !== '') return n;
+        const idx = r.choix.findIndex(c => String(c).trim().toLowerCase() === String(v).trim().toLowerCase());
+        return idx !== -1 ? idx : v;
+      });
 
       // Cohérence présence choix/choixCorrect
       if (r.choix.length === 0 && r.choixCorrect.length > 0) {
@@ -635,8 +647,10 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
 
       // Si les deux sont remplis, vérifier la cohérence
       if (r.choix.length > 0 && r.choixCorrect.length > 0) {
-        // Filtrer les indices hors limites
-        r.choixCorrect = r.choixCorrect.filter(idx => idx >= 0 && idx < r.choix.length);
+        // Filtrer les indices numériques hors limites — un texte non résolu (ci-dessus)
+        // n'est pas un indice, donc pas concerné par les bornes : il reste pour être
+        // signalé invalide plutôt que d'être silencieusement supprimé ici aussi.
+        r.choixCorrect = r.choixCorrect.filter(idx => typeof idx !== 'number' || (idx >= 0 && idx < r.choix.length));
 
         // Vérifier la règle
         const currentRegleLabel = valueToLabel('regle', r.regle) || r.regle;

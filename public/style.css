@@ -67,6 +67,23 @@ body { display: flex; flex-direction: column; height: 100vh; }
   font-weight: 600;
 }
 
+/* Badge « modèle LLM » — affiché dès l'initialisation (pas seulement en cours de
+   requête). Le nom peut être long (ex: mistralai/Ministral-3-8B-Instruct-2512) :
+   on tronque visuellement via max-width/ellipsis, le nom complet reste lisible
+   au survol grâce à l'attribut title (cf. updateModelBadge dans grid.js). */
+.badge-model {
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 12px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Badge statut ───────────────────────────────────────────────────────────── */
 .badge-status {
   font-size: 11px; font-weight: 700;

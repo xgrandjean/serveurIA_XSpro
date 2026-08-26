@@ -550,6 +550,12 @@ function buildDataCSV(rows, colsLLM, selectChoix = {}, includeId = false) {
         if (entry) return entry.label;
       }
 
+      // Champ array (choix, choixCorrect...) : `String(array)` équivaudrait à
+      // `array.join(',')`, ambigu dans un TSV si un élément contient lui-même une
+      // virgule. On le représente comme les autres champs multilignes : un élément
+      // par ligne, échappé en "\n" littéral (même convention que le \n ci-dessous).
+      if (Array.isArray(v)) return v.map(String).join('\n').replace(/\t/g, ' ').replace(/\n/g, '\\n');
+
       return String(v).replace(/\t/g, ' ').replace(/\n/g, '\\n');
     });
     return (includeId ? [row._id ?? '', ...cells] : cells).join('\t');
@@ -1028,6 +1034,12 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
 
 function coerceValue(value, col) {
   if (!col || value === '' || value === null || value === undefined) return value ?? '';
+  // Champ array (choix, choixCorrect...) : `String(array)` (branche "default" ci-dessous)
+  // équivaut à `array.join(',')` — un tableau LLM valide ["A","B","C"] devenait la chaîne
+  // "A,B,C", affichée ensuite comme un seul élément au lieu d'une ligne par proposition
+  // (constaté sur choix/choixCorrect, dont les colonnes XSpro n'ont pas de `col.type`
+  // dédié). On préserve donc le tableau tel quel — chaque élément normalisé en string.
+  if (Array.isArray(value)) return value.map(v => String(v));
   switch (col.type) {
     case 'integer': { const n = parseInt(value, 10);  return isNaN(n) ? 0 : n; }
     case 'decimal':

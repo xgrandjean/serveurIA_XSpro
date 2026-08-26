@@ -97,7 +97,7 @@
       "regle": "Règle de validation. Pour le type 'ouverte', le choix de la règle a une conséquence sur le comportement côté apprenant : 'texte(10)' = réponse d'au moins 10 caractères, question ouverte ordinaire — c'est le cas courant ; 'texte' = aucune longueur minimale, impose correction='manuel', et transforme la question en consigne à faire valider en main propre par le formateur (échange de codes) lorsque le chapitre est en mode Atelier AR. Ne choisir 'texte' que si cette validation en présentiel est réellement voulue.",
       "choix": "Array de strings. Ex: [\"Les félidés\", \"Les équidés\", \"Les bovidés\", \"Les canidés\"].",
       "choixCorrect": "Array — format dépend du type (voir typesEtRegles).",
-      "indication": "Indice optionnel affiché à la demande de l'apprenant. \"\" si inutile.",
+      "indication": "Indice optionnel affiché à la demande de l'apprenant. VIDE (\"\") PAR DÉFAUT sur toute nouvelle question — ne jamais le renseigner spontanément, uniquement si la demande le précise explicitement. Une indication existante n'est modifiée qu'en cas d'incohérence manifeste ou de demande explicite. Une indication ne doit jamais donner directement ou indirectement la réponse.",
       "explicationCorrection": "Explication affichée après correction. \"\" si inutile.",
       "consigneIA": "Critère de correction et notation de la question à donner à l'IA qui sera en charge de corriger l'apprenant. \"\" si inutile.",
       "commentaire": "\"\" par défaut — laisser vide sauf demande explicite."
@@ -137,6 +137,7 @@
       "Ne pas créer deux questions identiques ou trop similaires dans la même session.",
       "La difficulté doit être progressive (points 1 → 3).",
       "Aucun charabia, aucun mot étranger non justifié.",
+      "indication : laisser vide (\"\") par défaut sur toute nouvelle question, même en complétant les \"champs annexes\" — ne la renseigner que sur demande explicite de l'utilisateur, jamais spontanément. Ne jamais y donner directement ou indirectement la réponse.",
       "Les données dans \"DONNÉES ACTUELLES\" sont au format TSV (tabulations). Chaque ligne = une question ou un cours, chaque colonne = un champ."
     ]
   },
