@@ -50,7 +50,16 @@
  *    sans connaître les noms de champs non plus. Si un besoin similaire apparaît pour
  *    un autre champ, il se déclare dans le hook (ex: MANIFEST.champsIndexRef), jamais
  *    par un `if (cle === '...')` ici. Un tel code a été introduit puis retiré le
+ *    par un `if (cle === '...')` ici. Un tel code a été introduit puis retiré le
  *    2026-07-15 — ne pas le réintroduire sans passer par ce mécanisme.
+ * 6. `labelParType` — surcharge d'AFFICHAGE d'un libellé selectChoix selon le type de la ligne.
+ *    Un choix peut déclarer `labelParType: { <indice type>: <libellé> }` (déclaré par la vue dans
+ *    buildSelectChoix, ex: la règle 'texte' qui s'affiche "Atelier" sur les questions ouvertes).
+ *    Consommé GÉNÉRIQUEMENT ici par `libelleChoixPourType()` dans valueFormatter (cellule) et
+ *    getOptionLabel (dropdown). C'est du RENDU uniquement : la valeur stockée, le label contractuel
+ *    (sendLabel → LLM), les restrictions (champsRestreints) et l'export restent strictement inchangés.
+ *    Purement déclaratif et piloté par la vue — grid.js ne connaît aucun nom de champ métier ici,
+ *    dans le même esprit que champsRestreints/champsIndexRef.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
@@ -703,6 +712,30 @@ function isFieldNonApplicable(row, cle) {
   return Array.isArray(list) && list.includes(cle);
 }
 
+// ── Libellé d'affichage éventuellement surchargé par type de ligne ─────────────
+// Un choix selectChoix peut porter une surcharge PUREMENT VISUELLE dépendante du
+// type de la ligne via `labelParType: { <indice type>: <libellé> }`, déclarée par
+// la vue (ex: la règle 'texte' qui s'affiche "Atelier" sur les questions ouvertes).
+// Sert uniquement au RENDU (cellule + dropdown) ; la valeur stockée, le label
+// contractuel (sendLabel), les restrictions (champsRestreints) et la validation
+// restent inchangés. Générique : grid.js ne connaît aucun nom de champ métier.
+// Le type peut arriver en indice numérique (1..5) ou en code/label texte — on
+// normalise pour lire la clé numérique.
+function libelleChoixPourType(entry, typeValeur) {
+  if (!entry || !entry.labelParType) return null;
+  const map = entry.labelParType;
+  let t = typeValeur;
+  if (typeof t === 'string') {
+    const typeStrToInt = {
+      'qcm': 1, 'courte': 2, 'ouverte': 3, 'selection': 4, 'cours': 5,
+      'QCM': 1, 'Réponse courte': 2, 'Texte long': 3, 'Liste de choix': 4, 'Cours': 5,
+      '': 0, ' ': 0
+    };
+    t = typeStrToInt[t] ?? t;
+  }
+  return (t !== undefined && map[t] !== undefined) ? map[t] : null;
+}
+
 // ── Construction des colonDefs ─────────────────────────────────────────────────
 function buildColDefs(colonnes) {
 
@@ -844,7 +877,9 @@ const dataCols = colonnes.map(col => {
              getOptionValue: (value) => value,
              getOptionLabel: (value) => {
                const entry = sc.choix.find(c => c.valeur === value);
-               return entry ? entry.label : value;
+               if (!entry) return value;
+               const surcharge = libelleChoixPourType(entry, params.data?.type);
+               return (surcharge !== null) ? surcharge : entry.label;
              },
            };
          },
@@ -896,7 +931,9 @@ const dataCols = colonnes.map(col => {
           }
         }
         const selected = sc.choix.find(c => c.valeur === normalizedVal);
-        return selected ? selected.label : p.value;
+        if (!selected) return p.value;
+        const surcharge = libelleChoixPourType(selected, p.data?.type);
+        return (surcharge !== null) ? surcharge : selected.label;
       };
     }
 

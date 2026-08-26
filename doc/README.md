@@ -109,3 +109,40 @@ Carnet de liaisons (câbles, fluides entre équipements).
 ## Vue : formulaireGetDetailsTravaux
 
 Fiche de travaux/liste de tâches à réaliser sur chantier.
+
+## Vue : formulaireListeQuestions
+
+Gestion de questions/cours (qcm, réponse courte, texte long, liste de choix, cours)
+pour un module e-learning XSpro. Types encodés en indices (`PARCOURS_TYPE`) :
+1=qcm, 2=courte, 3=ouverte, 4=selection, 5=cours.
+
+### La règle `texte` et l'alias d'affichage « Atelier »
+
+Le champ `regle` (`PARCOURS_REGLE`) porte la valeur `texte` (indice 4), **partagée
+entre deux types** dont le sens est différent :
+
+| Type de la ligne | `regle = texte` signifie | Affichage dans la grille |
+|---|---|---|
+| **courte** (2) | simple réponse textuelle libre | « texte » (inchangé) |
+| **ouverte** (3, Texte long) | consigne **Atelier AR** : `texte` impose `correction='manuel'` et transforme la question en travail à faire valider en main propre par le formateur (échange de codes) | « **Atelier** » |
+
+Le libellé affiché est surchargé par type via un champ **déclaratif** `labelParType`
+ajouté à l'entrée de `selectChoix.regle.choix` dans `buildSelectChoix()`
+(`views/formulaireListeQuestions.js`) :
+
+```js
+{ valeur: 4, label: 'texte', labelParType: { 3: 'Atelier' } }, // 3 = ouverte
+```
+
+**C'est du pur rendu** : `label: 'texte'` reste le label contractuel. Les valeurs
+stockées, ce qui est envoyé au LLM (`sendLabel`), les restrictions de menu
+(`computeChampsRestreints` cherche encore la valeur 4 par `label === 'texte'`) et
+l'export Excel (qui sort `'texte'`) sont **strictement inchangés**. Aucune valeur
+`'atelier'` n'existe ni n'est échangée — ne jamais renvoyer `'atelier'` au LLM ou à
+l'export.
+
+Côté affichage, `grid.js` lit ce champ **génériquement** (aucun nom de champ en dur)
+via `libelleChoixPourType()` dans le `valueFormatter` (cellule) et le
+`getOptionLabel` (dropdown). Si un autre libellé devait dépendre du type à l'avenir,
+il suffit de déclarer `labelParType` sur l'entrée concernée — cf. `grid.js`,
+« Décisions volontaires », point 6.

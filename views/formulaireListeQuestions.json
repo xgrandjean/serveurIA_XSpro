@@ -56,7 +56,7 @@
         "points": "Entier 1-3 selon difficulté."
       },
       "ouverte": {
-        "description": "Texte long — réponse libre. Règle par défaut : 'texte(10)'. Ne choisir 'texte' que pour un travail à réaliser hors écran, que l'apprenant fera valider en main propre par le formateur (voir regle).",
+        "description": "Texte long — réponse libre. Règle par défaut : 'texte(10)'. Ne choisir 'texte' que pour un travail à réaliser hors écran, que l'apprenant fera valider en main propre par le formateur (voir regle). Dans la grille Worker, la règle 'texte' sur ce type est affichée « Atelier » (labelParType), mais la valeur échangée reste 'texte' — ne jamais renvoyer 'atelier'.",
         "regle": [
           "texte",
           "texte(10)"
@@ -94,7 +94,7 @@
     "formatChamps": {
       "_docOrdreQuestion": "ordreQuestion n'est PAS documenté ici : il est dans colonnesLlmHidden des DEUX modes (analyse et creation), donc jamais vu par le LLM. Le documenter ajouterait des instructions mortes dans le prompt système si buildSystemPrompt sérialise formatChamps sans filtrage par colonnesLlmHidden. Si ce champ doit un jour être exposé au LLM dans un mode donné, réintroduire l'entrée à ce moment-là.",
       "contenu": "Énoncé de la question ou corps du cours. Sauts de ligne → <br>. Markdown pour les cours, texte simple pour les questions.",
-      "regle": "Règle de validation. Pour le type 'ouverte', le choix de la règle a une conséquence sur le comportement côté apprenant : 'texte(10)' = réponse d'au moins 10 caractères, question ouverte ordinaire — c'est le cas courant ; 'texte' = aucune longueur minimale, impose correction='manuel', et transforme la question en consigne à faire valider en main propre par le formateur (échange de codes) lorsque le chapitre est en mode Atelier AR. Ne choisir 'texte' que si cette validation en présentiel est réellement voulue.",
+      "regle": "Règle de validation. Pour le type 'ouverte', le choix de la règle a une conséquence sur le comportement côté apprenant : 'texte(10)' = réponse d'au moins 10 caractères, question ouverte ordinaire — c'est le cas courant ; 'texte' = aucune longueur minimale, impose correction='manuel', et transforme la question en consigne à faire valider en main propre par le formateur (échange de codes) lorsque le chapitre est en mode Atelier AR. Ne choisir 'texte' que si cette validation en présentiel est réellement voulue. Note affichage : dans la grille Worker, sur les lignes de type 'ouverte', la règle 'texte' est affichée « Atelier » (surcharge purement visuelle via labelParType dans buildSelectChoix) — la valeur échangée avec cet agent et exportée reste 'texte', jamais 'atelier'.",
       "choix": "Array de strings. Ex: [\"Les félidés\", \"Les équidés\", \"Les bovidés\", \"Les canidés\"].",
       "choixCorrect": "Array — format dépend du type (voir typesEtRegles).",
       "indication": "Indice optionnel affiché à la demande de l'apprenant. VIDE (\"\") PAR DÉFAUT sur toute nouvelle question — ne jamais le renseigner spontanément, uniquement si la demande le précise explicitement. Une indication existante n'est modifiée qu'en cas d'incohérence manifeste ou de demande explicite. Une indication ne doit jamais donner directement ou indirectement la réponse.",

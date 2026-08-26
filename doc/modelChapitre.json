@@ -29,7 +29,7 @@
       "validation":"Cours à valider — affiche un bouton 'J'ai lu et compris' (type=cours UNIQUEMENT)",
       "unique":    "Choix unique parmi les propositions (type=qcm ou type=selection)",
       "multiple":  "Plusieurs réponses correctes possibles (type=qcm UNIQUEMENT)",
-      "texte":     "Réponse textuelle libre (type=courte ou type=ouverte)",
+      "texte":    "Réponse textuelle libre (type=courte ou type=ouverte). Selon le type : courte → réponse libre ordinaire ; ouverte → associée à correction='manuel', transforme la question en consigne Atelier AR (travail à faire valider en main propre par le formateur). Dans l'UI Worker (grid), cette valeur s'affiche « Atelier » sur les lignes de type ouverte — surcharge d'affichage PUREMENT visuelle via labelParType (cf. grid.js décision n°6), la valeur stockée/exportée reste bien 'texte'.",
       "texte(10)": "Réponse textuelle avec minimum 10 caractères (type=ouverte UNIQUEMENT)",
       "nombre":    "Réponse numérique uniquement (type=courte UNIQUEMENT)"
     }
@@ -66,7 +66,7 @@
   "format_champs": {
     "type":     "Obligatoire. Une des valeurs : qcm, courte, ouverte, selection, cours.",
     "contenu":  "Obligatoire. Pour 'cours' : Markdown (## titres, **gras**, - listes, | tableaux, ``` code). Du HTML simple est également accepté (encodé en entités < > \"). Pour les questions : texte simple, Markdown minimal.",
-    "regle":    "Obligatoire sauf pour cours sans validation. Voir coherences_type_regle.",
+    "regle":    "Obligatoire sauf pour cours sans validation. Voir coherences_type_regle. Sur une question ouverte, la règle 'texte' impose correction='manuel' et signifie une consigne Atelier AR (validation en présentiel) ; l'UI Worker l'affiche « Atelier » mais la valeur stockée/exportée reste 'texte'.",
     "correction":"Obligatoire sauf pour cours. Voir valeurs correction.",
     "points":   "Nombre entier entre 1 et 3, selon la difficulté de la question. Laisser VIDE pour les cours.",
     "choix":    "Propositions séparées par \\n (un saut de ligne entre chaque). Texte BRUT, pas de Markdown. VIDE pour courte et ouverte.",

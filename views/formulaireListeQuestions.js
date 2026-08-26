@@ -406,7 +406,14 @@ function buildSelectChoix(workerConfig, data, xsproPayload) {
         { valeur: 1, label: 'validation' },
         { valeur: 2, label: 'unique' },
         { valeur: 3, label: 'multiple' },
-        { valeur: 4, label: 'texte' },
+        // La valeur 4 ('texte') est partagée entre les types courte et ouverte :
+        //   courte  → simple réponse textuelle libre (le libellé 'texte' reste exact)
+        //   ouverte → 'texte' + correction manuelle = consigne Atelier AR (rituel).
+        // On garde le label CONTRACTUEL 'texte' (valeur stockée, sendLabel vers le
+        // LLM, restriction champsRestreints, export) et on ajoute UNIQUEMENT une
+        // surcharge d'AFFICHAGE par type (labelParType: { <indice type>: <libellé> })
+        // que grid.js lit génériquement dans valueFormatter/getOptionLabel.
+        { valeur: 4, label: 'texte', labelParType: { 3: 'Atelier' } }, // 3 = ouverte
         { valeur: 5, label: 'texte(10)' },
         { valeur: 6, label: 'nombre' },
       ],
