@@ -56,7 +56,7 @@
         "points": "Entier 1-3 selon difficulté."
       },
       "ouverte": {
-        "description": "Texte long — réponse libre",
+        "description": "Texte long — réponse libre. Règle par défaut : 'texte(10)'. Ne choisir 'texte' que pour un travail à réaliser hors écran, que l'apprenant fera valider en main propre par le formateur (voir regle).",
         "regle": [
           "texte",
           "texte(10)"
@@ -94,7 +94,7 @@
     "formatChamps": {
       "_docOrdreQuestion": "ordreQuestion n'est PAS documenté ici : il est dans colonnesLlmHidden des DEUX modes (analyse et creation), donc jamais vu par le LLM. Le documenter ajouterait des instructions mortes dans le prompt système si buildSystemPrompt sérialise formatChamps sans filtrage par colonnesLlmHidden. Si ce champ doit un jour être exposé au LLM dans un mode donné, réintroduire l'entrée à ce moment-là.",
       "contenu": "Énoncé de la question ou corps du cours. Sauts de ligne → <br>. Markdown pour les cours, texte simple pour les questions.",
-      "regle": "Règle de validation. Pour le type 'ouverte', 'texte(10)' signifie que les réponses de moins de 10 caractères sont invalides.",
+      "regle": "Règle de validation. Pour le type 'ouverte', le choix de la règle a une conséquence sur le comportement côté apprenant : 'texte(10)' = réponse d'au moins 10 caractères, question ouverte ordinaire — c'est le cas courant ; 'texte' = aucune longueur minimale, impose correction='manuel', et transforme la question en consigne à faire valider en main propre par le formateur (échange de codes) lorsque le chapitre est en mode Atelier AR. Ne choisir 'texte' que si cette validation en présentiel est réellement voulue.",
       "choix": "Array de strings. Ex: [\"Les félidés\", \"Les équidés\", \"Les bovidés\", \"Les canidés\"].",
       "choixCorrect": "Array — format dépend du type (voir typesEtRegles).",
       "indication": "Indice optionnel affiché à la demande de l'apprenant. \"\" si inutile.",

@@ -25,7 +25,7 @@
  *   contenu           string    Sauts de ligne → <br>
  *   regle             string    "unique" | "multiple" | "texte" | "texte(10)" | "nombre" | ""
  *   correction        string    "auto" | "manuel" | "semi" | ""
- *   points            string    "1" | "2" | "3" | "" (vide pour cours)
+ *   points            string    nombre > 0, entier ou décimal ("1", "0.5", "10") | "" (vide pour cours)
  *   choix             array     ["A","B","C","D"] — vide [] pour courte/ouverte/cours
  *   ordre_choix       string    "aleatoire" | "fixe" | ""
  *   choixCorrect      array     qcm/selection → indices [0,2] ; courte → strings ["réponse"] ; ouverte/cours → []
@@ -236,15 +236,16 @@ const MANIFEST = {
         set: { choix: ' ', ordre_choix: ' ' },
       },
 
-      // ── points hors plage → 1 (pour questions non-cours) ────────────────────
+      // ── points nuls ou négatifs → 1 (pour questions non-cours) ──────────────
+      // Aucun plafond : l'échelle 1→3 est une consigne de génération adressée au
+      // LLM (cf. systemPrompt), pas une contrainte sur la donnée. Un formateur qui
+      // saisit 10 dans la grille sait ce qu'il fait, et rien en aval ne plafonne —
+      // ni XSpro ni la publication. Seule une valeur non positive est corrigée :
+      // elle ne veut rien dire. Le seuil est « ≤ 0 » et non « < 1 » pour laisser
+      // passer les décimaux que le contrat de vue admet explicitement (ex. 0.5).
       {
         si:  { champ: 'type', op: 'neq', valeur: 5 },
-        et:  { champ: 'points', op: 'gt', valeur: 3 },
-        set: { points: 3 },
-      },
-      {
-        si:  { champ: 'type', op: 'neq', valeur: 5 },
-        et:  { champ: 'points', op: 'lt', valeur: 1 },
+        et:  { champ: 'points', op: 'lte', valeur: 0 },
         set: { points: 1 },
       },
     ],
@@ -546,7 +547,7 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
     // points par défaut → 1 si absent sur une ligne non-cours (type !== 5)
     if (type !== 5) {
       const pts = Number(r.points);
-      if (!r.points || isNaN(pts) || pts < 1) r.points = 1;
+      if (!r.points || isNaN(pts) || pts <= 0) r.points = 1;
     }
 
     // Normaliser choix en array si string <br>-séparé
@@ -594,16 +595,26 @@ function postProcessMerge(mergedRows, originalRows, colonnes) {
     }
 
     // Gestion des incohérences spécifiques Texte long (3) :
-    // correction dépend de regle (contrainte métier) :
-    //   regle = 'texte' (sans paramètre)         → correction forcée à "manuel" (indice 2)
-    //   regle = 'texte(N)' (texte avec paramètre) → correction forcée à "semi" (indice 3)
+    // correction dépend de regle (contrainte métier), même règle conditionnelle que
+    // validateFieldAgainstType — et comme pour "courte" ci-dessus, on ne corrige QUE
+    // ce qui est réellement invalide :
+    //   regle = 'texte' (sans paramètre)          → "manuel" seule valeur valide → forcée
+    //   regle = 'texte(N)' (texte avec paramètre) → "semi" OU "manuel" valides, repli "semi"
+    //
+    // Le repli ne doit pas écraser un "manuel" délibéré : sur une question ouverte, ce
+    // choix décide du comportement côté site. Le coller n'y est autorisé qu'en correction
+    // manuelle, et en mode Atelier AR c'est la règle qui distingue une simple question
+    // ouverte ('texte(10)') d'une consigne à valider en main propre ('texte'). Écraser en
+    // "semi" supprimait silencieusement la seule combinaison permettant une question
+    // ouverte où l'apprenant peut coller, sans rituel de validation.
     if (type === 3) {
       const regleLabel = valueToLabel('regle', r.regle) || r.regle;
       const regleStr = String(regleLabel || ' ');
+      const correctionLabel = valueToLabel('correction', r.correction) || r.correction;
       if (regleStr === 'texte') {
-        r.correction = 2; // manuel
-      } else if (regleStr.startsWith('texte(')) {
-        r.correction = 3; // semi
+        r.correction = 2; // manuel — aucune autre valeur acceptée
+      } else if (regleStr.startsWith('texte(') && correctionLabel !== 'manuel' && correctionLabel !== 'semi') {
+        r.correction = 3; // semi — défaut XSpro, appliqué seulement si la valeur est invalide
       }
     }
 
@@ -817,11 +828,11 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
       }
       return { ok: true };
     }
-  // points : vide pour cours, sinon 1-3
+  // points : vide pour cours, sinon un nombre strictement positif (pas de plafond — voir reglesPostProcess)
   if (cle === 'points') {
     if (typeKey === 'cours' && !isEmptyVal(checkVal)) return { ok: false, message: 'Le champ « Points » doit être vide pour le type cours.' };
     const n = Number(checkVal);
-    if (!isEmptyVal(checkVal) && (isNaN(n) || n < 1 || n > 3)) return { ok: false, message: `Le champ « Points » doit être un entier de 1 à 3 (type « ${typeKey} »).` };
+    if (!isEmptyVal(checkVal) && (isNaN(n) || n <= 0)) return { ok: false, message: `Le champ « Points » doit être un nombre strictement positif (entier ou décimal, ex. 1, 0.5, 2) — type « ${typeKey} ».` };
     return { ok: true };
   }
   
@@ -839,15 +850,15 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
 
   // ouverte : correction dépend de regle (contrainte métier)
   //   regle = 'texte' (sans paramètre)         → correction doit être "manuel"
-  //   regle = 'texte(N)' (texte avec paramètre) → correction doit être "semi"
+  //   regle = 'texte(N)' (texte avec paramètre) → correction "semi" ou "manuel" (semi par défaut)
   if (typeKey === 'ouverte' && cle === 'correction' && row) {
     const regleLabel = valueToLabel('regle', row.regle) || row.regle;
     const regleStr = String(regleLabel || ' ');
     if (regleStr === 'texte' && checkVal !== 'manuel') {
       return { ok: false, message: `Pour « ouverte » avec règle « texte », la correction doit être « manuel ».` };
     }
-    if (regleStr.startsWith('texte(') && checkVal !== 'semi') {
-      return { ok: false, message: `Pour « ouverte » avec règle « ${regleStr} », la correction doit être « semi ».` };
+    if (regleStr.startsWith('texte(') && checkVal !== 'semi' && checkVal !== 'manuel') {
+      return { ok: false, message: `Pour « ouverte » avec règle « ${regleStr} », la correction doit être « semi » ou « manuel ».` };
     }
   }
   // regle / correction : valeurs autorisées
