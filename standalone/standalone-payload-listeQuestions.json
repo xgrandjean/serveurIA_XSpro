@@ -1,5 +1,6 @@
 {
   "_comment": "Fichier de simulation standalone — formulaire de liste de questions. Généré à partir d'un VRAI payload XSPRO (formulaireListeQuestions) capturé sur POST /process. callbackUrl=null => fallback export Excel automatique.",
+  "_origin": "standalone",
   "sessionId": "formulaireListeQuestions_standalone_001",
   "contextName": "formulaireListeQuestions",
   "callbackUrl": null,

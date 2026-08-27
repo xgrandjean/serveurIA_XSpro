@@ -1,5 +1,6 @@
 {
   "_comment": "Fichier de simulation standalone — carnet de liaisons câbles/tuyauteries. callbackUrl=null => fallback export Excel automatique.",
+  "_origin": "standalone",
   "ia": {
     "apiKey": "sk-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMzM0MSwidG9rZW5faWQiOjMwNjk2LCJleHBpcmVzIjoxODExODg3MjAwfQ.M-x1tI8lrDRMzCj2Qpo_hOd3W5Ie0NKp2IoU_41CeTc",
     "endpoint": "https://albert.api.etalab.gouv.fr/v1/chat/completions",

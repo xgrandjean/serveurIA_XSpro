@@ -132,6 +132,8 @@ const MODES = {
   standard: {
     label: 'Standard',
     description: 'Vue standard du carnet de liaisons',
+    // Famille générique (creation/analyse/standard) — cf. viewResolver.js resolvePromptsSuggeresForMode.
+    famille: 'standard',
     surchargesColonnes: {
       repere:                 null,
       typeLiaison:            null,
@@ -158,6 +160,7 @@ const MODES = {
   creation: {
     label: 'Création',
     description: 'Créer un carnet de liaisons à partir de plans, schémas ou CCTP',
+    famille: 'creation',
     surchargesColonnes: {
       repere:                 null,
       typeLiaison:            null,

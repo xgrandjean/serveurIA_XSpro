@@ -132,6 +132,8 @@ const MODES = {
   standard: {
     label: 'Standard',
     description: 'Vue standard de la commande fournisseur',
+    // Famille générique (creation/analyse/standard) — cf. viewResolver.js resolvePromptsSuggeresForMode.
+    famille: 'standard',
     surchargesColonnes: {
       reference:   null,
       designation: null,
@@ -156,6 +158,7 @@ const MODES = {
   creation: {
     label: 'Création',
     description: 'Créer des commandes fournisseur à partir de documents (devis, CCTP…)',
+    famille: 'creation',
     surchargesColonnes: {
       reference:   null,
       designation: null,

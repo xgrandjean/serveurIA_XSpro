@@ -1,5 +1,6 @@
 {
   "_comment": "Fichier de simulation standalone — fiche de travaux (liste de tâches). Généré à partir d'un VRAI payload XSPRO (formulaireGetDetailsTravaux) capturé sur POST /process. callbackUrl=null => fallback export Excel automatique. Les commentaires d'exemple ont été nettoyés (mojibake d'origine retiré).",
+  "_origin": "standalone",
   "sessionId": "standalone_travaux_001",
   "contextName": "formulaireGetDetailsTravaux",
   "callbackUrl": null,

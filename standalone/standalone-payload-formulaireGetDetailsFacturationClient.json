@@ -1,5 +1,6 @@
 {
   "_comment": "Fichier de simulation standalone — facturation client (liste des prestations facturées). Calqué sur standalone-payload-formulaireGetDetailsTravaux.json. callbackUrl=null => fallback export Excel automatique.",
+  "_origin": "standalone",
   "sessionId": "standalone_fc_001",
   "contextName": "formulaireGetDetailsFacturationClient",
   "callbackUrl": null,

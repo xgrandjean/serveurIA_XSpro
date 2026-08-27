@@ -1,5 +1,6 @@
 {
   "_comment": "Fichier de simulation standalone — commande fournisseur (liste d'articles). Calqué sur standalone-payload-formulaireGetDetailsTravaux.json. callbackUrl=null => fallback export Excel automatique.",
+  "_origin": "standalone",
   "sessionId": "standalone_af_001",
   "contextName": "formulaireGetDetailsAF",
   "callbackUrl": null,

@@ -124,6 +124,45 @@ function mergePromptFields(base, jsonSection) {
   };
 }
 
+/**
+ * Extrait, dans l'objet promptsSuggeres envoyé par XSpro (workerConfig.promptsSuggeres,
+ * ex: { creation: [...], analyse: [...] } ou { creation: [...], synthese: [...] }), le
+ * tableau correspondant à la famille générique d'un mode. XSpro utilise indifféremment
+ * les clés 'analyse' et 'synthese' pour la famille "analyse" selon le contexte d'appel
+ * (cf. doc/XSPRO_INTEGRATION.md et payload standalone capturé réel) — les deux sont
+ * traitées comme synonymes ici.
+ *
+ * @param {Object|null} xsproPromptsSuggeres — workerConfig.promptsSuggeres brut
+ * @param {string|null} famille — 'creation' | 'analyse' | 'standard' | null
+ * @returns {Array|undefined|null}
+ */
+function resolveXsproFamilyPrompts(xsproPromptsSuggeres, famille) {
+  if (!xsproPromptsSuggeres || typeof xsproPromptsSuggeres !== 'object') return null;
+  if (famille === 'creation') return xsproPromptsSuggeres.creation;
+  if (famille === 'analyse') return xsproPromptsSuggeres.analyse ?? xsproPromptsSuggeres.synthese;
+  return null; // 'standard' ou famille inconnue : pas de case XSpro dédiée
+}
+
+/**
+ * Résout les promptsSuggeres EFFECTIFS d'un mode selon l'origine de la session :
+ *   - standalone → la vue (JSON > JS, déjà fusionné dans viewPrompts) fait toujours autorité.
+ *   - xspro      → les prompts XSpro de la famille du mode gagnent s'ils sont réels (tableau
+ *                  de plus d'1 entrée — 1 seule entrée = valeur par défaut non représentative,
+ *                  cf. README-prompts.md), sinon repli sur les prompts de la vue.
+ *
+ * @param {string} origin — session.origin ('standalone' | 'xspro')
+ * @param {string|null} famille
+ * @param {Array|null} viewPrompts — promptsSuggeres déjà résolus JSON > JS pour ce mode
+ * @param {Object|null} xsproPromptsSuggeres — workerConfig.promptsSuggeres brut
+ * @returns {Array|null}
+ */
+function resolvePromptsSuggeresForMode(origin, famille, viewPrompts, xsproPromptsSuggeres) {
+  if (origin !== 'xspro') return viewPrompts ?? null;
+  const xsproPrompts = resolveXsproFamilyPrompts(xsproPromptsSuggeres, famille);
+  if (Array.isArray(xsproPrompts) && xsproPrompts.length > 1) return xsproPrompts;
+  return viewPrompts ?? null;
+}
+
 // ── Résolution des colonnes effectives ───────────────────────────────────────
 /**
  * Résout MANIFEST.colonnes → array effectif.
@@ -293,7 +332,16 @@ function resolveEffectiveWorkerConfig(session) {
    const jsModes = viewHook?.MODES || {};
    session.modes = {};
    for (const [modeId, modeDef] of Object.entries(jsModes)) {
-     session.modes[modeId] = mergePromptFields(modeDef, jsonConfig?.modes?.[modeId]);
+     const merged = mergePromptFields(modeDef, jsonConfig?.modes?.[modeId]);
+     // promptsSuggeres : résolu séparément du reste (systemPrompt/regles/formatReponse
+     // restent JSON > JS > XSpro, inchangé ci-dessus). Priorité par origine de session :
+     //   - standalone → la vue (JSON > JS) fait toujours autorité
+     //   - xspro      → les prompts XSpro de la famille du mode gagnent s'ils sont réels
+     //                  (tableau de plus d'1 entrée — 1 seule = valeur par défaut/non
+     //                  représentative, cf. README-prompts.md), sinon repli sur la vue.
+     const famille = modeDef.famille || (['creation', 'analyse', 'standard'].includes(modeId) ? modeId : null);
+     merged.promptsSuggeres = resolvePromptsSuggeresForMode(session.origin, famille, merged.promptsSuggeres, workerConfig.promptsSuggeres);
+     session.modes[modeId] = merged;
    }
    session.rowStyles   = mf.rowStyles || null;
 

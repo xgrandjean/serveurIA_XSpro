@@ -132,6 +132,8 @@ const MODES = {
   standard: {
     label: 'Standard',
     description: 'Vue standard de la facturation client',
+    // Famille générique (creation/analyse/standard) — cf. viewResolver.js resolvePromptsSuggeresForMode.
+    famille: 'standard',
     surchargesColonnes: {
       reference:   null,
       designation: null,
@@ -154,6 +156,7 @@ const MODES = {
   creation: {
     label: 'Création',
     description: 'Créer des facturations client à partir de documents (devis signé, CCTP…)',
+    famille: 'creation',
     surchargesColonnes: {
       reference:   null,
       designation: null,

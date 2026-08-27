@@ -275,6 +275,11 @@ app.post('/process', async (req, res) => {
 
   const session = SM.createSession(payload);
 
+  // Identité standalone/XSpro de la session — un vrai appel XSpro n'envoie jamais
+  // _origin, donc reste 'xspro' par défaut (aucune régression). Consommé par
+  // viewResolver.js pour la priorité des promptsSuggeres par mode.
+  session.origin = payload._origin === 'standalone' ? 'standalone' : 'xspro';
+
   // Résolution du MANIFEST hook vue → session.effectiveWorkerConfig
   // Fait une seule fois ici, consommé par WS init et llmClient.js
   resolveEffectiveWorkerConfig(session);
@@ -841,6 +846,11 @@ function startStandaloneMode() {
   payload.callbackUrl = null;
 
   const session = SM.createSession(payload);
+
+  // Identité standalone/XSpro : inconditionnelle ici — le flag CLI --standalone
+  // est déjà la source de vérité pour ce chemin, indépendamment du contenu du
+  // fichier payload (y compris les anciens fichiers sans clé _origin).
+  session.origin = 'standalone';
 
   // Résolution du MANIFEST hook vue (même logique qu'en mode serveur)
   resolveEffectiveWorkerConfig(session);

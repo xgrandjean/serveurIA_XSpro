@@ -127,6 +127,8 @@ const MODES = {
   standard: {
     label: 'Standard',
     description: 'Vue standard de la fiche de travaux',
+    // Famille générique (creation/analyse/standard) — cf. viewResolver.js resolvePromptsSuggeresForMode.
+    famille: 'standard',
     surchargesColonnes: {
       repere:      null,
       intitule:    null,
@@ -148,6 +150,7 @@ const MODES = {
   creation: {
     label: 'Création',
     description: 'Créer une fiche de travaux à partir de documents (CCTP, descriptif…)',
+    famille: 'creation',
     surchargesColonnes: {
       repere:      null,
       intitule:    null,

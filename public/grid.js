@@ -2644,15 +2644,21 @@ function populateWorkModeSelector(modes) {
 function populatePromptSuggestions(promptsSuggeres) {
   const sel = el('prompt-suggestions');
   if (!sel) return;
-  // Vider toutes les options (sauf la première "— Suggestions —")
-  while (sel.options.length > 1) sel.remove(1);
+  // Purger tous les groupes/options précédents (optgroups compris), en préservant
+  // uniquement la première option placeholder "— Suggestions —".
+  while (sel.firstChild) {
+    const first = sel.firstChild;
+    // Ne pas retirer le <option value="">— Suggestions —</option> par défaut (1er enfant).
+    if (first === sel.options[0] && sel.options[0] && sel.options[0].value === '') break;
+    sel.removeChild(first);
+  }
   if (!promptsSuggeres) return;
 
-  // Tableau plat (héritage mode dans formulaireListeQuestions) → groupe "Synthèse" par défaut
-  if (Array.isArray(promptsSuggeres)) promptsSuggeres = { synthese: promptsSuggeres };
+  // Un tableau plat (héritage mode dans une vue) → un unique groupe "Suggestion".
+  if (Array.isArray(promptsSuggeres)) promptsSuggeres = { suggestion: promptsSuggeres };
 
-  // Agrégation : toutes les catégories portant un tableau non vide, classées par groupe.
-  const labelParCle = { creation: 'Création', synthese: 'Synthèse', analyse: 'Analyse' };
+  // Agrégation : ne garde que les catégories portant un tableau NON vide (jamais de groupe vide).
+  const labelParCle = { creation: 'Création', synthese: 'Synthèse', analyse: 'Analyse', suggestion: 'Suggestion' };
   const groupes = [];
   for (const cle of Object.keys(promptsSuggeres)) {
     const list = promptsSuggeres[cle];

@@ -275,6 +275,12 @@ const MODES = {
     label: 'Correction / Amélioration',
     description: 'Corriger et améliorer des questions existantes — reformuler, ajuster, compléter sur demande les champs annexes (indication, consigne de correction à donner à l\'IA pour cette ligne). Modifie les lignes, ne produit pas de bilan rédigé.',
 
+    // Famille générique du mode (creation/analyse/standard) — utilisée par
+    // viewResolver.js pour choisir la bonne case de workerConfig.promptsSuggeres
+    // envoyé par XSpro (resolvePromptsSuggeresForMode). Correspond déjà à l'id du
+    // mode ici ; explicité pour la cohérence avec les autres vues.
+    famille: 'analyse',
+
     surchargesColonnes: {
       type:                  { width: 90 ,pinned:     'left'},
       contenu:               { width: 380 },
@@ -308,6 +314,9 @@ const MODES = {
   creation: {
     label: 'Création',
     description: 'Générer de nouvelles questions depuis le cours ou des documents joints',
+
+    // Famille générique du mode — cf. commentaire dans MODES.analyse ci-dessus.
+    famille: 'creation',
 
     surchargesColonnes: {
       type:                  { width: 90, pinned:     'left'},
