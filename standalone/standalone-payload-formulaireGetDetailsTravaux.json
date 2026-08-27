@@ -1,5 +1,5 @@
 {
-  "_comment": "Fichier de simulation standalone — fiche de travaux (liste de tâches). Généré à partir d'un VRAI payload XSPRO (formulaireGetDetailsTravaux) capturé sur POST /process. callbackUrl=null => fallback export Excel automatique. Les commentaires d'exemple ont été nettoyés (mojibake d'origine retiré).",
+  "_comment": "Fichier de simulation standalone — fiche de travaux (liste de tâches). Épuré (2026-08-27) : ne conserve que les champs réellement lus par le pipeline (session/viewResolver/llmClient/excelExport). Contenu VIERGE/générique. callbackUrl=null => fallback export Excel automatique.",
   "_origin": "standalone",
   "sessionId": "standalone_travaux_001",
   "contextName": "formulaireGetDetailsTravaux",
@@ -10,300 +10,36 @@
     "provider": "albert",
     "model": "mistralai/Ministral-3-8B-Instruct-2512",
     "timeoutMs": 30000,
-    "maxPromptLength": 25000,
-    "maxContenu": 50000
+    "maxPromptLength": 25000
   },
   "data": {
-    "lexique": {
-      "repere": "identifiant unique de la tâche (ex. T-001, Tache-042...)",
-      "intitule": "désignation générale et concise de la tâche (ex. Installation TGBT, Pose prises de courant...)",
-      "quantite": "NOMBRE PUR uniquement (INTEGER ou FLOAT), sans unité ni expression de calcul.",
-      "commentaire": "texte libre, peut être vide",
-      "fait": "vide si non réalisée — saisie manuelle uniquement",
-      "validation": "vide si non réalisée — saisie manuelle uniquement",
-      "nonValide": "non vide si rejetée — saisie manuelle uniquement"
-    },
     "lignes": [
       {
-        "repere": "E-001",
-        "intitule": "Installation Tableau Général Basse Tension (TGBT)",
-        "quantite": 1,
-        "commentaire": "Hauteur réglable en début de salle"
-      },
-      {
-        "repere": "E-002",
-        "intitule": "Pose disjoncteurs différentiels / magnétothermiques",
-        "quantite": 6,
-        "commentaire": "Groupe électrogène 16A + 2 dérivations à courants faibles"
-      },
-      {
         "repere": "T-001",
-        "intitule": "Pose prises électriques 10A",
-        "quantite": 24,
-        "commentaire": "1 par bureau élève, 1 à l'avant du prof + prises au mur"
+        "intitule": "Tâche exemple A",
+        "quantite": 1,
+        "commentaire": ""
       },
       {
         "repere": "T-002",
-        "intitule": "Pose prises courant faible pour TI analytique",
+        "intitule": "Tâche exemple B",
         "quantite": 4,
-        "commentaire": "Au schéma, 2 points codec vidéo et points réseau étendu"
-      },
-      {
-        "repere": "L-001",
-        "intitule": "Fixation plafonniers de luminaires",
-        "quantite": 5,
-        "commentaire": "Hauteur standard + 2 projecteurs biais avant"
-      },
-      {
-        "repere": "L-002",
-        "intitule": "Pose luminaires muraux (éclairage ambiental)",
-        "quantite": 2,
-        "commentaire": "Encastrables type LED zéro consommation"
-      },
-      {
-        "repere": "C-001",
-        "intitule": "Tirage câblage faible puissance salle classe",
-        "quantite": 3,
-        "commentaire": "Couloir est + liaison aux platines et TI"
-      },
-      {
-        "repere": "C-002",
-        "intitule": "Armature tube câble 3 poles cuivré E 25mm²",
-        "quantite": 1,
-        "commentaire": "Liaison horizontale environ 10m en passe-câble"
-      },
-      {
-        "repere": "E-003",
-        "intitule": "Raccordement armoire divisionnaire (AD) si prévu",
-        "quantite": 1,
-        "commentaire": "Vérification d'existence circuit dédié avant branchement"
-      }
-    ],
-    "champs": [
-      {
-        "champ": "repere",
-        "cle": "repere",
-        "libelle": "identifiant unique de la tâche (ex. T-001, Tache-042...)"
-      },
-      {
-        "champ": "intitule",
-        "cle": "intitule",
-        "libelle": "désignation générale et concise de la tâche (ex. Installation TGBT, Pose prises de courant...)"
-      },
-      {
-        "champ": "quantite",
-        "cle": "quantite",
-        "libelle": "NOMBRE PUR uniquement (INTEGER ou FLOAT), sans unité ni expression de calcul."
-      },
-      {
-        "champ": "commentaire",
-        "cle": "commentaire",
-        "libelle": "texte libre, peut être vide"
-      },
-      {
-        "champ": "fait",
-        "cle": "fait",
-        "libelle": "vide si non réalisée — saisie manuelle uniquement",
-        "placeholder": true
-      },
-      {
-        "champ": "validation",
-        "cle": "validation",
-        "libelle": "vide si non réalisée — saisie manuelle uniquement",
-        "placeholder": true
-      },
-      {
-        "champ": "nonValide",
-        "cle": "nonValide",
-        "libelle": "non vide si rejetée — saisie manuelle uniquement",
-        "placeholder": true
-      }
-    ],
-    "rowsBruts": [
-      {
-        "rowid": 5,
-        "idDetailsFicheTravaux": "_1783368857335",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 1,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "E-001",
-        "intitule": "Installation Tableau Général Basse Tension (TGBT)",
-        "quantite": 1,
-        "commentaire": "Hauteur réglable en début de salle",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 6,
-        "idDetailsFicheTravaux": "_1783368857336",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 2,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "E-002",
-        "intitule": "Pose disjoncteurs différentiels / magnétothermiques",
-        "quantite": 6,
-        "commentaire": "Groupe électrogène 16A + 2 dérivations à courants faibles",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 7,
-        "idDetailsFicheTravaux": "_1783368857337",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 3,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "T-001",
-        "intitule": "Pose prises électriques 10A",
-        "quantite": 24,
-        "commentaire": "1 par bureau élève, 1 à l'avant du prof + prises au mur",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 8,
-        "idDetailsFicheTravaux": "_1783368857338",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 4,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "T-002",
-        "intitule": "Pose prises courant faible pour TI analytique",
-        "quantite": 4,
-        "commentaire": "Au schéma, 2 points codec vidéo et points réseau étendu",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 9,
-        "idDetailsFicheTravaux": "_1783368857339",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 5,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "L-001",
-        "intitule": "Fixation plafonniers de luminaires",
-        "quantite": 5,
-        "commentaire": "Hauteur standard + 2 projecteurs biais avant",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 10,
-        "idDetailsFicheTravaux": "_1783368857340",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 6,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "L-002",
-        "intitule": "Pose luminaires muraux (éclairage ambiental)",
-        "quantite": 2,
-        "commentaire": "Encastrables type LED zéro consommation",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 11,
-        "idDetailsFicheTravaux": "_1783368857341",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 7,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "C-001",
-        "intitule": "Tirage câblage faible puissance salle classe",
-        "quantite": 3,
-        "commentaire": "Couloir est + liaison aux platines et TI",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 12,
-        "idDetailsFicheTravaux": "_1783368857342",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 8,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "C-002",
-        "intitule": "Armature tube câble 3 poles cuivré E 25mm²",
-        "quantite": 1,
-        "commentaire": "Liaison horizontale environ 10m en passe-câble",
-        "iconeInfo": "enAttente"
-      },
-      {
-        "rowid": 13,
-        "idDetailsFicheTravaux": "_1783368857343",
-        "idFicheTechnique": "_1777978589527",
-        "idLigne": 9,
-        "selection": null,
-        "fait": "",
-        "validation": "",
-        "nonValide": "",
-        "repere": "E-003",
-        "intitule": "Raccordement armoire divisionnaire (AD) si prévu",
-        "quantite": 1,
-        "commentaire": "Vérification d'existence circuit dédié avant branchement",
-        "iconeInfo": "enAttente"
-      }
-    ],
-    "infosParent": {
-      "noFiche": "$F0005",
-      "designation": "Batiment D"
-    },
-    "infosVue": {
-      "nomOnglet": "vueFormulaireGetDetailsTravaux"
-    },
-    "maxContenu": 50000,
-    "colonnesExport": [
-      "repere",
-      "intitule",
-      "quantite",
-      "commentaire",
-      "fait",
-      "validation",
-      "nonValide"
-    ],
-    "modele": [
-      {
-        "repere": "T-001",
-        "intitule": "Installation TGBT",
-        "quantite": 1,
-        "commentaire": "",
-        "fait": "",
-        "validation": "",
-        "nonValide": ""
-      },
-      {
-        "repere": "T-002",
-        "intitule": "Pose prises de courant",
-        "quantite": 8,
-        "commentaire": "",
-        "fait": "",
-        "validation": "",
-        "nonValide": ""
+        "commentaire": "Commentaire exemple"
       },
       {
         "repere": "T-003",
-        "intitule": "Tirage câbles alimentation",
-        "quantite": 1,
-        "commentaire": "",
-        "fait": "",
-        "validation": "",
-        "nonValide": ""
+        "intitule": "Tâche exemple C",
+        "quantite": 2,
+        "commentaire": ""
       }
     ],
-    "cleschampsForceAZeroSiVide": [],
-    "clesChampsDevantEtreForceAVide": []
+    "infosParent": {
+      "noFiche": "$F0000",
+      "designation": "Désignation de la fiche"
+    },
+    "infosVue": {
+      "nomOnglet": "vueFormulaireGetDetailsTravaux"
+    }
   },
   "workerConfig": {
     "viewModule": "formulaireGetDetailsTravaux",
@@ -347,23 +83,6 @@
         "placeholder": true
       }
     ],
-    "regles": {
-      "clesChampsDevantEtreNonVides": [
-        "repere"
-      ],
-      "clesChampsSelectChoixDevantResterBrut": []
-    },
-    "systemPrompt": "Voici des données d'une fiche de travaux (liste de tâches à réaliser).\nRègles importantes :\nAnalyse l'état d'avancement de chaque tâche (fait, validation, nonValide).\nIdentifie les tâches non réalisées ou non validées.\nUtilise des chapitres clairs et des puces lisibles (- …).\nRappelle systématiquement le numéro de fiche et sa désignation s'ils sont renseignés.",
-    "promptsSuggeres": {
-      "creation": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Exemple attendu : génère les tâches pour l'installation d'un TGBT, de prises de courant et de luminaires dans une salle de classe, avec des quantités réalistes."
-      ],
-      "synthese": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Fais-moi un bilan détaillé de cette fiche de travaux avec :\n1. **Avancement global** : nb tâches réalisées/total, %.\n2. **Tâches non réalisées** : Liste avec repère + intitule.\n3. **Tâches non validées** : Liste avec repère + intitule.\n4. **Répartition par type** (E-XXX, T-XXX, L-XXX, C-XXX) : nb/total/% par catégorie."
-      ]
-    },
     "prompt": "Exemple attendu : génère les tâches pour l'installation d'un TGBT, de prises de courant et de luminaires dans une salle de classe, avec des quantités réalistes.",
     "modele": [
       {
@@ -397,8 +116,6 @@
     "export": {
       "nomOnglet": "Export IA",
       "colonnesExport": []
-    },
-    "copyToClipBoard": false,
-    "exportExcel": true
+    }
   }
 }

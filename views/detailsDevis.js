@@ -224,6 +224,13 @@ const MODES = {
       // viewResolver.js pour choisir la bonne case de workerConfig.promptsSuggeres
       // envoyé par XSpro (resolvePromptsSuggeresForMode).
       famille: 'standard',
+
+      // Mode généraliste de vérification, utile pour travailler le devis hors XSpro.
+      // Quand la session vient de XSpro, la vue XSpro couvre déjà ce besoin et fait
+      // autorité : viewResolver.js retire alors ce mode de la session (il n'est ni
+      // proposé, ni sélectionnable). Ne laisse donc que Décomposition et Chiffrage
+      // en usage connecté.
+      standaloneUniquement: true,
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       surchargesColonnes: {
         niveauListe:        {width: 70},
@@ -282,6 +289,11 @@ const MODES = {
       description: 'Décomposer les lots en sous-lots — structure et quantités uniquement',
       // Famille générique — décomposer, c'est créer de nouvelles lignes/sous-lots.
       famille: 'creation',
+
+      // Mode ouvert par défaut à l'arrivée sur la vue (cf. resolveDefaultModeId dans
+      // public/grid.js). La décomposition est le point d'entrée courant du devis : on
+      // structure les lots avant de pouvoir les chiffrer.
+      parDefaut: true,
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       // Seules les colonnes suivantes sont visibles : reference, niveauListe, designation,
       // unite, quantiteTotale, heuresUnitaire — tout le reste est masqué
@@ -307,7 +319,12 @@ const MODES = {
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
         'infoPrixTotalFO', 'infoHeuresTotalMO', 'infoPrixTotalMO', 'infoPrixTotalMOetFO'],
-      colonnesLlmHidden: ['prixAchatUnitaire', 'tauxHoraire', 'sousTraitance', 'commentaire',
+      // heuresUnitaire est masquée au LLM mais reste VISIBLE dans la grille (absente de
+      // colonnesUiHidden) : la décomposition ne produit que structure et quantités, le
+      // chiffrage viendra ensuite — mais l'utilisateur doit pouvoir saisir un temps de pose
+      // à la main dès cette étape. L'exposer au LLM contredisait la vocation du mode : la
+      // colonne était visible alors que le prompt en interdisait le remplissage.
+      colonnesLlmHidden: ['prixAchatUnitaire', 'tauxHoraire', 'heuresUnitaire', 'sousTraitance', 'commentaire',
         'remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',

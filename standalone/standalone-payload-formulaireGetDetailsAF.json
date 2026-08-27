@@ -1,5 +1,5 @@
 {
-  "_comment": "Fichier de simulation standalone — commande fournisseur (liste d'articles). Calqué sur standalone-payload-formulaireGetDetailsTravaux.json. callbackUrl=null => fallback export Excel automatique.",
+  "_comment": "Fichier de simulation standalone — commande fournisseur (liste d'articles). Épuré (2026-08-27) : ne conserve que les champs réellement lus par le pipeline (session/viewResolver/llmClient/excelExport). Contenu VIERGE/générique. callbackUrl=null => fallback export Excel automatique.",
   "_origin": "standalone",
   "sessionId": "standalone_af_001",
   "contextName": "formulaireGetDetailsAF",
@@ -10,256 +10,43 @@
     "provider": "albert",
     "model": "mistralai/Ministral-3-8B-Instruct-2512",
     "timeoutMs": 30000,
-    "maxPromptLength": 25000,
-    "maxContenu": 50000
+    "maxPromptLength": 25000
   },
   "data": {
-    "lexique": {
-      "reference": "référence du produit ou article",
-      "designation": "désignation ou description de l'article",
-      "quantite": "quantité (nombre décimal ou entier)",
-      "montant": "prix unitaire HT (nombre décimal)",
-      "commentaire": "commentaire libre",
-      "livre": "livré (0 non / 1 oui) - laisser vide en création",
-      "facture": "facturé (0 non / 1 oui) - laisser vide en création",
-      "regle": "réglé (0 non / 1 oui) - laisser vide en création",
-      "annule": "annulé (0 non / 1 oui) - laisser vide en création",
-      "codeTVA": "code TVA (1, 2, 3 ou vide)"
-    },
     "lignes": [
       {
-        "reference": "ELEC-001",
-        "designation": "Câble U1000R2V 3G2.5",
-        "quantite": 100,
-        "montant": 3.45,
-        "commentaire": "Lot alimentation TGBT",
-        "codeTVA": "1"
-      },
-      {
-        "reference": "ELEC-002",
-        "designation": "Disjoncteur différentiel 10A",
+        "reference": "REF-001",
+        "designation": "Article exemple A",
         "quantite": 10,
-        "montant": 12.50,
-        "commentaire": "Bâtiment D, salle de classe",
+        "montant": 25.5,
+        "commentaire": "",
         "codeTVA": "1"
       },
       {
-        "reference": "ELEC-003",
-        "designation": "Boîte d'encastrement prise de courant",
-        "quantite": 24,
-        "montant": 1.90,
-        "commentaire": "1 par bureau élève",
+        "reference": "REF-002",
+        "designation": "Article exemple B",
+        "quantite": 4,
+        "montant": 120,
+        "commentaire": "Commentaire exemple",
         "codeTVA": "1"
       },
       {
-        "reference": "ELEC-004",
-        "designation": "Luminaire LED encastrable 600x600",
-        "quantite": 7,
-        "montant": 58.00,
-        "commentaire": "5 plafonniers + 2 projecteurs biais avant",
-        "codeTVA": "1"
-      },
-      {
-        "reference": "ELEC-005",
-        "designation": "Chemin de câbles courant faible",
-        "quantite": 10,
-        "montant": 6.20,
-        "commentaire": "Liaison couloir est vers TI",
-        "codeTVA": "1"
-      }
-    ],
-    "champs": [
-      {
-        "champ": "reference",
-        "cle": "reference",
-        "libelle": "référence du produit ou article"
-      },
-      {
-        "champ": "designation",
-        "cle": "designation",
-        "libelle": "désignation ou description de l'article"
-      },
-      {
-        "champ": "quantite",
-        "cle": "quantite",
-        "libelle": "quantité (nombre décimal ou entier)"
-      },
-      {
-        "champ": "montant",
-        "cle": "montant",
-        "libelle": "prix unitaire HT (nombre décimal)"
-      },
-      {
-        "champ": "commentaire",
-        "cle": "commentaire",
-        "libelle": "commentaire libre"
-      },
-      {
-        "champ": "livre",
-        "cle": "livre",
-        "libelle": "livré (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "facture",
-        "cle": "facture",
-        "libelle": "facturé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "regle",
-        "cle": "regle",
-        "libelle": "réglé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "annule",
-        "cle": "annule",
-        "libelle": "annulé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "codeTVA",
-        "cle": "codeTVA",
-        "libelle": "code TVA (1, 2, 3 ou vide)"
-      }
-    ],
-    "rowsBruts": [
-      {
-        "rowid": 1,
-        "idDetailsAF": "_1783368900001",
-        "idAchatFournisseur": "_1777978600001",
-        "idLigne": 1,
-        "selection": null,
-        "reference": "ELEC-001",
-        "designation": "Câble U1000R2V 3G2.5",
-        "quantite": 100,
-        "montant": 3.45,
-        "commentaire": "Lot alimentation TGBT",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 2,
-        "idDetailsAF": "_1783368900002",
-        "idAchatFournisseur": "_1777978600001",
-        "idLigne": 2,
-        "selection": null,
-        "reference": "ELEC-002",
-        "designation": "Disjoncteur différentiel 10A",
-        "quantite": 10,
-        "montant": 12.50,
-        "commentaire": "Bâtiment D, salle de classe",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 3,
-        "idDetailsAF": "_1783368900003",
-        "idAchatFournisseur": "_1777978600001",
-        "idLigne": 3,
-        "selection": null,
-        "reference": "ELEC-003",
-        "designation": "Boîte d'encastrement prise de courant",
-        "quantite": 24,
-        "montant": 1.90,
-        "commentaire": "1 par bureau élève",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 4,
-        "idDetailsAF": "_1783368900004",
-        "idAchatFournisseur": "_1777978600001",
-        "idLigne": 4,
-        "selection": null,
-        "reference": "ELEC-004",
-        "designation": "Luminaire LED encastrable 600x600",
-        "quantite": 7,
-        "montant": 58.00,
-        "commentaire": "5 plafonniers + 2 projecteurs biais avant",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 5,
-        "idDetailsAF": "_1783368900005",
-        "idAchatFournisseur": "_1777978600001",
-        "idLigne": 5,
-        "selection": null,
-        "reference": "ELEC-005",
-        "designation": "Chemin de câbles courant faible",
-        "quantite": 10,
-        "montant": 6.20,
-        "commentaire": "Liaison couloir est vers TI",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
+        "reference": "",
+        "designation": "Article sans référence",
+        "quantite": 1,
+        "montant": 75,
+        "commentaire": "",
         "codeTVA": "1"
       }
     ],
     "infosParent": {
-      "noCommande": "$CF0012",
-      "fournisseur": "Rexel Distribution",
-      "referenceAffaire": "$F0005"
+      "noCommande": "$CF0000",
+      "fournisseur": "Nom du fournisseur",
+      "referenceAffaire": "$F0000"
     },
     "infosVue": {
       "nomOnglet": "vueFormulaireGetDetailsAF"
-    },
-    "maxContenu": 50000,
-    "colonnesExport": [
-      "reference",
-      "designation",
-      "quantite",
-      "montant",
-      "commentaire",
-      "livre",
-      "facture",
-      "regle",
-      "annule",
-      "codeTVA"
-    ],
-    "modele": [
-      {
-        "reference": "ELEC-001",
-        "designation": "Câble U1000R2V 3G2.5",
-        "quantite": 100,
-        "montant": 3.45,
-        "commentaire": "",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": ""
-      },
-      {
-        "reference": "ELEC-002",
-        "designation": "Disjoncteur 10A",
-        "quantite": 10,
-        "montant": 12.50,
-        "commentaire": "",
-        "livre": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": ""
-      }
-    ],
-    "cleschampsForceAZeroSiVide": [],
-    "clesChampsDevantEtreForceAVide": []
+    }
   },
   "workerConfig": {
     "viewModule": "formulaireGetDetailsAF",
@@ -319,24 +106,6 @@
         "libelle": "code TVA (1, 2, 3 ou vide)"
       }
     ],
-    "regles": {
-      "clesChampsDevantEtreNonVides": [
-        "reference",
-        "designation"
-      ],
-      "clesChampsSelectChoixDevantResterBrut": []
-    },
-    "systemPrompt": "Voici des données d'une commande fournisseur (liste d'articles à commander).\nRègles importantes :\nAnalyse l'état d'avancement de chaque ligne (livre, facture, regle, annule).\nIdentifie les lignes non livrées ou non facturées.\nUtilise des chapitres clairs et des puces lisibles (- …).\nRappelle systématiquement le numéro de la commande et le fournisseur s'ils sont renseignés.",
-    "promptsSuggeres": {
-      "creation": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Exemple attendu : génère une commande pour l'achat de câbles U1000R2V 3G2.5, disjoncteurs et parafoudres pour un petit chantier électrique."
-      ],
-      "synthese": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Fais-moi un bilan détaillé de cette commande fournisseur avec : total des achats, lignes livrées/non livrées, montant facturé et réglé."
-      ]
-    },
     "prompt": "Exemple attendu : génère une commande pour l'achat de câbles U1000R2V 3G2.5, disjoncteurs et parafoudres pour un petit chantier électrique.",
     "modele": [
       {
@@ -355,7 +124,7 @@
         "reference": "ELEC-002",
         "designation": "Disjoncteur 10A",
         "quantite": 10,
-        "montant": 12.50,
+        "montant": 12.5,
         "commentaire": "",
         "livre": "",
         "facture": "",
@@ -367,8 +136,6 @@
     "export": {
       "nomOnglet": "Export IA",
       "colonnesExport": []
-    },
-    "copyToClipBoard": false,
-    "exportExcel": true
+    }
   }
 }

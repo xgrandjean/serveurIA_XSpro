@@ -144,23 +144,63 @@ function resolveXsproFamilyPrompts(xsproPromptsSuggeres, famille) {
 }
 
 /**
+ * Marqueur d'auto-déclaration de XSpro : quand il n'a AUCUN prompt prédéfini réel pour
+ * une vue, XSpro n'envoie pas un tableau vide — il envoie son gabarit codé en dur dont
+ * la 1ʳᵉ entrée est littéralement « Je suis un prompt par défaut, fichier des prompts
+ * prédéfinis absent », suivie d'UN seul exemple générique
+ * (cf. XSpro/src/aiView/aiViewFactory.js, clé `prompts` de chaque vue).
+ *
+ * Ce marqueur doit être retiré AVANT le test de représentativité : sans ça, le gabarit
+ * compte 2 entrées, passe le seuil « > 1 » et écrase les prompts réels de la vue par
+ * une ligne d'information technique + un exemple — exactement ce que le seuil devait
+ * empêcher (cf. resolvePromptsSuggeresForMode).
+ */
+const MARQUEUR_PROMPT_DEFAUT_XSPRO = /prompt par d[ée]faut/i;
+
+/**
+ * Nettoie un tableau de prompts venant de XSpro : retire les entrées vides et le
+ * gabarit « prompt par défaut » auto-déclaré ci-dessus, et normalise les espaces
+ * (XSpro préfixe certaines entrées d'une espace parasite).
+ *
+ * @param {*} list
+ * @returns {Array|null} — tableau nettoyé, ou null si l'entrée n'était pas un tableau
+ */
+function nettoyerPromptsXspro(list) {
+  if (!Array.isArray(list)) return null;
+  return list
+    .filter(p => typeof p === 'string' && p.trim() && !MARQUEUR_PROMPT_DEFAUT_XSPRO.test(p))
+    .map(p => p.trim());
+}
+
+/**
  * Résout les promptsSuggeres EFFECTIFS d'un mode selon l'origine de la session :
  *   - standalone → la vue (JSON > JS, déjà fusionné dans viewPrompts) fait toujours autorité.
  *   - xspro      → les prompts XSpro de la famille du mode gagnent s'ils sont réels (tableau
  *                  de plus d'1 entrée — 1 seule entrée = valeur par défaut non représentative,
  *                  cf. README-prompts.md), sinon repli sur les prompts de la vue.
  *
+ * Le résultat est renvoyé sous forme d'objet { <famille>: [...] } quand la famille est
+ * connue, pour que l'UI (public/grid.js, populatePromptSuggestions) titre le groupe
+ * « Création »/« Analyse » au lieu du « Suggestion » générique auquel retombe tout
+ * tableau plat. Famille inconnue → tableau plat, comportement historique inchangé.
+ *
  * @param {string} origin — session.origin ('standalone' | 'xspro')
  * @param {string|null} famille
  * @param {Array|null} viewPrompts — promptsSuggeres déjà résolus JSON > JS pour ce mode
  * @param {Object|null} xsproPromptsSuggeres — workerConfig.promptsSuggeres brut
- * @returns {Array|null}
+ * @returns {Array|Object|null}
  */
 function resolvePromptsSuggeresForMode(origin, famille, viewPrompts, xsproPromptsSuggeres) {
-  if (origin !== 'xspro') return viewPrompts ?? null;
-  const xsproPrompts = resolveXsproFamilyPrompts(xsproPromptsSuggeres, famille);
-  if (Array.isArray(xsproPrompts) && xsproPrompts.length > 1) return xsproPrompts;
-  return viewPrompts ?? null;
+  const parFamille = (list) => (famille && Array.isArray(list) ? { [famille]: list } : (list ?? null));
+
+  if (origin !== 'xspro') return parFamille(viewPrompts);
+
+  // Seuil de représentativité appliqué APRÈS nettoyage du gabarit XSpro : il faut au
+  // moins 2 prompts réellement rédigés pour supplanter ceux de la vue (1 seul = valeur
+  // d'exemple, pas un jeu de prompts métier — cf. nettoyerPromptsXspro).
+  const xsproPrompts = nettoyerPromptsXspro(resolveXsproFamilyPrompts(xsproPromptsSuggeres, famille));
+  if (xsproPrompts && xsproPrompts.length > 1) return parFamille(xsproPrompts);
+  return parFamille(viewPrompts);
 }
 
 // ── Résolution des colonnes effectives ───────────────────────────────────────
@@ -332,6 +372,12 @@ function resolveEffectiveWorkerConfig(session) {
    const jsModes = viewHook?.MODES || {};
    session.modes = {};
    for (const [modeId, modeDef] of Object.entries(jsModes)) {
+     // Mode réservé au fonctionnement autonome (MODES.<id>.standaloneUniquement) : retiré
+     // de la session dès qu'elle vient de XSpro, où la vue XSpro fait autorité pour ce
+     // besoin. Retiré et non pas seulement caché : il n'atteint jamais le client, donc
+     // ni la liste des modes, ni le mode par défaut ne peuvent le sélectionner.
+     if (modeDef.standaloneUniquement && session.origin !== 'standalone') continue;
+
      const merged = mergePromptFields(modeDef, jsonConfig?.modes?.[modeId]);
      // promptsSuggeres : résolu séparément du reste (systemPrompt/regles/formatReponse
      // restent JSON > JS > XSpro, inchangé ci-dessus). Priorité par origine de session :

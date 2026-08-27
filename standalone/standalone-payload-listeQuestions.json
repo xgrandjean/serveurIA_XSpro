@@ -1,5 +1,5 @@
 {
-  "_comment": "Fichier de simulation standalone — formulaire de liste de questions. Généré à partir d'un VRAI payload XSPRO (formulaireListeQuestions) capturé sur POST /process. callbackUrl=null => fallback export Excel automatique.",
+  "_comment": "Fichier de simulation standalone — formulaire de liste de questions. Épuré (2026-08-27) : ne conserve que les champs réellement lus par le pipeline (session/viewResolver/llmClient/excelExport), vérifié par comparaison avec un vrai payload XSpro capturé. Contenu VIERGE/générique (aucune donnée réelle de cours) — juste assez de lignes pour exercer chaque type de question. callbackUrl=null => fallback export Excel automatique.",
   "_origin": "standalone",
   "sessionId": "formulaireListeQuestions_standalone_001",
   "contextName": "formulaireListeQuestions",
@@ -8,366 +8,100 @@
     "apiKey": "E8tfaxilRfBFknsKvvAbhNSi1wqaEI5x",
     "endpoint": "https://api.mistral.ai/v1/chat/completions",
     "provider": "mistral",
-    "model": "mistral-large-latest",
+    "model": "mistral-medium-latest",
     "timeoutMs": 30000,
-    "maxPromptLength": 25000,
-    "maxContenu": 50000
+    "maxPromptLength": 25000
   },
   "data": {
-    "lexique": {
-      "type": "type de question : qcm, courte, ouverte, selection, cours",
-      "contenu": "énoncé de la question ou contenu du bloc de cours (Markdown)",
-      "regle": "règle : validation, unique, multiple, texte, texte(10), nombre — voir cohérences type/règle",
-      "correction": "type de correction : auto, manuel, semi — vide pour les cours",
-      "points": "nombre de points (entier ou décimal, ne générer que des entiers) — vide pour les cours",
-      "choix": "tableau de propositions : [\"A\", \"B\", \"C\", \"D\"] — vide pour courte, ouverte et cours",
-      "ordre_choix": "aleatoire ou fixe pour qcm et selection — vide sinon",
-      "choixCorrect": "qcm/selection : tableau d'indices (0-based) : [1] ou [0,2] ; courte : tableau de strings acceptables : [\"herbivore\"] ou [\"herbivore\", \"végétarien\"] ; ouverte/cours : [] — vide pour ouverte et cours",
-      "indication": "indice optionnel affiché à la demande — vide si inutile",
-      "explicationCorrection": "explication affichée après correction — vide si inutile",
-      "commentaire": "commentaire optionnel visible que par le formateur — vide si inutile",
-      "consigneIA": "consigne de correction pour l'ia optionnel visible que par le formateur — vide si inutile",
-      "ordreQuestion": "Champs supplémentaire si on veut gérer une propriété ordreQuestion"
-    },
     "lignes": [
-      {
-        "type": "qcm",
-        "contenu": "Quelle partie de l'adresse IP identifie le réseau ?",
-        "regle": 2,
-        "correction": 1,
-        "points": 1,
-        "choix": ["HostID", "NetID", "Port TCP", "SSID"],
-        "ordre_choix": 1,
-        "choixCorrect": [1]
-      },
-      {
-        "type": "cours",
-        "contenu": "# Les réseaux IP et le masque de sous-réseau\n\n---\n\n## 1. Rappel : structure d'une adresse IP\n\nUne adresse IP est composée de **deux parties** :\n\n- La **partie réseau** (NetID) → identifie le réseau\n- La **partie poste** (HostID) → identifie la machine dans ce réseau\n\nC'est le **masque de sous-réseau** qui indique où s'arrête la partie réseau et où commence la partie poste.\n\n---\n\n## 2. Le masque /24 — cas classique\n\n### Notation décimale et binaire\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **Décimal** | 255 | 255 | 255 | 0 |\n| **Binaire** | 1111 1111 | 1111 1111 | 1111 1111 | 0000 0000 |\n| **Rôle** | 🔵 Réseau | 🔵 Réseau | 🔵 Réseau | 🟠 Poste |\n\n### Interprétation\n\n- **24 bits** à `1` → attribués à la **partie réseau** 🔵\n- **8 bits** à `0` → attribués à la **partie poste** 🟠\n- En notation CIDR : **/24**\n\n### Calcul du nombre de postes adressables\n\nLe dernier octet (8 bits) permet d'adresser :\n\n2^8 = 256 adresses\n\nMais deux adresses sont réservées :\n- La **première** (tous les bits à 0) → **adresse du réseau**\n- La **dernière** (tous les bits à 1) → **adresse de diffusion (broadcast)**\n\nDonc : **2^8 − 2 = 254 postes adressables**\n\n### L'adresse de diffusion (broadcast)\n\nL'adresse broadcast est une adresse spéciale qui permet d'envoyer un message à **toutes les machines du réseau en même temps**.\nLorsqu'une machine envoie un paquet vers l'adresse broadcast, toutes les machines du réseau le reçoivent.\n\n---\n\n## 3. Exemple avec le masque /24\n\nAdresse IP : **192.168.1.3 / 24**\n\n| | Partie réseau 🔵 | Partie poste 🟠 |\n|---|---|---|\n| **Adresse IP** | 192.168.1 | .3 |\n| **Masque** | 255.255.255 | .0 |\n\n| Élément | Adresse |\n|---|---|\n| Adresse du réseau (NetID) | 192.168.1.**0** |\n| 1er poste disponible | 192.168.1.**1** |\n| Dernier poste disponible | 192.168.1.**254** |\n| Adresse broadcast | 192.168.1.**255** |\n\n---\n\n## 4. Le masque de longueur quelconque — cas général\n\nOn peut utiliser des masques entre **/0** et **/30**.\nLe masque n'est pas forcément aligné sur un octet entier.\n\n### Exemple : le masque /26\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **Décimal** | 255 | 255 | 255 | 192 |\n| **Binaire** | 1111 1111 | 1111 1111 | 1111 1111 | **11**00 0000 |\n| **Rôle** | 🔵 Réseau | 🔵 Réseau | 🔵 Réseau | 🔵🔵🟠🟠🟠🟠🟠🟠 |\n\n### Interprétation\n\n- **26 bits** à `1` → attribués à la **partie réseau** 🔵\n- **6 bits** à `0` → attribués à la **partie poste** 🟠\n- En notation CIDR : **/26**\n\n### Calcul du nombre de postes adressables\n\n2^6 = 64 adresses\n\nDeux adresses sont réservées (réseau et broadcast), donc :\n\n**2^6 − 2 = 62 postes adressables**\n\n---\n\n## 5. Exemple avec le masque /26\n\nAdresse IP : **192.168.1.129 / 26**\n\nPour trouver l'adresse du réseau, on écrit l'adresse IP et le masque **en binaire**, puis on applique un **ET logique** bit à bit.\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **IP (binaire)** | 1100 0000 | 1010 1000 | 0000 0001 | **10**00 0001 |\n| **Masque /26 (binaire)** | 1111 1111 | 1111 1111 | 1111 1111 | **11**00 0000 |\n| **IP (décimal)** | 192 | 168 | 1 | 129 |\n| **Masque (décimal)** | 255 | 255 | 255 | 192 |\n\n### Résultat (ET logique entre IP et masque)\n\n| Adresse | Binaire (4e octet) | Décimal |\n|---|---|---|\n| **Réseau (NetID)** | 10**00 0000** | 192.168.1.**128** |\n| **1er poste** | 10**00 0001** | 192.168.1.**129** |\n| **Dernier poste** | 10**11 1110** | 192.168.1.**190** |\n| **Broadcast** | 10**11 1111** | 192.168.1.**191** |\n\n### Explication des bits\n\nDans le 4e octet, les **2 premiers bits** (`10`) appartiennent à la partie réseau 🔵.\nLes **6 bits restants** (`xx xxxx`) sont la partie poste 🟠 :\n\n| Rôle | 6 bits poste | Valeur |\n|---|---|---|\n| Réseau | 00 0000 | 0 |\n| 1er poste | 00 0001 | 1 |\n| Dernier poste | 11 1110 | 62 |\n| Broadcast | 11 1111 | 63 |\n\n---\n\n## 6. Méthode générale pour calculer un réseau\n\n1. **Écrire** l'adresse IP en binaire\n2. **Écrire** le masque en binaire\n3. **Appliquer un ET logique** bit à bit → on obtient l'adresse du réseau\n4. **Adresse broadcast** = adresse réseau avec tous les bits de la partie poste à `1`\n5. **1er poste** = adresse réseau + 1\n6. **Dernier poste** = adresse broadcast − 1\n\n---\n\n## 7. À retenir\n\n| Masque CIDR | Masque décimal | Bits réseau 🔵 | Bits poste 🟠 | Nb postes max |\n|---|---|---|---|---|\n| /8 | 255.0.0.0 | 8 | 24 | 16 777 214 |\n| /16 | 255.255.0.0 | 16 | 16 | 65 534 |\n| /24 | 255.255.255.0 | 24 | 8 | 254 |\n| /26 | 255.255.255.192 | 26 | 6 | 62 |\n| /30 | 255.255.255.252 | 30 | 2 | 2 |",
-        "regle": 1,
-        "correction": 1
-      },
-      {
-        "type": "qcm",
-        "contenu": "# Exercice : Déterminer l'adresse réseau sous Linux\n\nSous Linux, l'élève ouvre un terminal.\n\nIl tape :\n\nip a\n\nLe système affiche :\n\n2: eth0:  mtu 1500 qdisc mq state UP group default qlen 1000\ninet 192.168.34.57/20 brd 192.168.47.255 scope global eth0\nvalid_lft forever preferred_lft forever\n\nQuestion : Quelle est l'adresse du réseau sur lequel se trouve la machine",
-        "regle": 3,
-        "correction": 1,
-        "points": 1,
-        "choix": ["192.168.32.255", "192.168.32.1", "192.168.32.0", "11000000.10101000.00100000.00000001", "11000000.10101000.00100000.00000000"],
-        "ordre_choix": 2,
-        "choixCorrect": [2, 4],
-        "indication": "Décomposition binaire de l'adresse et du masque :\n\nIP     : 192.168.34.57   → 11000000.10101000.00100010.00111001\nMasque : 255.255.240.0   → 11111111.11111111.11110000.00000000\n\nRappel de la table des puissances de 2 :\n\n2^7 = 128 ; 2^6 = 64 ; 2^5 = 32 ; 2^4 = 16 ; 2^3 = 8 ; 2^2 = 4 ; 2^1 = 2 ; 2^0 = 1"
-      },
-      {
-        "type": "ouverte",
-        "contenu": "Justifier votre réponse",
-        "regle": 5,
-        "correction": 3,
-        "points": 1
-      }
-    ],
-    "champs": [
-      {
-        "champ": "type",
-        "cle": "type",
-        "libelle": "type de question : qcm, courte, ouverte, selection, cours"
-      },
-      {
-        "champ": "contenu",
-        "cle": "contenu",
-        "libelle": "énoncé de la question ou contenu du bloc de cours (Markdown)"
-      },
-      {
-        "champ": "regle",
-        "cle": "regle",
-        "libelle": "règle : validation, unique, multiple, texte, texte(10), nombre — voir cohérences type/règle"
-      },
-      {
-        "champ": "correction",
-        "cle": "correction",
-        "libelle": "type de correction : auto, manuel, semi — vide pour les cours"
-      },
-      {
-        "champ": "points",
-        "cle": "points",
-        "libelle": "nombre de points (entier ou décimal, ne générer que des entiers) — vide pour les cours"
-      },
-      {
-        "champ": "choix",
-        "cle": "choix",
-        "libelle": "tableau de propositions : [\"A\", \"B\", \"C\", \"D\"] — vide pour courte, ouverte et cours"
-      },
-      {
-        "champ": "ordre_choix",
-        "cle": "ordre_choix",
-        "libelle": "aleatoire ou fixe pour qcm et selection — vide sinon"
-      },
-      {
-        "champ": "choixCorrect",
-        "cle": "choixCorrect",
-        "libelle": "qcm/selection : tableau d'indices (0-based) : [1] ou [0,2] ; courte : tableau de strings acceptables : [\"herbivore\"] ou [\"herbivore\", \"végétarien\"] ; ouverte/cours : [] — vide pour ouverte et cours"
-      },
-      {
-        "champ": "indication",
-        "cle": "indication",
-        "libelle": "indice optionnel affiché à la demande — vide si inutile"
-      },
-      {
-        "champ": "explicationCorrection",
-        "cle": "explicationCorrection",
-        "libelle": "explication affichée après correction — vide si inutile"
-      },
-      {
-        "champ": "commentaire",
-        "cle": "commentaire",
-        "libelle": "commentaire optionnel visible que par le formateur — vide si inutile"
-      },
-      {
-        "champ": "consigneIA",
-        "cle": "consigneIA",
-        "libelle": "consigne de correction pour l'ia optionnel visible que par le formateur — vide si inutile"
-      },
-      {
-        "champ": "ordreQuestion",
-        "cle": "ordreQuestion",
-        "libelle": "Champs supplémentaire si on veut gérer une propriété ordreQuestion"
-      }
-    ],
-    "rowsBruts": [
-      {
-        "rowid": 139,
-        "idQuestion": "_1781691210791",
-        "idChapitre": "_1779588167262",
-        "idLigne": 1,
-        "selection": 0,
-        "iconeInfo": "qcm",
-        "type": 1,
-        "contenu": "Quelle partie de l'adresse IP identifie le réseau ?",
-        "regle": 2,
-        "correction": 1,
-        "points": 1,
-        "choix": "HostID\nNetID\nPort TCP\nSSID",
-        "ordre_choix": 1,
-        "choixCorrect": "NetID",
-        "indication": "",
-        "commentaire": null,
-        "masque": null,
-        "explicationCorrection": null,
-        "consigneIA": null,
-        "ordreQuestion": null,
-        "_champsInvalides": {},
-        "_champsVidesOblig": {}
-      },
-      {
-        "rowid": 1,
-        "idQuestion": "_1779588579177",
-        "idChapitre": "_1779588167262",
-        "idLigne": 2,
-        "selection": 0,
-        "iconeInfo": "cours",
-        "type": 5,
-        "contenu": "# Les réseaux IP et le masque de sous-réseau\n\n---\n\n## 1. Rappel : structure d'une adresse IP\n\nUne adresse IP est composée de **deux parties** :\n\n- La **partie réseau** (NetID) → identifie le réseau\n- La **partie poste** (HostID) → identifie la machine dans ce réseau\n\nC'est le **masque de sous-réseau** qui indique où s'arrête la partie réseau et où commence la partie poste.\n\n---\n\n## 2. Le masque /24 — cas classique\n\n### Notation décimale et binaire\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **Décimal** | 255 | 255 | 255 | 0 |\n| **Binaire** | 1111 1111 | 1111 1111 | 1111 1111 | 0000 0000 |\n| **Rôle** | 🔵 Réseau | 🔵 Réseau | 🔵 Réseau | 🟠 Poste |\n\n### Interprétation\n\n- **24 bits** à `1` → attribués à la **partie réseau** 🔵\n- **8 bits** à `0` → attribués à la **partie poste** 🟠\n- En notation CIDR : **/24**\n\n### Calcul du nombre de postes adressables\n\nLe dernier octet (8 bits) permet d'adresser :\n\n2^8 = 256 adresses\n\nMais deux adresses sont réservées :\n- La **première** (tous les bits à 0) → **adresse du réseau**\n- La **dernière** (tous les bits à 1) → **adresse de diffusion (broadcast)**\n\nDonc : **2^8 − 2 = 254 postes adressables**\n\n### L'adresse de diffusion (broadcast)\n\nL'adresse broadcast est une adresse spéciale qui permet d'envoyer un message à **toutes les machines du réseau en même temps**.\nLorsqu'une machine envoie un paquet vers l'adresse broadcast, toutes les machines du réseau le reçoivent.\n\n---\n\n## 3. Exemple avec le masque /24\n\nAdresse IP : **192.168.1.3 / 24**\n\n| | Partie réseau 🔵 | Partie poste 🟠 |\n|---|---|---|\n| **Adresse IP** | 192.168.1 | .3 |\n| **Masque** | 255.255.255 | .0 |\n\n| Élément | Adresse |\n|---|---|\n| Adresse du réseau (NetID) | 192.168.1.**0** |\n| 1er poste disponible | 192.168.1.**1** |\n| Dernier poste disponible | 192.168.1.**254** |\n| Adresse broadcast | 192.168.1.**255** |\n\n---\n\n## 4. Le masque de longueur quelconque — cas général\n\nOn peut utiliser des masques entre **/0** et **/30**.\nLe masque n'est pas forcément aligné sur un octet entier.\n\n### Exemple : le masque /26\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **Décimal** | 255 | 255 | 255 | 192 |\n| **Binaire** | 1111 1111 | 1111 1111 | 1111 1111 | **11**00 0000 |\n| **Rôle** | 🔵 Réseau | 🔵 Réseau | 🔵 Réseau | 🔵🔵🟠🟠🟠🟠🟠🟠 |\n\n### Interprétation\n\n- **26 bits** à `1` → attribués à la **partie réseau** 🔵\n- **6 bits** à `0` → attribués à la **partie poste** 🟠\n- En notation CIDR : **/26**\n\n### Calcul du nombre de postes adressables\n\n2^6 = 64 adresses\n\nDeux adresses sont réservées (réseau et broadcast), donc :\n\n**2^6 − 2 = 62 postes adressables**\n\n---\n\n## 5. Exemple avec le masque /26\n\nAdresse IP : **192.168.1.129 / 26**\n\nPour trouver l'adresse du réseau, on écrit l'adresse IP et le masque **en binaire**, puis on applique un **ET logique** bit à bit.\n\n| | Octet 1 | Octet 2 | Octet 3 | Octet 4 |\n|---|---|---|---|---|\n| **IP (binaire)** | 1100 0000 | 1010 1000 | 0000 0001 | **10**00 0001 |\n| **Masque /26 (binaire)** | 1111 1111 | 1111 1111 | 1111 1111 | **11**00 0000 |\n| **IP (décimal)** | 192 | 168 | 1 | 129 |\n| **Masque (décimal)** | 255 | 255 | 255 | 192 |\n\n### Résultat (ET logique entre IP et masque)\n\n| Adresse | Binaire (4e octet) | Décimal |\n|---|---|---|\n| **Réseau (NetID)** | 10**00 0000** | 192.168.1.**128** |\n| **1er poste** | 10**00 0001** | 192.168.1.**129** |\n| **Dernier poste** | 10**11 1110** | 192.168.1.**190** |\n| **Broadcast** | 10**11 1111** | 192.168.1.**191** |\n\n### Explication des bits\n\nDans le 4e octet, les **2 premiers bits** (`10`) appartiennent à la partie réseau 🔵.\nLes **6 bits restants** (`xx xxxx`) sont la partie poste 🟠 :\n\n| Rôle | 6 bits poste | Valeur |\n|---|---|---|\n| Réseau | 00 0000 | 0 |\n| 1er poste | 00 0001 | 1 |\n| Dernier poste | 11 1110 | 62 |\n| Broadcast | 11 1111 | 63 |\n\n---\n\n## 6. Méthode générale pour calculer un réseau\n\n1. **Écrire** l'adresse IP en binaire\n2. **Écrire** le masque en binaire\n3. **Appliquer un ET logique** bit à bit → on obtient l'adresse du réseau\n4. **Adresse broadcast** = adresse réseau avec tous les bits de la partie poste à `1`\n5. **1er poste** = adresse réseau + 1\n6. **Dernier poste** = adresse broadcast − 1\n\n---\n\n## 7. À retenir\n\n| Masque CIDR | Masque décimal | Bits réseau 🔵 | Bits poste 🟠 | Nb postes max |\n|---|---|---|---|---|\n| /8 | 255.0.0.0 | 8 | 24 | 16 777 214 |\n| /16 | 255.255.0.0 | 16 | 16 | 65 534 |\n| /24 | 255.255.255.0 | 24 | 8 | 254 |\n| /26 | 255.255.255.192 | 26 | 6 | 62 |\n| /30 | 255.255.255.252 | 30 | 2 | 2 |",
-        "regle": 1,
-        "correction": 1,
-        "points": "",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "",
-        "indication": "",
-        "commentaire": null,
-        "masque": null,
-        "explicationCorrection": null,
-        "consigneIA": null,
-        "ordreQuestion": null,
-        "_champsInvalides": {},
-        "_champsVidesOblig": {}
-      },
-      {
-        "rowid": 2,
-        "idQuestion": "_1779588579218",
-        "idChapitre": "_1779588167262",
-        "idLigne": 3,
-        "selection": 0,
-        "iconeInfo": "qcm",
-        "type": 1,
-        "contenu": "# Exercice : Déterminer l'adresse réseau sous Linux\n\nSous Linux, l'élève ouvre un terminal.\n\nIl tape :\n\nip a\n\nLe système affiche :\n\n2: eth0:  mtu 1500 qdisc mq state UP group default qlen 1000\ninet 192.168.34.57/20 brd 192.168.47.255 scope global eth0\nvalid_lft forever preferred_lft forever\n\nQuestion : Quelle est l'adresse du réseau sur lequel se trouve la machine",
-        "regle": 3,
-        "correction": 1,
-        "points": 1,
-        "choix": "192.168.32.255\n192.168.32.1\n192.168.32.0\n11000000.10101000.00100000.00000001\n11000000.10101000.00100000.00000000",
-        "ordre_choix": 2,
-        "choixCorrect": "192.168.32.0\n11000000.10101000.00100000.00000000",
-        "indication": "Décomposition binaire de l'adresse et du masque :\n\nIP     : 192.168.34.57   → 11000000.10101000.00100010.00111001\nMasque : 255.255.240.0   → 11111111.11111111.11110000.00000000\n\nRappel de la table des puissances de 2 :\n\n2^7 = 128 ; 2^6 = 64 ; 2^5 = 32 ; 2^4 = 16 ; 2^3 = 8 ; 2^2 = 4 ; 2^1 = 2 ; 2^0 = 1",
-        "commentaire": null,
-        "masque": null,
-        "explicationCorrection": null,
-        "consigneIA": null,
-        "ordreQuestion": null,
-        "_champsInvalides": {},
-        "_champsVidesOblig": {}
-      },
-      {
-        "rowid": 3,
-        "idQuestion": "_1779592017527",
-        "idChapitre": "_1779588167262",
-        "idLigne": 4,
-        "selection": 0,
-        "iconeInfo": "texte_long",
-        "type": 3,
-        "contenu": "Justifier votre réponse",
-        "regle": 5,
-        "correction": 3,
-        "points": 1,
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "",
-        "indication": "",
-        "commentaire": "",
-        "masque": 0,
-        "explicationCorrection": null,
-        "consigneIA": null,
-        "ordreQuestion": null,
-        "_champsInvalides": {},
-        "_champsVidesOblig": {}
-      }
-    ],
-    "infosVue": {
-      "nomOnglet": "Questions du chapitre",
-      "nbLignes": 4
-    },
-    "infosParent": {
-      "chapitre": {
-        "titre": "Le protocole IP masque quelconque",
-        "numero": 2
-      },
-      "parcours": {
-        "numero": "P001",
-        "designation": "Réseau informatique"
-      }
-    },
-    "maxContenuCours": 1000,
-    "maxContenuQuestions": 15000,
-    "maxContenu": 50000,
-    "colonnesExport": [
-      "type",
-      "contenu",
-      "regle",
-      "correction",
-      "points",
-      "choix",
-      "ordre_choix",
-      "choixCorrect",
-      "indication",
-      "commentaire",
-      "explicationCorrection",
-      "consigneIA",
-      "ordreQuestion"
-    ],
-    "modele": [
       {
         "type": "cours",
         "contenu": "## Titre du cours\n\nContenu en Markdown. Les **mots importants** peuvent être mis en gras.\n\n- Point 1\n- Point 2\n- Point 3",
         "regle": "",
         "correction": "",
-        "points": "",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "",
-        "indication": "",
-        "explicationCorrection": "",
-        "commentaire": "Bloc de cours sans validation"
-      },
-      {
-        "type": "cours",
-        "contenu": "## À retenir\n\nLire attentivement avant de continuer.",
-        "regle": "validation",
-        "correction": "",
-        "points": "",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "",
-        "indication": "",
-        "explicationCorrection": "",
-        "commentaire": "Bloc de cours avec bouton de validation obligatoire"
+        "points": ""
       },
       {
         "type": "qcm",
-        "contenu": "Quelle est la famille animale du cheval ?",
+        "contenu": "Exemple de question à choix multiple ?",
         "regle": "unique",
         "correction": "auto",
-        "points": "1",
-        "choix": "Les félidés\nLes équidés\nLes bovidés\nLes canidés",
+        "points": 1,
+        "choix": [
+          "Proposition A",
+          "Proposition B",
+          "Proposition C",
+          "Proposition D"
+        ],
         "ordre_choix": "aleatoire",
-        "choixCorrect": "Les équidés",
-        "indication": "Pensez aux sabots.",
-        "explicationCorrection": "Le cheval appartient à la famille des équidés, qui comprend aussi l'âne et le zèbre.",
-        "commentaire": "QCM à choix unique"
-      },
-      {
-        "type": "qcm",
-        "contenu": "Quels animaux sont des équidés ?",
-        "regle": "multiple",
-        "correction": "auto",
-        "points": "2",
-        "choix": "Le cheval\nL'âne\nLe zèbre\nLe lion\nLe cochon",
-        "ordre_choix": "aleatoire",
-        "choixCorrect": "Le cheval\nL'âne\nLe zèbre",
+        "choixCorrect": [
+          0
+        ],
         "indication": "",
-        "explicationCorrection": "Les équidés sont le cheval, l'âne et le zèbre. Le lion est un félidé, le cochon un suidé.",
-        "commentaire": "QCM à choix multiples"
+        "explicationCorrection": "",
+        "commentaire": "",
+        "consigneIA": ""
       },
       {
         "type": "courte",
-        "contenu": "Quel est le régime alimentaire du cheval ?",
+        "contenu": "Exemple de question à réponse courte ?",
         "regle": "texte",
         "correction": "auto",
-        "points": "1",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "herbivore",
-        "indication": "Il ne mange pas de viande.",
-        "explicationCorrection": "",
-        "commentaire": "Réponse courte textuelle"
-      },
-      {
-        "type": "courte",
-        "contenu": "Combien de pattes a un cheval ?",
-        "regle": "nombre",
-        "correction": "auto",
-        "points": "1",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "4",
+        "points": 1,
+        "choixCorrect": [
+          "réponse"
+        ],
         "indication": "",
         "explicationCorrection": "",
-        "commentaire": "Réponse courte numérique"
+        "commentaire": "",
+        "consigneIA": ""
       },
       {
         "type": "ouverte",
-        "contenu": "Expliquez en quelques phrases pourquoi le cheval blanc reste blanc la nuit.",
-        "regle": "texte",
+        "contenu": "Exemple de question ouverte à développer.",
+        "regle": "texte(10)",
         "correction": "manuel",
-        "points": "3",
-        "choix": "",
-        "ordre_choix": "",
-        "choixCorrect": "",
+        "points": 1,
         "indication": "",
         "explicationCorrection": "",
-        "commentaire": "Texte long — correction manuelle, pas de choixCorrect"
+        "commentaire": "",
+        "consigneIA": ""
       },
       {
         "type": "selection",
-        "contenu": "Trouvez l'intrus parmi ces animaux.",
+        "contenu": "Exemple de liste déroulante à choix unique.",
         "regle": "unique",
         "correction": "auto",
-        "points": "1",
-        "choix": "Cheval\nÂne\nZèbre\nLion",
+        "points": 1,
+        "choix": [
+          "Option A",
+          "Option B",
+          "Option C"
+        ],
         "ordre_choix": "fixe",
-        "choixCorrect": "Lion",
+        "choixCorrect": [
+          0
+        ],
         "indication": "",
-        "explicationCorrection": "Le lion est un félidé, pas un équidé.",
-        "commentaire": "Liste déroulante (selection) — choix unique obligatoire"
+        "explicationCorrection": "",
+        "commentaire": "",
+        "consigneIA": ""
       }
-    ]
+    ],
+    "infosVue": {
+      "nomOnglet": "Questions du chapitre",
+      "nbLignes": 5
+    },
+    "infosParent": {
+      "chapitre": {
+        "titre": "Titre du chapitre",
+        "numero": 1
+      },
+      "parcours": {
+        "numero": "P000",
+        "designation": "Nom du parcours"
+      }
+    }
   },
   "workerConfig": {
     "viewModule": "formulaireListeQuestions",
@@ -438,29 +172,7 @@
         "libelle": "Champs supplémentaire si on veut gérer une propriété ordreQuestion"
       }
     ],
-    "regles": {
-      "clesChampsDevantEtreNonVides": [
-        "type"
-      ],
-      "clesChampsSelectChoixDevantResterBrut": [
-        "type",
-        "regle",
-        "correction",
-        "ordre_choix"
-      ]
-    },
-    "systemPrompt": "Voici des données de questions d'un chapitre dans un parcours de formation.\nRègles importantes :\nRappelle systématiquement le nom du chapitre et du parcours s'ils sont renseignés.\nsauf si on te demande un format de sortie spécifique (par exemple un fichier .csv)",
-    "promptsSuggeres": {
-      "creation": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        " génère 5 questions QCM avec 4 propositions sur le thème du chapitre"
-      ],
-      "synthese": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        " fais-moi un bilan des questions de ce chapitre (répartition par type, points, difficultés…)"
-      ]
-    },
-    "prompt": "génère 5 questions QCM avec 4 propositions sur le thème du chapitre",
+    "prompt": "Génère 5 questions qcm variées sur le thème du chapitre",
     "modele": [
       {
         "type": "cours",
@@ -594,8 +306,6 @@
     "export": {
       "nomOnglet": "Export IA",
       "colonnesExport": []
-    },
-    "copyToClipBoard": false,
-    "exportExcel": true
+    }
   }
 }

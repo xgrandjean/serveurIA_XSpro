@@ -1,5 +1,5 @@
 {
-  "_comment": "Fichier de simulation standalone — facturation client (liste des prestations facturées). Calqué sur standalone-payload-formulaireGetDetailsTravaux.json. callbackUrl=null => fallback export Excel automatique.",
+  "_comment": "Fichier de simulation standalone — facturation client (liste des prestations facturées). Épuré (2026-08-27) : ne conserve que les champs réellement lus par le pipeline (session/viewResolver/llmClient/excelExport). Contenu VIERGE/générique. callbackUrl=null => fallback export Excel automatique.",
   "_origin": "standalone",
   "sessionId": "standalone_fc_001",
   "contextName": "formulaireGetDetailsFacturationClient",
@@ -10,217 +10,43 @@
     "provider": "albert",
     "model": "mistralai/Ministral-3-8B-Instruct-2512",
     "timeoutMs": 30000,
-    "maxPromptLength": 25000,
-    "maxContenu": 50000
+    "maxPromptLength": 25000
   },
   "data": {
-    "lexique": {
-      "reference": "référence de la prestation",
-      "designation": "désignation de la prestation ou article facturé",
-      "quantite": "quantité (nombre décimal ou entier)",
-      "montant": "prix unitaire HT (nombre décimal)",
-      "commentaire": "commentaire libre",
-      "facture": "facturé (0 non / 1 oui) - laisser vide en création",
-      "regle": "réglé (0 non / 1 oui) - laisser vide en création",
-      "annule": "annulé (0 non / 1 oui) - laisser vide en création",
-      "codeTVA": "code TVA (1, 2, 3 ou vide)"
-    },
     "lignes": [
       {
         "reference": "FAC-001",
-        "designation": "Fourniture et pose de prises de courant",
-        "quantite": 24,
-        "montant": 45.00,
-        "commentaire": "Bâtiment D, salle de classe",
+        "designation": "Prestation exemple A",
+        "quantite": 12,
+        "montant": 45,
+        "commentaire": "",
         "codeTVA": "1"
       },
       {
         "reference": "FAC-002",
-        "designation": "Fourniture et pose de luminaires LED",
-        "quantite": 7,
-        "montant": 75.00,
-        "commentaire": "5 plafonniers + 2 projecteurs biais avant",
+        "designation": "Prestation exemple B",
+        "quantite": 3,
+        "montant": 150,
+        "commentaire": "Commentaire exemple",
         "codeTVA": "1"
       },
       {
-        "reference": "FAC-003",
-        "designation": "Installation Tableau Général Basse Tension",
+        "reference": "",
+        "designation": "Prestation sans référence",
         "quantite": 1,
-        "montant": 850.00,
-        "commentaire": "TGBT complet avec disjoncteurs différentiels",
-        "codeTVA": "1"
-      },
-      {
-        "reference": "FAC-004",
-        "designation": "Tirage câblage courant faible",
-        "quantite": 10,
-        "montant": 22.00,
-        "commentaire": "Liaison couloir est vers TI analytique",
-        "codeTVA": "1"
-      }
-    ],
-    "champs": [
-      {
-        "champ": "reference",
-        "cle": "reference",
-        "libelle": "référence de la prestation"
-      },
-      {
-        "champ": "designation",
-        "cle": "designation",
-        "libelle": "désignation de la prestation ou article facturé"
-      },
-      {
-        "champ": "quantite",
-        "cle": "quantite",
-        "libelle": "quantité (nombre décimal ou entier)"
-      },
-      {
-        "champ": "montant",
-        "cle": "montant",
-        "libelle": "prix unitaire HT (nombre décimal)"
-      },
-      {
-        "champ": "commentaire",
-        "cle":"commentaire",
-        "libelle": "commentaire libre"
-      },
-      {
-        "champ": "facture",
-        "cle": "facture",
-        "libelle": "facturé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "regle",
-        "cle": "regle",
-        "libelle": "réglé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "annule",
-        "cle": "annule",
-        "libelle": "annulé (0 non / 1 oui) - laisser vide en création",
-        "placeholder": true
-      },
-      {
-        "champ": "codeTVA",
-        "cle": "codeTVA",
-        "libelle": "code TVA (1, 2, 3 ou vide)"
-      }
-    ],
-    "rowsBruts": [
-      {
-        "rowid": 1,
-        "idDetailsFC": "_1783369000001",
-        "idFacturationClient": "_1777978700001",
-        "idLigne": 1,
-        "selection": null,
-        "reference": "FAC-001",
-        "designation": "Fourniture et pose de prises de courant",
-        "quantite": 24,
-        "montant": 45.00,
-        "commentaire": "Bâtiment D, salle de classe",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 2,
-        "idDetailsFC": "_1783369000002",
-        "idFacturationClient": "_1777978700001",
-        "idLigne": 2,
-        "selection": null,
-        "reference": "FAC-002",
-        "designation": "Fourniture et pose de luminaires LED",
-        "quantite": 7,
-        "montant": 75.00,
-        "commentaire": "5 plafonniers + 2 projecteurs biais avant",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 3,
-        "idDetailsFC": "_1783369000003",
-        "idFacturationClient": "_1777978700001",
-        "idLigne": 3,
-        "selection": null,
-        "reference": "FAC-003",
-        "designation": "Installation Tableau Général Basse Tension",
-        "quantite": 1,
-        "montant": 850.00,
-        "commentaire": "TGBT complet avec disjoncteurs différentiels",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "rowid": 4,
-        "idDetailsFC": "_1783369000004",
-        "idFacturationClient": "_1777978700001",
-        "idLigne": 4,
-        "selection": null,
-        "reference": "FAC-004",
-        "designation": "Tirage câblage courant faible",
-        "quantite": 10,
-        "montant": 22.00,
-        "commentaire": "Liaison couloir est vers TI analytique",
-        "facture": "",
-        "regle": "",
-        "annule": "",
+        "montant": 300,
+        "commentaire": "",
         "codeTVA": "1"
       }
     ],
     "infosParent": {
-      "noAffaire": "$F0005",
-      "noFacture": "$FC0031",
-      "referenceAffaire": "$F0005"
+      "noAffaire": "$F0000",
+      "noFacture": "$FC0000",
+      "referenceAffaire": "$F0000"
     },
     "infosVue": {
       "nomOnglet": "vueFormulaireGetDetailsFacturationClient"
-    },
-    "maxContenu": 50000,
-    "colonnesExport": [
-      "reference",
-      "designation",
-      "quantite",
-      "montant",
-      "commentaire",
-      "facture",
-      "regle",
-      "annule",
-      "codeTVA"
-    ],
-    "modele": [
-      {
-        "reference": "FAC-001",
-        "designation": "Fourniture et pose de prises de courant",
-        "quantite": 15,
-        "montant": 45.00,
-        "commentaire": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      },
-      {
-        "reference": "FAC-002",
-        "designation": "Fourniture et pose de luminaires LED",
-        "quantite": 8,
-        "montant": 75.00,
-        "commentaire": "",
-        "facture": "",
-        "regle": "",
-        "annule": "",
-        "codeTVA": "1"
-      }
-    ],
-    "cleschampsForceAZeroSiVide": [],
-    "clesChampsDevantEtreForceAVide": []
+    }
   },
   "workerConfig": {
     "viewModule": "formulaireGetDetailsFacturationClient",
@@ -247,7 +73,7 @@
       },
       {
         "champ": "commentaire",
-        "cle":"commentaire",
+        "cle": "commentaire",
         "libelle": "commentaire libre"
       },
       {
@@ -274,30 +100,13 @@
         "libelle": "code TVA (1, 2, 3 ou vide)"
       }
     ],
-    "regles": {
-      "clesChampsDevantEtreNonVides": [
-        "designation"
-      ],
-      "clesChampsSelectChoixDevantResterBrut": []
-    },
-    "systemPrompt": "Voici des données d'une facturation client (liste des prestations facturées).\nRègles importantes :\nAnalyse l'état d'avancement de chaque ligne (facture, regle, annule).\nIdentifie les lignes non facturées ou non réglées.\nUtilise des chapitres clairs et des puces lisibles (- …).\nRappelle systématiquement le numéro de la facture et la désignation de l'affaire s'ils sont renseignés.",
-    "promptsSuggeres": {
-      "creation": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Exemple attendu : génère une facturation pour la fourniture et pose de prises de courant, luminaires et tableau électrique."
-      ],
-      "synthese": [
-        "Je suis un prompt par défaut, fichier des prompts prédéfinis absent",
-        "Fais-moi un bilan détaillé de cette facturation client avec : total HT, montant facturé, montant réglé, reste à payer."
-      ]
-    },
     "prompt": "Exemple attendu : génère une facturation pour la fourniture et pose de prises de courant, luminaires et tableau électrique.",
     "modele": [
       {
         "reference": "FAC-001",
         "designation": "Fourniture et pose de prises de courant",
         "quantite": 15,
-        "montant": 45.00,
+        "montant": 45,
         "commentaire": "",
         "facture": "",
         "regle": "",
@@ -308,7 +117,7 @@
         "reference": "FAC-002",
         "designation": "Fourniture et pose de luminaires LED",
         "quantite": 8,
-        "montant": 75.00,
+        "montant": 75,
         "commentaire": "",
         "facture": "",
         "regle": "",
@@ -319,8 +128,6 @@
     "export": {
       "nomOnglet": "Export IA",
       "colonnesExport": []
-    },
-    "copyToClipBoard": false,
-    "exportExcel": true
+    }
   }
 }

@@ -161,6 +161,10 @@ const MODES = {
     label: 'Création',
     description: 'Créer un carnet de liaisons à partir de plans, schémas ou CCTP',
     famille: 'creation',
+
+    // Mode ouvert par défaut à l'arrivée sur la vue (cf. resolveDefaultModeId dans
+    // public/grid.js) : la création est l'usage courant de cette vue de saisie.
+    parDefaut: true,
     surchargesColonnes: {
       repere:                 null,
       typeLiaison:            null,

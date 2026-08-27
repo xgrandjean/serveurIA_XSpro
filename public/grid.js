@@ -477,11 +477,9 @@ function initGrid(colonnes, rows) {
       // Appliquer le mode par défaut au premier onGridReady
       if (!state.defaultModeApplied) {
         state.defaultModeApplied = true;
-        // Déterminer le mode par défaut : "standard" s'il existe, sinon le premier mode disponible
         const modes = state.modes || {};
-        const modeKeys = Object.keys(modes);
-        const defaultModeId = modeKeys.includes('standard') ? 'standard' : (modeKeys.length > 0 ? modeKeys[0] : null);
-        const defaultMode = modes[defaultModeId];
+        const defaultModeId = resolveDefaultModeId(modes);
+        const defaultMode = defaultModeId ? modes[defaultModeId] : null;
 
         if (defaultMode) {
           state.activeWorkMode = defaultModeId;
@@ -2610,6 +2608,23 @@ function sendPrompt() {
  * Si un seul mode ou moins : le sélecteur reste caché (pas besoin de choisir).
  * Si plusieurs modes : le sélecteur apparaît.
  */
+/**
+ * Mode de travail sélectionné à l'ouverture de la session.
+ *
+ * Ordre : un mode déclarant `parDefaut: true` dans MODES (views/<vue>.js) l'emporte ;
+ * sinon "standard" s'il existe ; sinon le premier mode déclaré. Le drapeau permet à une
+ * vue d'ouvrir sur son mode d'usage courant sans imposer d'ordre particulier dans MODES.
+ *
+ * Fonction unique : la règle était écrite deux fois (sélecteur + premier onGridReady) et
+ * devait donc être modifiée aux deux endroits sous peine de voir la liste afficher un mode
+ * et la grille en appliquer un autre.
+ */
+function resolveDefaultModeId(modes) {
+  const keys = Object.keys(modes || {});
+  if (!keys.length) return null;
+  return keys.find(k => modes[k]?.parDefaut) || (keys.includes('standard') ? 'standard' : keys[0]);
+}
+
 function populateWorkModeSelector(modes) {
   const sel = el('work-mode-selector');
   if (!sel) return;
@@ -2629,8 +2644,7 @@ function populateWorkModeSelector(modes) {
     sel.appendChild(opt);
   });
   sel.style.display = 'inline-block';
-  // Sélectionner "standard" si disponible, sinon le premier mode par défaut
-  const defaultMode = keys.includes('standard') ? 'standard' : keys[0];
+  const defaultMode = resolveDefaultModeId(modes);
   sel.value = defaultMode;
   state.activeWorkMode = defaultMode;
   // Tooltip du <select> : description du mode actif (le title sur <option> n'est pas supporté par les navigateurs)
@@ -2646,11 +2660,13 @@ function populatePromptSuggestions(promptsSuggeres) {
   if (!sel) return;
   // Purger tous les groupes/options précédents (optgroups compris), en préservant
   // uniquement la première option placeholder "— Suggestions —".
-  while (sel.firstChild) {
-    const first = sel.firstChild;
-    // Ne pas retirer le <option value="">— Suggestions —</option> par défaut (1er enfant).
-    if (first === sel.options[0] && sel.options[0] && sel.options[0].value === '') break;
-    sel.removeChild(first);
+  // Retrait par la FIN (et non par le début) : sel.firstChild est toujours le
+  // placeholder lui-même, donc un test "suis-je le placeholder ?" AVANT retrait
+  // s'arrêtait dès la 1ère itération sans jamais rien supprimer — c'était le bug
+  // (les <optgroup> des modes précédents s'empilaient à chaque changement de mode).
+  const placeholder = sel.options[0] && sel.options[0].value === '' ? sel.options[0] : null;
+  while (sel.lastChild && sel.lastChild !== placeholder) {
+    sel.removeChild(sel.lastChild);
   }
   if (!promptsSuggeres) return;
 
@@ -2666,16 +2682,50 @@ function populatePromptSuggestions(promptsSuggeres) {
     groupes.push({ cle, list });
   }
 
+  // Les prompts rédigés côté XSpro (promptsParDefautAi.json) portent leurs propres
+  // intertitres sous la forme « -- Titre -- » au milieu de la liste. Ce ne sont pas des
+  // prompts : envoyés au LLM ils ne veulent rien dire. On les promeut donc en sous-groupes
+  // réels (<optgroup> imbriqué visuellement), ce qui les rend non sélectionnables et
+  // préserve le découpage voulu par l'auteur des prompts.
+  const SEPARATEUR = /^\s*-{2,}\s*(.+?)\s*-{2,}\s*$/;
+
   for (const { cle, list } of groupes) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = labelParCle[cle] || cle;
+    const libelleGroupe = labelParCle[cle] || cle;
+    let cible = null;
+
+    const nouveauGroupe = (label) => {
+      const g = document.createElement('optgroup');
+      g.label = label;
+      sel.appendChild(g);
+      return g;
+    };
+
     for (const s of list) {
+      const sep = SEPARATEUR.exec(s);
+      if (sep) {
+        // Intertitre → ouvre un sous-groupe « Groupe · Section », sans option sélectionnable.
+        cible = nouveauGroupe(`${libelleGroupe} · ${sep[1]}`);
+        continue;
+      }
+      // Prompts précédant tout intertitre → groupe principal, créé à la demande pour ne
+      // jamais laisser un <optgroup> vide si la liste débute par une section.
+      if (!cible) cible = nouveauGroupe(libelleGroupe);
       const opt = document.createElement('option');
       opt.value = s;
       opt.textContent = s.length > 46 ? s.slice(0, 43) + '…' : s;
-      optgroup.appendChild(opt);
+      // Le libellé est tronqué à 46 caractères (certains prompts font plusieurs lignes) :
+      // l'infobulle porte le texte intégral, consultable au survol dans la liste déroulée.
+      // Posée sur l'<option> et non sur le <select> : après un choix, le select est
+      // réinitialisé sur son placeholder (cf. écouteur 'change'), une infobulle sur lui
+      // ne montrerait donc jamais le prompt retenu.
+      opt.title = s;
+      cible.appendChild(opt);
     }
-    sel.appendChild(optgroup);
+
+    // Une section déclarée mais sans aucun prompt derrière laisserait un groupe vide.
+    for (const g of Array.from(sel.querySelectorAll('optgroup'))) {
+      if (!g.children.length) g.remove();
+    }
   }
 }
 

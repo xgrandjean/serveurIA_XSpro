@@ -318,6 +318,12 @@ const MODES = {
     // Famille générique du mode — cf. commentaire dans MODES.analyse ci-dessus.
     famille: 'creation',
 
+    // Mode ouvert par défaut à l'arrivée sur la vue (cf. resolveDefaultModeId dans
+    // public/grid.js). La création est l'usage courant, et c'est aussi ce que suppose
+    // l'appel venant de XSpro, dont le prompt par défaut est un prompt de génération —
+    // ouvrir sur l'analyse obligeait à changer de mode avant la première demande.
+    parDefaut: true,
+
     surchargesColonnes: {
       type:                  { width: 90, pinned:     'left'},
       contenu:               { width: 380 },

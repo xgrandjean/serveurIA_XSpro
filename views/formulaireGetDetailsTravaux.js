@@ -151,6 +151,10 @@ const MODES = {
     label: 'Création',
     description: 'Créer une fiche de travaux à partir de documents (CCTP, descriptif…)',
     famille: 'creation',
+
+    // Mode ouvert par défaut à l'arrivée sur la vue (cf. resolveDefaultModeId dans
+    // public/grid.js) : la création est l'usage courant de cette vue de saisie.
+    parDefaut: true,
     surchargesColonnes: {
       repere:      null,
       intitule:    null,

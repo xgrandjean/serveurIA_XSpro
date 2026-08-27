@@ -157,6 +157,10 @@ const MODES = {
     label: 'Création',
     description: 'Créer des facturations client à partir de documents (devis signé, CCTP…)',
     famille: 'creation',
+
+    // Mode ouvert par défaut à l'arrivée sur la vue (cf. resolveDefaultModeId dans
+    // public/grid.js) : la création est l'usage courant de cette vue de saisie.
+    parDefaut: true,
     surchargesColonnes: {
       reference:   null,
       designation: null,
