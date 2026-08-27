@@ -84,6 +84,18 @@ body { display: flex; flex-direction: column; height: 100vh; }
   text-overflow: ellipsis;
 }
 
+/* Lien « Config IA » (#lien-config-ia) : réutilise le style .badge-model, en cliquable.
+   Visible uniquement en mode standalone (cf. onInit dans grid.js) — sans effet et donc
+   sans intérêt sur une session pilotée par XSpro, qui envoie toujours son propre bloc IA. */
+a.badge-model {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.badge-model:hover {
+  background: rgba(255,255,255,.24);
+}
+
 /* ── Badge statut ───────────────────────────────────────────────────────────── */
 .badge-status {
   font-size: 11px; font-weight: 700;

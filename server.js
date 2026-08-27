@@ -411,6 +411,7 @@ wss.on('connection', (ws, req) => {
        type:         'init',
        sessionId,
        contextName:  session.contextName,
+       origin:       session.origin,
        workerConfig: session.effectiveWorkerConfig,
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},
@@ -719,7 +720,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
       break;
     }
 
@@ -824,6 +825,56 @@ async function openBrowser(url) {
   }
 }
 
+// ── Configuration IA éditable (mode standalone) ────────────────────────────────
+// Un seul fichier pour le bloc "ia" (fournisseur/clé API/modèle), au lieu de le
+// dupliquer dans les 7 payloads standalone. But : ce bloc change selon qui lance le
+// Worker en autonome (clé API personnelle, fournisseur préféré) — l'éditer une fois
+// via /ia-config.html plutôt que dans chaque fichier de payload.
+// N'affecte QUE startStandaloneMode() ci-dessous : une session pilotée par XSpro
+// reçoit toujours son bloc "ia" du payload XSpro, jamais de ce fichier (cf. mémoire
+// "séparation Worker/XSpro : tout par le payload" — ceci reste un réglage 100% local
+// au fonctionnement autonome, aucun couplage nouveau avec XSpro).
+const IA_CONFIG_FILE   = path.join(STANDALONE_DIR, 'ia-config.json');
+const IA_CONFIG_CHAMPS = ['apiKey', 'endpoint', 'provider', 'model', 'timeoutMs', 'maxPromptLength'];
+
+app.get('/api/ia-config', (req, res) => {
+  if (fs.existsSync(IA_CONFIG_FILE)) {
+    try {
+      return res.json({ source: 'ia-config.json', ia: JSON.parse(fs.readFileSync(IA_CONFIG_FILE, 'utf-8')) });
+    } catch (e) {
+      return res.status(500).json({ error: `ia-config.json invalide : ${e.message}` });
+    }
+  }
+  // Pas encore configuré → renvoyer le bloc "ia" du payload standalone par défaut,
+  // comme simple point de départ pour préremplir le formulaire (rien n'est écrit ici).
+  try {
+    const payload = JSON.parse(fs.readFileSync(STANDALONE_FILE, 'utf-8'));
+    return res.json({ source: 'payload par défaut', ia: payload.ia || {} });
+  } catch (e) {
+    return res.json({ source: 'aucun', ia: {} });
+  }
+});
+
+app.post('/api/ia-config', (req, res) => {
+  const body = req.body || {};
+  const ia = {};
+  for (const champ of IA_CONFIG_CHAMPS) {
+    if (body[champ] !== undefined && body[champ] !== '') ia[champ] = body[champ];
+  }
+  if (!ia.apiKey || !ia.endpoint) {
+    return res.status(400).json({ error: 'apiKey et endpoint sont requis.' });
+  }
+  ia.timeoutMs       = Number(ia.timeoutMs)       || 30000;
+  ia.maxPromptLength = Number(ia.maxPromptLength) || 25000;
+  try {
+    fs.mkdirSync(STANDALONE_DIR, { recursive: true });
+    fs.writeFileSync(IA_CONFIG_FILE, JSON.stringify(ia, null, 2) + '\n', 'utf-8');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Mode standalone ───────────────────────────────────────────────────────────
 // Charge standalone-payload.json et crée la session automatiquement.
 function startStandaloneMode() {
@@ -841,6 +892,18 @@ function startStandaloneMode() {
   }
 
   console.log(`[Standalone] Payload chargé → contextName: ${payload.contextName}`);
+
+  // Surcharge par la configuration IA éditable (/ia-config.html), si elle existe —
+  // ne remplace que les champs qu'elle définit, le reste du payload est inchangé.
+  if (fs.existsSync(IA_CONFIG_FILE)) {
+    try {
+      const surcharge = JSON.parse(fs.readFileSync(IA_CONFIG_FILE, 'utf-8'));
+      payload.ia = { ...payload.ia, ...surcharge };
+      console.log(`[Standalone] Configuration IA personnalisée appliquée (${path.basename(IA_CONFIG_FILE)})`);
+    } catch (e) {
+      console.warn(`[Standalone] ia-config.json invalide, ignoré : ${e.message}`);
+    }
+  }
 
   // callbackUrl forcé à null en standalone → toujours fallback Excel
   payload.callbackUrl = null;
@@ -860,6 +923,7 @@ function startStandaloneMode() {
   // Afficher le nom du fichier chargé
   const payloadFileName = path.basename(STANDALONE_FILE);
   console.log(`[Standalone] Fichier : ${payloadFileName}`);
+  console.log(`[Standalone] Configuration IA : http://localhost:${PORT}/ia-config.html`);
 
   // Petit délai pour laisser le serveur démarrer avant d'ouvrir le navigateur
   setTimeout(() => openBrowser(uiUrl), 500);

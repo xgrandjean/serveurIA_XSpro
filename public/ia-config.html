@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Configuration IA — AI Worker</title>
+<style>
+  * , *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue-dark:   #1E3A5F;
+    --blue-mid:    #2C5282;
+    --blue-light:  #EBF4FF;
+    --grey-100:    #F7F9FC;
+    --grey-200:    #EDF2F7;
+    --grey-300:    #E2E8F0;
+    --grey-500:    #A0AEC0;
+    --text:        #2D3748;
+    --text-light:  #718096;
+    --green:       #276749;
+    --green-light: #F0FFF4;
+    --red:         #9B2335;
+    --red-light:   #FFF5F5;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --radius: 8px;
+  }
+  html, body { height: 100%; background: var(--grey-100); font-family: var(--font); font-size: 14px; color: var(--text); }
+  body { display: flex; justify-content: center; padding: 40px 16px; }
+  main { width: 100%; max-width: 520px; }
+  h1 { font-size: 17px; color: var(--blue-dark); margin-bottom: 4px; }
+  .sous-titre { color: var(--text-light); font-size: 13px; margin-bottom: 20px; }
+  .carte { background: #fff; border: 1px solid var(--grey-300); border-radius: var(--radius); padding: 20px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--text-light); margin: 14px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--grey-300); border-radius: 6px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text); }
+  input:focus, select:focus { outline: none; border-color: var(--blue-mid); }
+  .ligne-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .aide { font-size: 11px; color: var(--text-light); margin-top: 3px; }
+  .actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+  button { background: var(--blue-mid); color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button:hover { background: var(--blue-dark); }
+  button:disabled { background: var(--grey-500); cursor: default; }
+  .statut { font-size: 12px; padding: 6px 10px; border-radius: 6px; display: none; }
+  .statut.ok { display: block; background: var(--green-light); color: var(--green); }
+  .statut.erreur { display: block; background: var(--red-light); color: var(--red); }
+  .source { font-size: 11px; color: var(--text-light); margin-bottom: 16px; }
+  .retour { display: inline-block; margin-top: 18px; font-size: 12px; color: var(--blue-mid); text-decoration: none; }
+  .retour:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ Configuration IA — mode standalone</h1>
+  <p class="sous-titre">Fournisseur, clé API et modèle utilisés quand le Worker tourne en autonome
+    (<code>npm run standalone</code>). Enregistré une seule fois dans
+    <code>standalone/ia-config.json</code>, appliqué à tous les payloads de test — inutile de
+    modifier chaque fichier. Sans effet sur une session pilotée par XSpro, qui envoie toujours
+    son propre bloc IA.</p>
+
+  <div class="carte">
+    <p id="source" class="source"></p>
+
+    <label for="provider">Fournisseur</label>
+    <input id="provider" placeholder="mistral, albert, openai...">
+
+    <label for="model">Modèle</label>
+    <input id="model" placeholder="mistral-medium-latest">
+
+    <label for="endpoint">Endpoint (URL de l'API)</label>
+    <input id="endpoint" placeholder="https://api.mistral.ai/v1/chat/completions">
+
+    <label for="apiKey">Clé API</label>
+    <input id="apiKey" type="password" placeholder="sk-...">
+
+    <div class="ligne-2">
+      <div>
+        <label for="timeoutMs">Timeout (ms)</label>
+        <input id="timeoutMs" type="number" step="1000" placeholder="30000">
+      </div>
+      <div>
+        <label for="maxPromptLength">Longueur max. du prompt (caractères)</label>
+        <input id="maxPromptLength" type="number" step="1000" placeholder="25000">
+        <p class="aide">Nombre de caractères (pas des tokens, pas des octets) — troncature de l'historique au-delà.</p>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-enregistrer">Enregistrer</button>
+      <span id="statut" class="statut"></span>
+    </div>
+  </div>
+
+  <a class="retour" id="lien-retour" href="/index.html">← Retour à la grille</a>
+</main>
+
+<script>
+const CHAMPS = ['provider', 'model', 'endpoint', 'apiKey', 'timeoutMs', 'maxPromptLength'];
+
+function afficherStatut(texte, ok) {
+  const el = document.getElementById('statut');
+  el.textContent = texte;
+  el.className = 'statut ' + (ok ? 'ok' : 'erreur');
+}
+
+async function charger() {
+  try {
+    const r = await fetch('/api/ia-config');
+    const j = await r.json();
+    for (const c of CHAMPS) {
+      if (j.ia && j.ia[c] !== undefined) document.getElementById(c).value = j.ia[c];
+    }
+    const src = document.getElementById('source');
+    src.textContent = j.source === 'ia-config.json'
+      ? 'Configuration personnalisée déjà enregistrée.'
+      : (j.source === 'payload par défaut'
+          ? 'Aucune configuration personnalisée — valeurs du payload standalone par défaut, à titre indicatif.'
+          : 'Aucune valeur existante.');
+  } catch (e) {
+    afficherStatut('Chargement impossible : ' + e.message, false);
+  }
+}
+
+async function enregistrer() {
+  const bouton = document.getElementById('btn-enregistrer');
+  bouton.disabled = true;
+  afficherStatut('', true);
+  const corps = {};
+  for (const c of CHAMPS) corps[c] = document.getElementById(c).value.trim();
+  try {
+    const r = await fetch('/api/ia-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corps),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Erreur inconnue');
+    afficherStatut('Enregistré — pris en compte au prochain lancement standalone.', true);
+  } catch (e) {
+    afficherStatut(e.message, false);
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+document.getElementById('btn-enregistrer').addEventListener('click', enregistrer);
+
+// Reprend l'URL de la grille passée par le lien "⚙ Config IA" du bandeau (sessionId
+// inclus) — sans elle, /index.html refuse de s'ouvrir ("⚠ sessionId manquant dans
+// l'URL."). Absente (page ouverte directement, ex. depuis le log console au
+// démarrage) → repli sur /index.html nu, comportement inchangé.
+const retour = new URLSearchParams(window.location.search).get('retour');
+if (retour) document.getElementById('lien-retour').href = retour;
+
+charger();
+</script>
+</body>
+</html>

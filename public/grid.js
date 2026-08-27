@@ -280,6 +280,18 @@ function onInit(msg) {
 
   console.log('[Payload XSpro]', msg.xsproPayload);
 
+  // Lien "Config IA" (⚙, bandeau) : visible seulement en standalone — sans effet et
+  // donc sans intérêt sur une session pilotée par XSpro, qui envoie toujours son
+  // propre bloc IA (cf. standalone/ia-config.json, server.js startStandaloneMode).
+  const lienConfigIa = el('lien-config-ia');
+  if (lienConfigIa) {
+    lienConfigIa.classList.toggle('hidden', msg.origin !== 'standalone');
+    // Fait suivre l'URL courante (sessionId inclus) pour que le lien "← Retour à la
+    // grille" d'ia-config.html puisse revenir à CETTE session, pas à /index.html nu
+    // (que grid.js refuse avec "⚠ sessionId manquant dans l'URL.").
+    lienConfigIa.href = '/ia-config.html?retour=' + encodeURIComponent(window.location.href);
+  }
+
   document.title                 = `AI Worker — ${msg.contextName}`;
   el('context-name').textContent = msg.contextName;
 
