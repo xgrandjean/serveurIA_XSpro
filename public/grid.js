@@ -230,6 +230,41 @@ function normaliserLignesEntrantes(rows) {
   return rows;
 }
 
+// ── Résolution d'affichage des champs champsIndexRef (ex: choixCorrect → choix) ──
+// Selon la provenance des données (payload XSpro sérialisé au format export, réponse
+// LLM avant normalisation complète, état transitoire d'édition), la donnée peut
+// arriver sous deux formes dégradées que le rendu doit savoir résoudre SANS jamais
+// modifier la donnée stockée ni renvoyée au serveur :
+//   1. le champ de référence (choix) lui-même arrive en STRING (<br> ou \n séparé)
+//      au lieu d'un array — on le découpe alors pour l'affiche ;
+//   2. la valeur (choixCorrect) arrive en STRING d'indice ("0", "2") au lieu du
+//      nombre 0, 2 — on la normalise pour résoudre l'indice.
+// La correspondance est EXACTE (seuls les espaces avant/après sont ignorés) et ne
+// s'applique que si l'indice est un entier valide DANS LES BORNES du tableau de
+// référence et pointe vers une entrée non vide — un texte libre (réponse courte
+// valant littéralement "2", ou texte non encore résolu en indice) ressort tel quel,
+// jamais interprété comme indice ni perdu (la validation rouge getInvalidFields le
+// signale ensuite). La donnée réelle n'est jamais modifiée.
+function refArrayPourAffichage(refValue) {
+  if (Array.isArray(refValue)) return refValue;
+  if (typeof refValue === 'string' && refValue.trim() !== '') {
+    return refValue.split(/<br\s*\/?>|\r?\n/i).map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function resoudreIndexPourAffichage(valeur, refArray) {
+  const arr = Array.isArray(refArray) ? refArray : [];
+  const n = typeof valeur === 'number'
+    ? valeur
+    : (typeof valeur === 'string' && /^-?\d+$/.test(valeur.trim()) ? Number(valeur.trim()) : NaN);
+  if (Number.isInteger(n) && n >= 0 && n < arr.length &&
+      arr[n] !== null && arr[n] !== undefined && String(arr[n]).trim() !== '') {
+    return arr[n];
+  }
+  return valeur;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 function onInit(msg) {
   state.workerConfig = msg.workerConfig;
@@ -589,7 +624,7 @@ TextareaCellEditor.prototype.init = function(params) {
   // Édition = texte résolu (lisible) ; stockage/LLM = indices (cf. getValue ci-dessous).
   const cle = params.colDef?.field;
   const refField = state.workerConfig?.champsIndexRef?.[cle];
-  this.indexRefArray = refField ? (Array.isArray(params.data?.[refField]) ? params.data[refField] : []) : null;
+  this.indexRefArray = refField ? refArrayPourAffichage(params.data?.[refField]) : null;
   // Champ array "simple" (choix...) : AG Grid n'invoque pas colDef.valueParser de façon
   // fiable avec un cellEditor personnalisé (constaté : newValue reste une string brute
   // dans onCellValueChanged). getValue() produit donc directement le tableau final —
@@ -599,15 +634,13 @@ TextareaCellEditor.prototype.init = function(params) {
   // Gestion spéciale pour les arrays (choix, choixCorrect) : convertir en string avec \n
   let initialValue;
   if (this.indexRefArray) {
-    // Résoudre chaque valeur pour l'édition : un indice numérique valide se résout en
-    // texte via refField ; une valeur déjà en texte brut (non encore résolue — état
-    // transitoire normal, cf. computeIndexRefSideEffects) s'affiche telle quelle.
-    const values = Array.isArray(params.value) ? params.value : [];
+    // Résoudre chaque valeur pour l'édition : un indice numérique (OU string d'indice,
+    // cf. resoudreIndexPourAffichage) valide se résout en texte via refField ; une
+    // valeur déjà en texte brut (non encore résolue — état transitoire normal, cf.
+    // computeIndexRefSideEffects) s'affiche telle quelle.
+    const values = Array.isArray(params.value) ? params.value : (params.value == null ? [] : [params.value]);
     initialValue = values
-      .map(v => {
-        const resolved = (typeof v === 'number') ? this.indexRefArray[v] : undefined;
-        return resolved !== undefined ? resolved : v;
-      })
+      .map(v => String(resoudreIndexPourAffichage(v, this.indexRefArray)))
       .filter(v => v !== undefined && v !== null)
       .join('\n');
   } else if (params.value == null) {
@@ -1110,12 +1143,15 @@ const dataCols = colonnes.map(col => {
         const refField = state.workerConfig?.champsIndexRef?.[col.cle];
         let rawItems;
         if (refField) {
-          const refArray = Array.isArray(params.data?.[refField]) ? params.data[refField] : [];
-          const indices = Array.isArray(value) ? value : [];
-          rawItems = indices.map(v => {
-            const resolved = (typeof v === 'number') ? refArray[v] : undefined;
-            return resolved !== undefined ? resolved : v; // indice résolu → texte ; sinon → valeur brute telle quelle
-          }).filter(v => v !== undefined && v !== null);
+          // RefArray tolère array OU string <br>/<br>-séparée (cf. refArrayPourAffichage) ;
+          // chaque valeur (indice numérique OU string d'indice) se résout en texte exact.
+          const refArray = refArrayPourAffichage(params.data?.[refField]);
+          const valeurs = Array.isArray(value)
+            ? value
+            : (value === null || value === undefined ? [] : [value]);
+          rawItems = valeurs
+            .map(v => resoudreIndexPourAffichage(v, refArray))
+            .filter(v => v !== undefined && v !== null);
         } else {
           rawItems = Array.isArray(value) ? value : (typeof value === 'string' && value ? [value] : []);
         }
@@ -1333,9 +1369,12 @@ function formatValeurPourRevue(value, col, params, baseValueFormatter, rowPourRe
 
   const refField = state.workerConfig?.champsIndexRef?.[col.cle];
   if (refField) {
-    const refArray = Array.isArray(rowPourRefs?.[refField]) ? rowPourRefs[refField] : [];
-    const items = (Array.isArray(value) ? value : [])
-      .map(v => (typeof v === 'number' ? refArray[v] : undefined) ?? v)
+    // Même tolérance qu'au rendu : refArray peut être array ou string <br>/<br>-séparée,
+    // et chaque valeur un indice numérique OU une string d'indice (cf. helpers ci-dessus).
+    const refArray = refArrayPourAffichage(rowPourRefs?.[refField]);
+    const valeurs = Array.isArray(value) ? value : (value === null || value === undefined ? [] : [value]);
+    const items = valeurs
+      .map(v => resoudreIndexPourAffichage(v, refArray))
       .filter(v => v !== undefined && v !== null);
     return items.length ? tronquer(items.join(' ⏎ ')) : '(vide)';
   }
@@ -2607,17 +2646,31 @@ function populatePromptSuggestions(promptsSuggeres) {
   if (!sel) return;
   // Vider toutes les options (sauf la première "— Suggestions —")
   while (sel.options.length > 1) sel.remove(1);
-  // Déterminer les prompts à afficher
-  const isExport = state.workerConfig?.exportExcel === true;
-  const prompts = isExport
-    ? (promptsSuggeres?.creation || [])
-    : (promptsSuggeres?.synthese || []);
-  prompts.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s.length > 46 ? s.slice(0, 43) + '…' : s;
-    sel.appendChild(opt);
-  });
+  if (!promptsSuggeres) return;
+
+  // Tableau plat (héritage mode dans formulaireListeQuestions) → groupe "Synthèse" par défaut
+  if (Array.isArray(promptsSuggeres)) promptsSuggeres = { synthese: promptsSuggeres };
+
+  // Agrégation : toutes les catégories portant un tableau non vide, classées par groupe.
+  const labelParCle = { creation: 'Création', synthese: 'Synthèse', analyse: 'Analyse' };
+  const groupes = [];
+  for (const cle of Object.keys(promptsSuggeres)) {
+    const list = promptsSuggeres[cle];
+    if (!Array.isArray(list) || !list.length) continue;
+    groupes.push({ cle, list });
+  }
+
+  for (const { cle, list } of groupes) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = labelParCle[cle] || cle;
+    for (const s of list) {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s.length > 46 ? s.slice(0, 43) + '…' : s;
+      optgroup.appendChild(opt);
+    }
+    sel.appendChild(optgroup);
+  }
 }
 
 /**

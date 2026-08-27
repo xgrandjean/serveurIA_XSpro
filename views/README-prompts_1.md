@@ -181,3 +181,33 @@ définitivement).
 | `formulaireGetDetailsFichesTechniques` | Non | `historise` (racine, uniforme) | 15 tours |
 | `formulaireGetDetailsAF` | Non | `historise` (racine, uniforme) | 15 tours |
 | `formulaireGetDetailsFacturationClient` | Non | `historise` (racine, uniforme) | 15 tours |
+
+## 8. Encart `VOCABULAIRE UTILISATEUR` (synonymes → code)
+
+L'utilisateur emploie souvent, dans sa demande, du vocabulaire courant au lieu des codes
+exacts attendus dans les données (ex. « texte long » pour `type="ouverte"`, « question
+courte » pour `type="courte"`). Plutôt que de dupliquer les règles (déjà sérialisées dans
+`regles` sous `== RÈGLES DE CONSTRUCTION D'UNE LIGNE ==`), on ajoute en **fin de
+`systemPrompt`** un court encart déclaratif qui **prévient** l'IA de cette correspondance
+et pointe vers les règles existantes pour tout le reste (pas de doublon).
+
+Emplacement : dans le JSON pairé, à la fin du `systemPrompt` de **chaque mode** concerné
+(`modes.<modeId>.systemPrompt`) — pas à la racine, car les `systemPrompt` par mode
+écrasent celui de la racine lors de la fusion (`mergePromptFields` de `viewResolver.js`).
+
+Convention : l'encart commence par la ligne `VOCABULAIRE UTILISATEUR :`, se limite
+essentiellement à la correspondance des types / noms de champs / objets métier (les cas les
+plus sujets à confusion), reste court, et se termine par un renvoi explicite aux règles
+existantes pour ne pas créer de doublon. Aucune modification de code n'est requise.
+
+L'encart est **personnalisé, propre à chaque vue** (jamais un mécanisme générique) : il est
+dupliqué dans le `systemPrompt` de chaque mode effectif. Vues couvertes :
+
+| Vue | Modes avec encart | Correspondances principales |
+|---|---|---|
+| `formulaireListeQuestions` | `analyse`, `creation` | `type` : texte long/réponse courte/QCM ↔ `ouverte`/`courte`/`qcm` ; piège « Atelier » |
+| `detailsDevis` | root, `decomposition`, `chiffrage` | `niveauListe` : titre/chapitre/sous-chapitre/ligne ↔ `' '`/`▶ ◇ ○`/`○ ◆ ○`/`○ ○ ●` ; `sousTraitance` ✓ ; `tauxHoraire` |
+| `formulaireGetDetailsTravaux` | root, `creation` | objet « tâche/poste/ouvrage » ; champs `repere`/`intitule`/`quantite` |
+| `formulaireGetDetailsFichesTechniques` | root, `creation` | objet « liaison/raccordement » ; `tenant`/`aboutissant` ; champs `repere`/`longueurLiaison` |
+| `formulaireGetDetailsAF` | root, `creation` | objet « article/ligne/produit » ; champs `reference`/`designation`/`quantite`/`montant`/`codeTVA` |
+| `formulaireGetDetailsFacturationClient` | root, `creation` | objet « prestation/ligne/ouvrage » ; champs `reference`/`designation`/`quantite`/`montant`/`codeTVA` |

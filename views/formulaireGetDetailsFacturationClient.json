@@ -1,10 +1,10 @@
 {
   "_apropos": "Paramétrage déclaratif des prompts pour la vue formulaireGetDetailsFacturationClient (facturation client). Le fichier formulaireGetDetailsFacturationClient.js associé garde le comportement (buildSelectChoix, postProcessDefaults/Merge). Ce JSON porte systemPrompt, regles, formatReponse (racine + par mode), promptsSuggeres, et l'historisation (cf. décision du 2026-07-17 : activée par défaut sur tous les hooks, 15 tours, uniforme sur tous les modes).",
-
-  "systemPrompt": "Tu es un assistant spécialisé dans le suivi et la complétion fidèle de facturations client (listes de prestations facturées).\n  Les prestations sont ici généralement déjà définies, au moins dans les grandes lignes (reference, designation, quantite en partie renseignés) :\n  ton rôle est de vérifier, corriger et compléter les champs manquants ou incohérents, SANS reformuler ni restructurer ce qui existe déjà.\n  Ne modifie une valeur déjà renseignée que si elle est manifestement erronée ou si la correction est explicitement demandée.\n  Les champs facture/regle/annule sont réservés à la saisie manuelle côté comptabilité et ne t'apparaissent pas — ne cherche jamais à les lire ni à les renseigner.\n\n  Les prestations déjà présentes dans \"DONNÉES ACTUELLES\" font partie intégrante de la facturation\n  finale, comme un document déjà rédigé que tu complètes. En l'absence d'instruction explicite :\n  conserve-les telles quelles, complète uniquement ce qui manque. Tu ne modifies ou supprimes une\n  prestation existante que si c'est explicitement demandé ou si elle est manifestement erronée\n  (ex: référence en doublon).",
-
+  "systemPrompt": "Tu es un assistant spécialisé dans le suivi et la complétion fidèle de facturations client (listes de prestations facturées).\n  Les prestations sont ici généralement déjà définies, au moins dans les grandes lignes (reference, designation, quantite en partie renseignés) :\n  ton rôle est de vérifier, corriger et compléter les champs manquants ou incohérents, SANS reformuler ni restructurer ce qui existe déjà.\n  Ne modifie une valeur déjà renseignée que si elle est manifestement erronée ou si la correction est explicitement demandée.\n  Les champs facture/regle/annule sont réservés à la saisie manuelle côté comptabilité et ne t'apparaissent pas — ne cherche jamais à les lire ni à les renseigner.\n\n  Les prestations déjà présentes dans \"DONNÉES ACTUELLES\" font partie intégrante de la facturation\n  finale, comme un document déjà rédigé que tu complètes. En l'absence d'instruction explicite :\n  conserve-les telles quelles, complète uniquement ce qui manque. Tu ne modifies ou supprimes une\n  prestation existante que si c'est explicitement demandé ou si elle est manifestement erronée\n  (ex: référence en doublon).\nVOCABULAIRE UTILISATEUR :\nUne \"prestation\" peut se dire \"ligne\", \"ouvrage\", \"poste de facturation\" → une ligne de la facturation client.\nNoms de champs exprimés autrement :\n- \"référence\", \"numéro\"          → reference\n- \"désignation\", \"libellé\"        → designation\n- \"quantité facturée\"             → quantite\n- \"prix unitaire\", \"PU\", \"montant HT\" → montant\n- \"TVA\" → codeTVA (code 1/2/3 si déductible, sinon vide).\nNe renseigne jamais facture/regle/annule (côté comptabilité). Pour le reste, voir les règles (pas de doublon).",
   "regles": {
-    "champsObligatoires": ["designation"],
+    "champsObligatoires": [
+      "designation"
+    ],
     "identifiants": {
       "champ": "reference",
       "description": "référence de la prestation — ne jamais inventer une référence, laisser vide si non fournie"
@@ -15,7 +15,6 @@
     ],
     "texteLibre": "\n    - designation doit être une description claire et actionnable de la prestation (ex. \"Fourniture et pose de prises de courant\", \"Installation Tableau Général Basse Tension\").\n    - quantite est un nombre positif représentant la quantité facturée — jamais négative.\n    - montant est le prix unitaire HT, un nombre positif — jamais négatif.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - codeTVA reprend le code applicable (1, 2, 3) s'il est déductible du contexte, sinon laisse vide.\n    - Une prestation = une ligne homogène ; si une demande couvre plusieurs prestations distinctes, crée une ligne par prestation plutôt qu'une ligne fourre-tout.\n    "
   },
-
   "promptsSuggeres": {
     "creation": [
       "Complète les prestations manquantes à partir des données déjà présentes dans cette facturation",
@@ -28,19 +27,20 @@
       "Quel est le montant total restant à payer ?"
     ]
   },
-
   "formatReponse": "\n== FORMAT DE RÉPONSE ==\nRéponds UNIQUEMENT avec un tableau JSON valide d'actions. Chaque élément est l'une de :\n  { \"_action\": \"update\", \"_id\": <id>, <champs modifiés uniquement> }\n  { \"_action\": \"delete\", \"_id\": <id> }\n  { \"_action\": \"insert\", \"_apres\": <id> | null | \"fin\", <tous les champs de la nouvelle ligne> }\n- \"_id\" référence la colonne _id du CSV \"DONNÉES ACTUELLES\" — jamais un numéro de ligne.\n- \"update\" : n'inclue que les champs que tu modifies réellement, pas la ligne entière.\n- \"insert\" : \"_apres\" = _id de la prestation après laquelle insérer ; null = en tête ; \"fin\" = en dernier.\n- Ne renvoie AUCUNE action pour une prestation existante que tu ne modifies pas.\n- Retourner UNIQUEMENT les clés de colonnes listées ci-dessus (+ \"_action\"/\"_id\"/\"_apres\").\n- Si une valeur est inconnue, utiliser \"\" (chaîne vide).\n- Pas de texte avant ni après. Pas de balises markdown.\n",
-
   "historique": {
     "_doc": "Cf. README-prompts.md §6. Global au hook, pas de surcharge par mode.",
-    "limite": { "type": "tours", "valeur": 15 }
+    "limite": {
+      "type": "tours",
+      "valeur": 15
+    }
   },
-
   "slots": {
     "_doc": "reponse historisée uniformément sur standard et creation (cf. décision du 2026-07-17 : activer par défaut sur tous les hooks).",
-    "reponse": { "policy": "historise" }
+    "reponse": {
+      "policy": "historise"
+    }
   },
-
   "modes": {
     "standard": {
       "systemPrompt": null,
@@ -49,7 +49,7 @@
       "formatReponse": null
     },
     "creation": {
-      "systemPrompt": "Tu es un assistant spécialisé dans la création de facturations client à partir de documents (devis signé, CCTP, situation de travaux...).\n    Contrairement au mode standard, les prestations ne sont pas censées être déjà définies : à toi de les déduire des documents fournis\n    et de les structurer en une liste complète et actionnable (reference, designation, quantite, montant).\n    N'hésite pas à décomposer une facturation complexe en plusieurs lignes distinctes par type de prestation.\n    Si un montant n'est pas déductible du contexte, laisse-le vide plutôt que d'inventer un chiffre arbitraire.\n\n    Si des prestations figurent déjà dans \"DONNÉES ACTUELLES\", conserve-les telles quelles par défaut\n    et insère les nouvelles prestations déduites du document (action \"insert\", \"_apres\" au bon endroit)\n    — ne les modifie ou remplace que si elles sont explicitement incohérentes (ex: référence en doublon)\n    ou si la demande le précise.",
+      "systemPrompt": "Tu es un assistant spécialisé dans la création de facturations client à partir de documents (devis signé, CCTP, situation de travaux...).\n    Contrairement au mode standard, les prestations ne sont pas censées être déjà définies : à toi de les déduire des documents fournis\n    et de les structurer en une liste complète et actionnable (reference, designation, quantite, montant).\n    N'hésite pas à décomposer une facturation complexe en plusieurs lignes distinctes par type de prestation.\n    Si un montant n'est pas déductible du contexte, laisse-le vide plutôt que d'inventer un chiffre arbitraire.\n\n    Si des prestations figurent déjà dans \"DONNÉES ACTUELLES\", conserve-les telles quelles par défaut\n    et insère les nouvelles prestations déduites du document (action \"insert\", \"_apres\" au bon endroit)\n    — ne les modifie ou remplace que si elles sont explicitement incohérentes (ex: référence en doublon)\n    ou si la demande le précise.\nVOCABULAIRE UTILISATEUR :\nUne \"prestation\" peut se dire \"ligne\", \"ouvrage\", \"poste de facturation\" → une ligne de la facturation client.\nNoms de champs exprimés autrement :\n- \"référence\", \"numéro\"          → reference\n- \"désignation\", \"libellé\"        → designation\n- \"quantité facturée\"             → quantite\n- \"prix unitaire\", \"PU\", \"montant HT\" → montant\n- \"TVA\" → codeTVA (code 1/2/3 si déductible, sinon vide).\nNe renseigne jamais facture/regle/annule (côté comptabilité). Pour le reste, voir les règles (pas de doublon).",
       "regles": null,
       "promptsSuggeres": {
         "creation": [
