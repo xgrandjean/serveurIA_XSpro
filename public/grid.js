@@ -2162,6 +2162,18 @@ function updateReviewToolbar() {
       if (chk) chk.checked = false;
       state.gridApi?.onFilterChanged();
     }
+    // Le message "Vérifie et valide..." (posé par onActDone) invitait à traiter les
+    // propositions ci-dessous — une fois le pending retombé à 0, il restait affiché sans
+    // plus avoir de sens tant que rien ne le remplaçait explicitement. Remplacé
+    // UNIQUEMENT s'il est encore ce message précis, jamais un autre statut (ex: 'Prêt',
+    // 'Planification…'). Texte volontairement neutre ("traitées", pas "validées") : le
+    // pending peut retomber à 0 par tout-validé, tout-rejeté, ou un mélange des deux
+    // (approbations/rejets individuels) — un message qui affirmerait "tout est validé"
+    // serait faux dans les deux derniers cas.
+    const statusEl = el('status-message');
+    if (statusEl && statusEl.textContent === 'Vérifie et valide les propositions IA ci-dessous.') {
+      setStatusMessage('Toutes les propositions ont été traitées — clique sur « Valider et exporter ».');
+    }
   }
 }
 
