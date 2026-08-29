@@ -19,6 +19,12 @@ const { resolveProvider, getHandler }  = require('./providers');
 const { FILE_TYPES, resolveFileType }  = require('./fileTypes');
 const { runHandler }                   = require('./fileHandlers');
 
+// ── Cache "JSON mode" par config LLM (endpoint+modèle) ─────────────────────────
+// Détecté automatiquement à la 1ère requête ACT de chaque config, pour la durée
+// de vie du process (cf. callLLM). true = supporté, false = non supporté,
+// absent = jamais testé.
+const jsonModeSupportCache = new Map();
+
 // ── Politique de cycle de vie du contexte LLM (cf. README-prompts.md §3-6) ────
 // Policies par défaut : reproduisent exactement le comportement "PAS d'historique"
 // actuel tant qu'aucun JSON pairé n'existe pour la vue (session.promptPolicy null).
@@ -110,6 +116,17 @@ function buildHistorizedMessages(session, historiqueCfg) {
     warnings.push({ type: 'troncature_historique', limiteAppliquee: limite.valeur, toursSupprimes });
   }
   return { messages, warnings };
+}
+
+// ── Filet 2 : message correctif renvoyé au LLM sur JSON invalide (cf. run()) ───
+// Ne demande jamais de retirer les backticks/formatage Markdown du contenu : ils
+// peuvent avoir une valeur pédagogique dans l'énoncé des questions — seule la
+// syntaxe JSON doit être corrigée, le contenu doit rester inchangé.
+function buildJsonCorrectionPrompt(parseError) {
+  return `== CORRECTION REQUISE ==
+Ta réponse précédente n'est pas un JSON valide (erreur : "${String(parseError.message).slice(0, 300)}").
+Renvoie EXACTEMENT le même contenu, mais corrige uniquement ce qui rend le JSON invalide (guillemets, échappement, virgules). Ne supprime ni ne reformule aucun texte, y compris les backticks ou toute mise en forme Markdown déjà présents dans les champs — ils peuvent avoir une valeur pédagogique et doivent être conservés, correctement échappés dans le JSON.
+Réponds uniquement avec le JSON corrigé, sans texte ni balise autour.`;
 }
 
 // ── Point d'entrée principal ──────────────────────────────────────────────────
@@ -245,21 +262,64 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   console.log(`[LLM] Timeout config : ${mode === 'act' ? Math.max((ia.timeoutMs || 30000) * 4, 120000) : (ia.timeoutMs || 30000)}ms (mode ${mode})`);
   const rawResponse = await callLLM(ia, truncated, mode);
 
+  // ── 9b. Mode ACT : parsing + filet de correction sur JSON invalide ─────────
+  // Doit se faire AVANT l'écriture de l'historique (§10) pour que celui-ci
+  // retienne la réponse réellement exploitée (corrigée le cas échéant), pas
+  // la version brute invalide — cf. plan "filet de sécurité JSON invalide".
+  // Le mode PLAN ne parse jamais de JSON (réponse texte libre, §11) : rien
+  // de ce qui suit ne s'y applique, finalResponse reste rawResponse.
+  function parseActResponse(resp) {
+    if (editionParActions) {
+      const applied = applyRowActions(resp, session.rows, colonnes, selectChoix, session);
+      return { rows: applied.rows, resume: applied.resume, rapport: applied.rapport };
+    }
+    return { rows: parseAndMergeRows(resp, session.rows, colonnes, selectChoix), resume: null, rapport: null };
+  }
+
+  let finalResponse = rawResponse;
+  let parseResult   = null;  // { rows, resume, rapport } une fois le parsing réussi
+  let parseError    = null;  // erreur définitive si le filet de correction échoue aussi
+
+  if (mode === 'act') {
+    try {
+      parseResult = parseActResponse(rawResponse);
+    } catch (err1) {
+      console.warn(`[LLM] JSON invalide (${String(err1.message).slice(0, 150)}) — renvoi correctif au LLM`);
+      try {
+        const correctionMessages = [
+          ...truncated,
+          { role: 'assistant', content: rawResponse },
+          { role: 'user', content: buildJsonCorrectionPrompt(err1) },
+        ];
+        const retryResponse = await callLLM(ia, correctionMessages, mode);
+        finalResponse = retryResponse;
+        parseResult = parseActResponse(retryResponse);
+        console.log('[LLM] Correction JSON réussie au 2e essai');
+      } catch (err2) {
+        console.error('[LLM] Correction JSON échouée — abandon (erreur d\'origine remontée)');
+        parseError = err1;
+      }
+    }
+  }
+
   // Trace de ce qui a REELLEMENT ete transmis, enregistree ici et nulle part ailleurs :
   // c'est le seul point ou `truncated` est la valeur envoyee (apres troncature) et non une
   // reconstitution. session.history ne garde que le prompt utilisateur et la reponse, pas
   // le prompt systeme assemble ; l'apercu (buildPromptPreview) reconstruit, lui, ce qui
   // SERAIT envoyé maintenant — les deux ne se substituent pas l'un a l'autre.
+  // `finalResponse` = la réponse corrigée si le filet de correction a été utilisé avec
+  // succès, sinon la dernière réponse obtenue — jamais la version brute invalide une fois
+  // qu'une correction a réussi (cf. plan "filet de sécurité JSON invalide").
   session.dernierEnvoi = {
     messages:   truncated,
-    reponse:    rawResponse,
+    reponse:    finalResponse,
     modele:     ia.model || null,
     mode,
     horodatage: Date.now(),
   };
 
   // ── 10. Historique ─────────────────────────────────────────────────────────
-  SM.pushHistory(session, 'assistant', rawResponse);
+  SM.pushHistory(session, 'assistant', finalResponse);
 
   // Tour historisé à usage LLM (distinct de session.history ci-dessus) — cf.
   // README-prompts.md §3-6. Rien n'est stocké si la vue n'a pas de JSON pairé,
@@ -269,15 +329,19 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
       modeId:   activeModeId,
       demande:  slotPolicies.demande?.policy  === 'historise' ? (userPrompt || null) : null,
       infosVue: slotPolicies.infosVue?.policy === 'historise' ? (data.infosVue || null) : null,
-      reponse:  slotPolicies.reponse?.policy  === 'historise' ? (rawResponse || null) : null,
+      reponse:  slotPolicies.reponse?.policy  === 'historise' ? (finalResponse || null) : null,
     };
     if (turn.demande || turn.infosVue || turn.reponse) SM.pushLlmTurn(session, turn);
   }
 
+  // Échec définitif (2 tentatives de parsing épuisées) : l'historique est déjà à jour
+  // pour rester exploitable en debug (cf. ci-dessus), on remonte l'erreur maintenant.
+  if (parseError) throw parseError;
+
   // ── 11. Traitement selon le mode ───────────────────────────────────────────
   if (mode === 'plan') {
-    session.currentPlan = rawResponse;
-    if (onPlan) onPlan(rawResponse);
+    session.currentPlan = finalResponse;
+    if (onPlan) onPlan(finalResponse);
     return;
   }
 
@@ -285,17 +349,9 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   // actionsResume : uniquement renseigné en editionParActions (cf. applyRowActions) —
   // le contrat positionnel n'a pas besoin d'un résumé séparé, onCellUpdate ci-dessous
   // porte déjà le détail cellule par cellule pour ce contrat.
-  let updatedRows;
-  let actionsResume = null;
-  let rapportIA     = null;   // synthese redigee par le LLM (contrat { rapport, actions })
-  if (editionParActions) {
-    const applied = applyRowActions(rawResponse, session.rows, colonnes, selectChoix, session);
-    updatedRows   = applied.rows;
-    actionsResume = applied.resume;
-    rapportIA     = applied.rapport;
-  } else {
-    updatedRows = parseAndMergeRows(rawResponse, session.rows, colonnes, selectChoix);
-  }
+  let updatedRows      = parseResult.rows;
+  const actionsResume  = parseResult.resume;
+  const rapportIA      = parseResult.rapport;   // synthese redigee par le LLM (contrat { rapport, actions })
 
   // Hook vue — post-traitement métier après merge
   if (viewHook?.postProcessMerge) {
@@ -640,96 +696,145 @@ async function callLLM(ia, messages, mode = 'act') {
   // max_tokens adaptatif : 4096 pour PLAN, 8192 pour ACT
   const maxTokens = mode === 'act' ? 8192 : 4096;
 
-  // Sérialiser le body une seule fois (log + envoi)
-  const bodyPayload = {
-    model:       ia.model,
-    messages,
-    max_tokens:  maxTokens,
-    temperature: 0.2,
-  };
-  const bodyStr = JSON.stringify(bodyPayload);
-  console.log(`[LLM] Requête ${mode} — body ${bodyStr.length} chars, timeout ${timeoutMs}ms, max_tokens ${maxTokens}`);
+  // ── Requête HTTP unitaire, factorisée pour permettre un 2e essai sans
+  // response_format si le 1er échoue (cf. détection JSON mode ci-dessous).
+  async function doRequest(useJsonMode) {
+    const bodyPayload = {
+      model:       ia.model,
+      messages,
+      max_tokens:  maxTokens,
+      temperature: 0.2,
+    };
+    if (useJsonMode) bodyPayload.response_format = { type: 'json_object' };
 
-  const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), timeoutMs);
+    const bodyStr = JSON.stringify(bodyPayload);
+    console.log(`[LLM] Requête ${mode} — body ${bodyStr.length} chars, timeout ${timeoutMs}ms, max_tokens ${maxTokens}${useJsonMode ? ', json_mode' : ''}`);
 
-  let startTime = Date.now();
-  let response;
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), timeoutMs);
+
+    let startTime = Date.now();
+    let response;
+    try {
+      response = await fetch(ia.endpoint, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${ia.apiKey}`,
+        },
+        body: bodyStr,
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      // AbortError (timeout) vs autre erreur réseau
+      if (fetchError.name === 'AbortError') {
+        const cause = 'timeout';
+        const suggestion = `Le LLM n'a pas répondu dans le délai imparti de ${timeoutMs / 1000}s. Tu peux augmenter ia.timeoutMs dans le payload ou réessayer.`;
+        console.error(`[LLM] Timeout (${mode}) après ${timeoutMs}ms`);
+        throw Object.assign(new Error(`⚠ Timeout : le LLM n'a pas répondu en ${timeoutMs / 1000}s`), { cause, suggestion, httpStatus: null, timeoutMs });
+      }
+      const cause = 'network';
+      const suggestion = 'Vérifie ta connexion réseau et que l\'endpoint est accessible.';
+      console.error(`[LLM] Erreur réseau (${mode}) :`, fetchError.message);
+      throw Object.assign(new Error(`⚠ Erreur réseau : ${fetchError.message}`), { cause, suggestion, httpStatus: null });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const elapsed = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      const truncatedErr = errBody.slice(0, 300);
+      let cause, suggestion;
+      switch (response.status) {
+        case 401:
+          cause = 'auth';
+          suggestion = 'Clé API invalide — vérifie ta clé Mistral.';
+          break;
+        case 429:
+          cause = 'rate_limit';
+          suggestion = 'Trop de requêtes vers l\'API — attends quelques secondes puis réessaie.';
+          break;
+        case 400:
+          cause = 'bad_request';
+          suggestion = 'Requête mal formée — vérifie les logs pour plus de détails.';
+          break;
+        case 500: case 502: case 503:
+          cause = 'server_error';
+          suggestion = `Le serveur LLM a retourné une erreur HTTP ${response.status} — réessaie plus tard ou contacte le support.`;
+          break;
+        default:
+          cause = 'http_error';
+          suggestion = `Erreur HTTP ${response.status} — vérifie la configuration.`;
+      }
+      console.error(`[LLM] Échec HTTP ${response.status} (${mode}) en ${elapsed}ms : ${truncatedErr}`);
+      throw Object.assign(
+        new Error(`⚠ ${suggestion} (HTTP ${response.status})`),
+        { cause, suggestion, httpStatus: response.status }
+      );
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      const cause = 'empty_response';
+      const suggestion = 'Le LLM a répondu mais sans contenu textuel — vérifie les logs de la requête.';
+      console.error(`[LLM] Réponse inattendue (${mode}) en ${elapsed}ms :`, JSON.stringify(data).slice(0, 200));
+      throw Object.assign(
+        new Error(`⚠ Réponse LLM vide ou inattendue`),
+        { cause, suggestion, httpStatus: response.status }
+      );
+    }
+
+    console.log(`[LLM] Réponse reçue (${mode}) — ${content.length} chars en ${elapsed}ms`);
+    return content;
+  }
+
+  // ── Détection automatique du support "JSON mode" (response_format json_object) ─
+  // Uniquement en mode ACT (le mode PLAN répond en texte libre, cf. run()).
+  // Cache par config LLM (endpoint+modèle), pour la durée de vie du process —
+  // testé une seule fois sur la 1ère requête ACT de chaque config, jamais revalidé
+  // ensuite (cf. plan JSON mode auto, doc/ ou mémoire projet).
+  const capKey = `${ia.endpoint}::${ia.model}`;
+  const jsonModeState = jsonModeSupportCache.get(capKey); // true | false | undefined
+  const attemptJsonMode = mode === 'act' && jsonModeState !== false;
+
+  if (!attemptJsonMode) return doRequest(false);
+
   try {
-    response = await fetch(ia.endpoint, {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${ia.apiKey}`,
-      },
-      body: bodyStr,
-      signal: controller.signal,
-    });
-  } catch (fetchError) {
-    clearTimeout(timeoutId);
-    // AbortError (timeout) vs autre erreur réseau
-    if (fetchError.name === 'AbortError') {
-      const cause = 'timeout';
-      const suggestion = `Le LLM n'a pas répondu dans le délai imparti de ${timeoutMs / 1000}s. Tu peux augmenter ia.timeoutMs dans le payload ou réessayer.`;
-      console.error(`[LLM] Timeout (${mode}) après ${timeoutMs}ms`);
-      throw Object.assign(new Error(`⚠ Timeout : le LLM n'a pas répondu en ${timeoutMs / 1000}s`), { cause, suggestion, httpStatus: null, timeoutMs });
+    const content = await doRequest(true);
+    if (jsonModeState === undefined) {
+      jsonModeSupportCache.set(capKey, true);
+      console.log(`[LLM] JSON mode confirmé pour ${capKey}`);
     }
-    const cause = 'network';
-    const suggestion = 'Vérifie ta connexion réseau et que l\'endpoint est accessible.';
-    console.error(`[LLM] Erreur réseau (${mode}) :`, fetchError.message);
-    throw Object.assign(new Error(`⚠ Erreur réseau : ${fetchError.message}`), { cause, suggestion, httpStatus: null });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+    return content;
+  } catch (err) {
+    // Déjà confirmé supporté par le passé : cet échec n'est pas imputable au JSON
+    // mode, on ne retente pas inutilement.
+    if (jsonModeState === true) throw err;
 
-  const elapsed = Date.now() - startTime;
+    // Jamais testé : seul un 400 (requête mal formée) suggère plausiblement que
+    // response_format est le paramètre rejeté — sur toute autre cause (réseau,
+    // timeout, auth, rate limit, 5xx) le second essai serait un doublon inutile
+    // et doublerait l'attente sans rien apprendre.
+    if (err.cause !== 'bad_request') throw err;
 
-  if (!response.ok) {
-    const errBody = await response.text().catch(() => '');
-    const truncatedErr = errBody.slice(0, 300);
-    let cause, suggestion;
-    switch (response.status) {
-      case 401:
-        cause = 'auth';
-        suggestion = 'Clé API invalide — vérifie ta clé Mistral.';
-        break;
-      case 429:
-        cause = 'rate_limit';
-        suggestion = 'Trop de requêtes vers l\'API — attends quelques secondes puis réessaie.';
-        break;
-      case 400:
-        cause = 'bad_request';
-        suggestion = 'Requête mal formée — vérifie les logs pour plus de détails.';
-        break;
-      case 500: case 502: case 503:
-        cause = 'server_error';
-        suggestion = `Le serveur LLM a retourné une erreur HTTP ${response.status} — réessaie plus tard ou contacte le support.`;
-        break;
-      default:
-        cause = 'http_error';
-        suggestion = `Erreur HTTP ${response.status} — vérifie la configuration.`;
+    console.warn(`[LLM] Échec 400 avec JSON mode (${capKey}) — nouvel essai sans response_format`);
+    try {
+      const content = await doRequest(false);
+      jsonModeSupportCache.set(capKey, false);
+      console.log(`[LLM] JSON mode non supporté pour ${capKey} — repli sur texte libre`);
+      return content;
+    } catch (retryErr) {
+      // Le 2e essai échoue aussi : le 400 initial n'était probablement pas lié au
+      // JSON mode — on ne met rien en cache (retesté à la prochaine requête) et on
+      // remonte l'erreur du second essai, celui qui reflète le comportement
+      // antérieur à cette détection.
+      throw retryErr;
     }
-    console.error(`[LLM] Échec HTTP ${response.status} (${mode}) en ${elapsed}ms : ${truncatedErr}`);
-    throw Object.assign(
-      new Error(`⚠ ${suggestion} (HTTP ${response.status})`),
-      { cause, suggestion, httpStatus: response.status }
-    );
   }
-
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) {
-    const cause = 'empty_response';
-    const suggestion = 'Le LLM a répondu mais sans contenu textuel — vérifie les logs de la requête.';
-    console.error(`[LLM] Réponse inattendue (${mode}) en ${elapsed}ms :`, JSON.stringify(data).slice(0, 200));
-    throw Object.assign(
-      new Error(`⚠ Réponse LLM vide ou inattendue`),
-      { cause, suggestion, httpStatus: response.status }
-    );
-  }
-
-  console.log(`[LLM] Réponse reçue (${mode}) — ${content.length} chars en ${elapsed}ms`);
-  return content;
 }
 
 // ── Parse JSON générique (extrait la réponse LLM, tolérant aux ```json``` et texte parasite) ─
