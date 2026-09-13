@@ -104,6 +104,8 @@ Content-Type: application/json
   "contextName": "detailsDevis",
   "callbackUrl": "http://localhost:3000/worker-response",
 
+  /* "ia" vaut null quand XSpro n'a aucune clé à prêter ; un champ "canal": "mcp"
+     accompagne alors le payload — cf. la section plus bas. */
   "ia": {
     "apiKey":    "sk-xxxxxxxxxxxx",
     "endpoint":  "https://albert.api.etalab.gouv.fr/v1/chat/completions",
@@ -204,8 +206,43 @@ Le Worker n'a rien à faire de tout cela : il consomme le bloc `ia` tel quel. `p
 d'ailleurs pas déduit du nom de la clé de configuration mais de l'URL de l'`endpoint` — d'où
 un `provider: "albert"` alors que la configuration s'appelle `config_hf`.
 
-Enfin, si **aucun** des deux canaux n'est actif, XSpro n'appelle pas le Worker : il interrompt
-la demande et l'annonce à l'utilisateur, plutôt que d'émettre un payload avec un `ia` vide.
+### Quand XSpro n'a aucune clé à prêter — `ia: null` et le marqueur `canal`
+
+> **Révision du contrat (13/09/2026)** — deux champs, et rien d'autre ne change.
+
+Si **aucun** des deux canaux IA n'est actif, XSpro distingue désormais deux cas :
+
+- **la vue n'est pas traitée par le Worker** (`isExportConfigurable !== true`) — il interrompt
+  la demande et l'annonce à l'utilisateur, comme avant : ni le Worker ni le circuit local ne
+  pourraient aboutir ;
+- **la vue est traitée par le Worker** — il appelle quand même, avec :
+
+```jsonc
+{
+  "ia":    null,      // aucune clé à prêter
+  "canal": "mcp"      // ajouté UNIQUEMENT dans ce cas
+}
+```
+
+Le sens du couple : « je n'ai pas de clé à te prêter, débrouille-toi avec ton propre canal ».
+Le Worker est en effet autonome de ce côté-là — Claude le remplit par le canal MCP, sans
+qu'aucune clé ne lui soit prêtée (cf. [`CANAL_MCP.md`](./CANAL_MCP.md)).
+
+**Ce que le Worker en fait**, à la création de la session :
+
+| Payload | Canal de la session |
+|---|---|
+| `canal: "mcp"` présent | **forcé** en MCP — pour cette session seulement, sans faire mémoire |
+| absent | le dernier canal **choisi par l'utilisateur** ; jamais de réalignement sur `api` |
+
+Le forçage est nécessaire : sans lui, la session naîtrait sur le chemin clé API, avec une zone
+de prompt visible, un bloc `ia` vide, et aucune façon d'aboutir. Et il ne fait pas mémoire :
+que XSpro soit sans clé à un instant donné ne dit rien de la façon dont l'utilisateur veut
+travailler ensuite.
+
+Le Worker tolère un `ia` absent ou vide partout ailleurs : `resolveProvider` se replie sans
+rien signaler quand il n'y a rien à résoudre, et l'UI grise l'option « Clé API » du sélecteur
+« Remplissage » en disant pourquoi.
 
 ### Clés spécifiques de `workerConfig`
 
