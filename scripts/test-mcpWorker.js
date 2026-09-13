@@ -153,7 +153,7 @@ function attendre(ms) { return new Promise((r) => setTimeout(r, ms)); }
         JSON.stringify(f.etat.reponses.filter((x) => x.id === undefined || x.id === null)));
 
     const outils = (liste.result && liste.result.tools) || [];
-    verifier('tools/list renvoie des outils', outils.length === 6, 'n=' + outils.length);
+    verifier('tools/list renvoie des outils', outils.length === 7, 'n=' + outils.length);
     verifier('chaque outil a un nom, une description et un schéma',
         outils.every((o) => o.name && o.description && o.inputSchema),
         outils.filter((o) => !(o.name && o.description && o.inputSchema)).map((o) => o.name).join(','));
@@ -172,6 +172,11 @@ function attendre(ms) { return new Promise((r) => setTimeout(r, ms)); }
     verifier('« écrire » annonce que c\'est une proposition soumise à l\'utilisateur',
         !!(ecrireCellules && /PROPOSITION/.test(ecrireCellules.description)),
         ecrireCellules ? 'description sans mention' : 'outil absent');
+    const anomalie = outils.find((o) => o.name === 'worker_signaler_anomalie');
+    verifier('« signaler une anomalie » annonce qu\'il n\'écrit rien dans la grille',
+        !!(anomalie && /BÊTA/.test(anomalie.description) && /RIEN dans la grille/.test(anomalie.description)),
+        anomalie ? 'description sans mention' : 'outil absent');
+
     const contexte = outils.find((o) => o.name === 'worker_contexte');
     verifier('« contexte » renvoie vers le briefing avant d\'écrire',
         !!(contexte && /BRIEFING/.test(contexte.description)),
@@ -324,8 +329,9 @@ async function allerRetour(dejaJoignable) {
             ctx && ctx.colonnes.map((c) => c.cle).join(','));
         verifier('les lignes portent un _id', !!(ctx && ctx.lignes.every((l) => l._id !== undefined)),
             ctx && JSON.stringify(ctx.lignes[0]));
-        verifier('le briefing est celui de l\'IA à clé API',
-            !!(ctx && typeof ctx.briefing === 'string' && ctx.briefing.length > 1000),
+        verifier('le briefing porte les consignes métier de la vue',
+            !!(ctx && typeof ctx.briefing === 'string' && ctx.briefing.length > 1000
+               && /== RÈGLES ==|== RÈGLES DE CONSTRUCTION/.test(ctx.briefing)),
             ctx && 'briefing = ' + (ctx.briefing ? ctx.briefing.length : 0) + ' caractères');
 
         // 4b. Non-régression du chemin clé API : worker_contexte emprunte
@@ -390,11 +396,104 @@ async function allerRetour(dejaJoignable) {
             listerExports().length === exportsAvant.length,
             'avant ' + exportsAvant.length + ', après ' + listerExports().length);
 
+        // 10. Le rapport d'anomalies (phase bêta) : un journal pour le
+        //     développeur, et RIEN dans la grille.
+        const wsAvant = JSON.stringify(ws.recus);
+        const journalAvant = lignesJournal();
+        const ano = donnees(await f.outil('worker_signaler_anomalie', {
+            sessionId: payload.sessionId,
+            gravite: 'mineure',
+            description: 'Essai automatique du harnais — cette entrée est attendue.',
+            elements: { origine: 'test-mcpWorker' },
+        }));
+        verifier('worker_signaler_anomalie consigne dans le journal',
+            !!(ano && ano.consigne === true && ano.journal), JSON.stringify(ano));
+        verifier('l\'outil rend la phrase exacte à reprendre dans le rapport',
+            !!(ano && /Rapport d'activité mis à jour/.test(ano.phraseARapporter || '')),
+            ano && String(ano.phraseARapporter));
+        verifier('le journal a bien gagné une ligne',
+            lignesJournal() === journalAvant + 1, `avant ${journalAvant}, après ${lignesJournal()}`);
+        await attendre(200);
+        verifier('signaler une anomalie ne pousse RIEN vers la grille',
+            JSON.stringify(ws.recus) === wsAvant, JSON.stringify(ws.recus));
+
+        // 11. Les consignes servies sur TOUTES les vues.
+        await verifierBriefings(f);
+
         ws.fermer();
         f.fermer();
     } finally {
         if (worker) { try { worker.kill(); } catch (_) {} }
     }
+}
+
+// ── Les briefings, sur les six vues ───────────────────────────────────────────
+// Ce que Claude reçoit comme consignes métier. Deux invariants comptent :
+//   - le contrat de réponse de l'IA par clé API (« Réponds UNIQUEMENT avec un
+//     tableau JSON valide... ») ne doit JAMAIS arriver ici, il dit l'inverse de ce
+//     qu'il faut faire ;
+//   - la correspondance avec les outils doit toujours être là.
+// Le premier protège d'une dérive silencieuse : si un futur remaniement de
+// buildSystemPrompt renommait la section, le repli cesserait de la couper sans
+// que rien ne le signale. C'est ce test qui doit échouer, pas le canal.
+async function verifierBriefings(f) {
+    titre('Briefings');
+
+    const MARQUEUR_FORMAT   = '== FORMAT DE RÉPONSE ==';
+    const MARQUEUR_COLONNES = '== COLONNES ==';
+    const dossier = path.join(RACINE, 'standalone');
+    const fichiers = fs.readdirSync(dossier).filter((n) => /^standalone-payload-/.test(n));
+
+    let deLaVue = 0;
+    let duRepli = 0;
+    const fautifs = [];
+    const tailles = [];
+
+    for (let i = 0; i < fichiers.length; i++) {
+        const payload = JSON.parse(fs.readFileSync(path.join(dossier, fichiers[i]), 'utf8'));
+        delete payload._origin;                       // vue telle qu'une session XSpro la voit
+        payload.sessionId = `${payload.contextName}_brief_${i}_${Date.now()}`;
+        const corps = JSON.stringify(payload);
+        const rp = await requete({ method: 'POST', path: '/process', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(corps) } }, corps);
+        if (rp.code !== 200) { fautifs.push(`${payload.contextName} : POST /process ${rp.code}`); continue; }
+
+        const base  = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, briefing: false }));
+        const modes = ((base && base.modesDisponibles) || []).map((m) => m.id);
+
+        for (const mode of (modes.length ? modes : [undefined])) {
+            const c  = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, mode }));
+            const b  = (c && c.briefing) || '';
+            const ou = `${payload.contextName}/${mode || '—'}`;
+
+            if (c && c.briefingSource === 'vue') deLaVue++; else duRepli++;
+            tailles.push(b.length);
+
+            if (b.includes(MARQUEUR_FORMAT))           fautifs.push(`${ou} : porte encore le FORMAT DE RÉPONSE`);
+            if (/Réponds UNIQUEMENT/.test(b))          fautifs.push(`${ou} : dit encore de répondre en JSON`);
+            if (b.includes(MARQUEUR_COLONNES))         fautifs.push(`${ou} : reprend la liste des colonnes, déjà servie structurée`);
+            if (!b.includes('== COMMENT RÉPONDRE ==')) fautifs.push(`${ou} : sans la correspondance des outils`);
+            if (!b.trim())                             fautifs.push(`${ou} : briefing vide`);
+        }
+    }
+
+    verifier('aucun briefing ne porte le contrat de réponse de la clé API', fautifs.length === 0, fautifs.join(' | '));
+    verifier('les deux vues reprises servent leurs consignes courtes', deLaVue === 4, `vue=${deLaVue}, repli=${duRepli}`);
+    verifier('les vues non reprises passent par le repli', duRepli > 0, `repli=${duRepli}`);
+    verifier('aucun briefing ne dépasse 8 000 caractères',
+        tailles.every((t) => t <= 8000), 'max = ' + Math.max(...tailles));
+
+    console.log('  (' + tailles.length + ' briefings, de ' + Math.min(...tailles) + ' à ' + Math.max(...tailles) + ' caractères)');
+}
+
+// Journal d'anomalies du jour (phase bêta) — même nom que celui construit par
+// mcpChannel.js, pour compter ses lignes avant et après.
+function lignesJournal() {
+    const d = new Date();
+    const jour = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+        return fs.readFileSync(path.join(RACINE, 'logs', `anomalies-${jour}.jsonl`), 'utf8')
+            .split('\n').filter((l) => l.trim()).length;
+    } catch (_) { return 0; }
 }
 
 function listerExports() {

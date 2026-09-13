@@ -29,11 +29,45 @@ même nom de base : `formulaireListeQuestions.js` ↔ `formulaireListeQuestions.
 | `reglesPostProcess`, `exportFormat` | `promptsSuggeres`, `formatReponse` (base + par mode) |
 | `postProcessDefaults`, `postProcessMerge` | `historique` (limite de conservation) |
 | `validateCellEdit`, `getInvalidFields`, `getMissingFields` | `slots` (policy de cycle de vie, base + par mode) |
-| `computeIndexRefSideEffects`, `computeChampsRestreints` | — |
+| `computeIndexRefSideEffects`, `computeChampsRestreints` | `mcp` (consignes du canal MCP, base + par mode) |
 
 Règle simple pour trancher un cas ambigu futur : **si ça peut se lire comme une
 instruction ou une donnée de configuration figée, ça va en JSON ; si ça a besoin
 d'un `if`/d'une boucle/d'un calcul, ça reste en JS.**
+
+### 2bis. Le bloc `mcp` — un second jeu de prompts
+
+`systemPrompt`, `regles`, `modele` et `formatReponse` s'adressent à **l'IA par clé
+API** : un modèle de puissance limitée, joignable par une seule requête sans
+dialogue possible. D'où leur longueur, leurs rappels, et leur contrat de réponse
+en JSON.
+
+Le bloc **`mcp`** s'adresse au **canal MCP**, où c'est Claude qui écrit par outils
+et peut dialoguer (cf. `doc/CANAL_MCP.md`). Il ne reprend que les règles métier et
+les exemples — ni liste de colonnes (servie structurée par `worker_contexte`), ni
+consigne de format, ni garde-fou écrit pour compenser la faiblesse du modèle.
+
+```jsonc
+"mcp": { "mission": "…", "regles": ["…"], "exemple": "…" }
+```
+
+Deux différences à connaître :
+
+- **Il se compose au lieu de se remplacer.** Racine et mode sont fusionnés champ
+  par champ, et les `regles` sont **concaténées** — la vue porte le commun, le mode
+  le spécifique. C'est l'inverse de la règle du §3, et c'est voulu : le
+  remplacement total est ce qui oblige à recopier dans chaque mode ce qui vaut pour
+  la vue (voir §8, l'encart `VOCABULAIRE` dupliqué).
+- **Les deux jeux divergent, et c'est assumé.** Une règle métier qui change doit
+  être portée aux deux endroits. Un test compare mot pour mot ce que reçoit la clé
+  API avant et après toute modification (`npm run test:mcp:e2e`).
+
+État : `detailsDevis` et `formulaireListeQuestions` sont repris. Les quatre autres
+vues passent par un repli mécanique — leur prompt clé API, amputé de la section
+`== FORMAT DE RÉPONSE ==` et de `== COLONNES ==`.
+
+⚠ `mergePromptFields` (`viewResolver.js`) est une **liste fermée de 5 clés**. Un
+champ prompt ajouté au JSON sans y être nommé est ignoré **sans erreur**.
 
 ## 3. Chargement et fusion
 

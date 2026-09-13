@@ -18,7 +18,16 @@
     "                        ce reglage ne fixe que le point de depart. Mettre 'mcp' si",
     "                        on travaille surtout avec Claude : il peut alors preparer",
     "                        une session sans que la grille ait ete ouverte.",
-    "mcp.actif             : false ferme completement le canal de pilotage."
+    "mcp.actif             : false ferme completement le canal de pilotage.",
+    "",
+    "beta.rapportAnomalies : instrument de PHASE BETA. Demande a Claude de consigner",
+    "                        dans logs/anomalies-AAAA-MM-JJ.jsonl ce qui cloche du cote",
+    "                        des donnees fournies par XSpro (contradictions avec la",
+    "                        realite, libelle de colonne qui ne correspond pas au",
+    "                        contenu, regle metier intenable). Destine au developpeur,",
+    "                        pas a l'utilisateur : rien n'est ecrit dans la grille, et",
+    "                        Claude se contente d'une phrase signalant que le journal a",
+    "                        ete alimente. Mettre false pour couper."
   ],
 
   "port": 8888,
@@ -30,6 +39,7 @@
 
   "canalParDefaut": "api",
   "mcp": { "actif": true },
+  "beta": { "rapportAnomalies": true },
 
   "contexts": {
     "listeBlanche": ["detailsDevis","formulaireGetDetailsTravaux","formulaireGetDetailsFichesTechniques","formulaireListeQuestions","formulaireGetDetailsFacturationClient","formulaireGetDetailsAF"],

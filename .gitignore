@@ -30,3 +30,6 @@ release/
 
 # Misc
 *.pem
+
+# Journal d'anomalies du canal MCP (phase beta) — donnees d'execution
+logs/

@@ -59,24 +59,79 @@ Déclaration, dans `.mcp.json` à la racine :
 { "mcpServers": { "worker": { "command": "node", "args": ["tools/mcp-worker/server.js"] } } }
 ```
 
-## Les six outils
+## Les sept outils
 
 | Outil | Ce qu'il fait |
 |---|---|
 | `worker_sessions` | Les grilles ouvertes, ce que XSpro a demandé, les modes, si c'est inscriptible |
-| `worker_contexte` | Colonnes du mode, lignes avec leur `_id`, et le **briefing** — les consignes métier exactes de l'IA à clé API |
+| `worker_contexte` | Colonnes du mode, lignes avec leur `_id`, et le **briefing** — les règles métier de la vue et ses exemples |
 | `worker_ecrire_cellules` | Pose des valeurs : plusieurs lignes, plusieurs colonnes, un appel |
 | `worker_inserer_lignes` | Ajoute des lignes (chemin du bouton « + Ligne »), rend les `_id` créés |
 | `worker_supprimer_lignes` | Marque des lignes à supprimer (chemin du bouton « ✂️ ») |
 | `worker_terminer` | Clôt le lot : statut `paused`, grille redessinée, rapport affiché |
+| `worker_signaler_anomalie` | **Phase bêta** — consigne dans un journal, pour le développeur, ce qui cloche dans les données reçues |
 
 Les lignes se désignent par leur **`_id`** (stable toute la session), jamais par leur position :
 la traduction en index se fait au moment d'écrire, si bien qu'un déplacement ou un ajout fait
 par l'utilisateur entre deux lots est sans conséquence.
 
-Le **briefing** vient de `llmClient.buildPromptPreview()` : c'est le system prompt que
-recevrait l'IA à clé API pour le mode demandé. Les deux canaux travaillent donc avec les mêmes
-règles métier, sans que `llmClient.js` ait été modifié.
+## Le briefing : deux jeux de prompts, et pourquoi
+
+Le **briefing** est ce que Claude reçoit comme consignes métier. Il vient, par ordre de
+priorité :
+
+1. du bloc **`mcp`** du JSON pairé de la vue (`views/<vue>.json`) — des consignes courtes,
+   écrites pour ce canal ;
+2. à défaut, du prompt système de l'IA à clé API, **amputé** de ce qui ne vaut que pour elle.
+
+Pourquoi deux jeux plutôt qu'un. Les prompts de la clé API ont été écrits pour un modèle de
+puissance limitée, joignable par une seule requête sans dialogue possible. Ils sont donc longs,
+méfiants, répétitifs — et se terminent par un contrat de réponse : *« Réponds UNIQUEMENT avec
+un tableau JSON valide […] Pas de texte avant ni après. »* Par MCP, c'est l'inverse qu'il faut
+faire : appeler des outils, et parler à l'utilisateur. Les reprendre tels quels revenait à
+donner une consigne fausse et à payer quelque 8 000 caractères de garde-fous devenus sans
+objet. Mesuré sur les six vues : le briefing est passé de 4 221–17 778 caractères à
+3 250–5 449, et de 9 395 à 3 653 sur `detailsDevis/décomposition`. (La consigne de la phase
+bêta ci-dessous en rajoute ~950, portant l'intervalle servi aujourd'hui à 4 202–6 401.)
+
+**Les prompts de la clé API ne sont pas touchés**, et la divergence est assumée : les deux
+lecteurs n'ont ni la même puissance, ni le même canal. Une règle métier qui change doit donc
+être portée aux deux endroits — un test compare mot pour mot, avant et après, ce que reçoit
+la clé API.
+
+### Le bloc `mcp`
+
+À la racine du JSON pairé **et** par mode :
+
+```jsonc
+"mcp": {
+  "mission": "2 à 5 lignes : ce que Claude fait sur cette vue, dans ce mode.",
+  "regles":  ["une phrase par règle métier", "..."],
+  "exemple": "un appel d'outil, montrant la forme attendue"
+}
+```
+
+Contrairement aux quatre autres champs prompt, qui se **remplacent** en bloc, celui-ci se
+**compose** : la racine porte ce qui vaut pour toute la vue, le mode ajoute son spécifique, et
+les règles sont concaténées. C'est délibéré — la règle du remplacement total oblige sinon à
+recopier dans chaque mode ce qui vaut pour la vue, et c'est précisément ce qui a produit
+l'encart `VOCABULAIRE` dupliqué quatre fois dans `detailsDevis`.
+
+Ce qu'un bloc `mcp` ne reprend pas : la liste des colonnes (`worker_contexte` la sert déjà,
+structurée, avec les types et les valeurs admises), les consignes de format, et les garde-fous
+écrits pour un modèle faible. Ce qu'il garde : les valeurs stockées exactes, les invariants,
+les arbitrages métier, et les exemples.
+
+**Attention** — `mergePromptFields` (`viewResolver.js`) est une **liste fermée** : un champ
+prompt qui n'y est pas nommé est ignoré sans erreur. Ajouter une clé au JSON pairé sans
+l'ajouter là donne un fichier qui a l'air correct et qui ne sert à rien.
+
+### Le repli
+
+Pour une vue sans bloc `mcp` : le prompt de la clé API, coupé à partir de
+`== FORMAT DE RÉPONSE ==` (toujours en dernière position), débarrassé de `== COLONNES ==`, et
+suivi de la correspondance avec les outils. Utilisable immédiatement, sans relecture — mais ce
+n'est pas l'état visé : une vue reprise à la main dit les choses en trois fois moins.
 
 ## Ce qu'une écriture MCP fait exactement
 
@@ -105,6 +160,36 @@ produirait une saisie manuelle :
 
 Les colonnes inconnues et les `_id` introuvables sont **écartés et rapportés** dans la réponse :
 sans cela, une faute de frappe créerait un champ fantôme expédié à XSpro.
+
+## Phase bêta — le rapport d'anomalies
+
+Pendant la bêta, Claude est le seul à voir en vrai ce que XSpro envoie au Worker. Un septième
+outil, `worker_signaler_anomalie`, lui permet de consigner ce qui ne tient pas debout : des
+données qui contredisent la réalité de l'affaire, un libellé de colonne qui ne décrit pas son
+contenu, une règle métier intenable, une valeur attendue absente d'une liste de choix, une
+colonne masquée par un mode alors qu'elle serait nécessaire.
+
+**Ce journal s'adresse au développeur, pas à l'utilisateur.** L'outil n'écrit rien dans la
+grille et n'émet aucun message WebSocket. La consigne donnée à Claude lui interdit d'expliquer
+l'anomalie dans la grille : s'il en a signalé au moins une, il ajoute à son rapport de fin
+cette phrase, et rien d'autre à ce sujet —
+
+> Rapport d'activité mis à jour — voir le fichier log correspondant.
+
+L'utilisateur averti sait ainsi qu'il y a eu un souci, et transmet le fichier.
+
+**Où** : `logs/anomalies-AAAA-MM-JJ.jsonl`, à côté de `exports/`, dans le dossier de données du
+Worker (créé au premier signalement, ignoré par git). Une ligne JSON par anomalie —
+horodatage, gravité (`mineure` / `genante` / `bloquante`), session, vue, mode, origine, canal,
+description, et les éléments en cause en forme libre.
+
+**Interrupteur** : `worker-config.json` → `"beta": { "rapportAnomalies": false }` coupe à la
+fois l'outil et la consigne dans le briefing. Le coût de cette consigne est d'environ
+950 caractères par briefing, ce qui est la raison d'être de l'interrupteur.
+
+À trancher avant de figer : garde-t-on le mécanisme une fois la bêta finie, et si oui, que
+devient le journal — rotation, purge, remontée automatique ? Le bandeau en tête de
+`mcpChannel.js` pose la question à l'endroit où on la relira.
 
 ## Garde-fous
 

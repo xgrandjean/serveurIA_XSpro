@@ -62,6 +62,7 @@ let WORKER_CONFIG = {
   contexts: { listeBlanche: [], listeNoire: [] },
   mcp: { actif: true },
   canalParDefaut: 'api',
+  beta: { rapportAnomalies: true },
 };
 
 if (fs.existsSync(WORKER_CONFIG_FILE)) {
@@ -84,6 +85,8 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
       // réglage ne fixe que le point de départ. 'mcp' permet à Claude de préparer
       // une session sans que personne ait ouvert la grille.
       canalParDefaut: raw.canalParDefaut === 'mcp' ? 'mcp' : 'api',
+      // Instruments de phase bêta — cf. le bandeau en tête de mcpChannel.js.
+      beta: { rapportAnomalies: raw.beta?.rapportAnomalies !== false },
     };
     // console.log(`[Worker] Config chargee : port=${WORKER_CONFIG.port}`);
   } catch (e) {
@@ -144,7 +147,12 @@ app.use(express.json({ limit: '10mb' }));
 // doivent jamais recevoir Access-Control-Allow-Origin, sinon n'importe quelle
 // page ouverte dans le navigateur de l'utilisateur pourrait écrire dans sa
 // grille. Toute la logique est dans mcpChannel.js.
-installMcpChannel(app, { SM, wsSend, actif: WORKER_CONFIG.mcp.actif });
+installMcpChannel(app, {
+  SM, wsSend,
+  actif:            WORKER_CONFIG.mcp.actif,
+  dataRoot:         DATA_ROOT,
+  rapportAnomalies: WORKER_CONFIG.beta.rapportAnomalies,
+});
 
 // Fichiers statiques publics (UI)
 if (!fs.existsSync(PUBLIC_DIR)) {

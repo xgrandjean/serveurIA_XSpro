@@ -155,10 +155,11 @@ const OUTILS = [
         description:
             'Tout ce qu\'il faut pour remplir une grille : les colonnes du mode de travail '
           + '(avec leur type et, le cas échéant, les seules valeurs admises), les lignes avec '
-          + 'leur _id, les informations de l\'affaire, et le « briefing » — les consignes '
-          + 'métier exactes que recevrait l\'IA à clé API pour ce mode. LIRE LE BRIEFING '
-          + 'AVANT D\'ÉCRIRE : il porte les règles de la vue. L\'appeler une fois par session, '
-          + 'puis le rappeler avec briefing:false pour relire seulement les lignes.',
+          + 'leur _id, les informations de l\'affaire, et le « briefing » — les règles métier '
+          + 'de la vue et les exemples, suivis de la correspondance entre ces règles et les '
+          + 'outils. LIRE LE BRIEFING AVANT D\'ÉCRIRE : les règles d\'une vue ne se devinent '
+          + 'pas. L\'appeler une fois par session, puis le rappeler avec briefing:false pour '
+          + 'relire seulement les lignes.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -273,6 +274,40 @@ const OUTILS = [
             required: ['sessionId'],
         },
         verbe: 'terminer',
+    },
+    {
+        name: 'worker_signaler_anomalie',
+        description:
+            'PHASE BÊTA — consigne, dans un journal destiné au développeur du Worker, quelque '
+          + 'chose qui ne tient pas debout dans ce qu\'on t\'a donné : des données qui '
+          + 'contredisent la réalité de l\'affaire, un libellé de colonne qui ne décrit pas ce '
+          + 'qu\'elle contient, une règle impossible à respecter, une valeur attendue absente '
+          + 'd\'une liste de choix, une colonne dont tu aurais besoin et que le mode masque. '
+          + 'N\'écrit RIEN dans la grille et n\'interrompt rien : signale, puis continue avec ce '
+          + 'que tu as. Ce journal ne s\'adresse pas à l\'utilisateur — ne lui explique pas '
+          + 'l\'anomalie ; ajoute seulement à ton rapport de fin la phrase que cet outil te rend '
+          + 'dans « phraseARapporter », et rien d\'autre à ce sujet.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sessionId:   SESSION_ID,
+                description: {
+                    type: 'string',
+                    description: 'Ce que tu as constaté, en clair, et en quoi cela cloche. Écris-le pour quelqu\'un qui n\'a pas la session sous les yeux.',
+                },
+                gravite: {
+                    type: 'string',
+                    enum: ['mineure', 'genante', 'bloquante'],
+                    description: 'mineure : gênant mais sans effet sur le résultat. genante (défaut) : il a fallu contourner. bloquante : le travail demandé n\'est pas faisable en l\'état.',
+                },
+                elements: {
+                    description: 'Facultatif : ce sur quoi porte le constat — clés de colonnes, _id de lignes, valeurs fautives. Forme libre.',
+                },
+                mode: { type: 'string', description: 'Mode de travail concerné, si la question s\'y rapporte.' },
+            },
+            required: ['sessionId', 'description'],
+        },
+        verbe: 'anomalie',
     },
 ];
 

@@ -27,6 +27,53 @@
 
 'use strict';
 
+const fs   = require('fs');
+const path = require('path');
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── PHASE BÊTA — rapport d'anomalies ─────────────────────────────────────────
+//
+// Ce qui suit est un instrument de mise au point, pas une fonctionnalité pour
+// l'utilisateur. Pendant la bêta, Claude est le seul à voir en vrai ce que XSpro
+// envoie réellement au Worker : il est donc bien placé pour signaler ce qui
+// cloche — des données qui contredisent la réalité de l'affaire, un libellé de
+// colonne qui ne décrit pas son contenu, une règle métier intenable, une valeur
+// attendue absente d'une liste de choix.
+//
+// Ces constats vont dans un journal destiné au DÉVELOPPEUR, jamais dans la
+// grille : aucun message WebSocket n'est poussé, et Claude se contente d'une
+// phrase disant que le journal a été alimenté. L'utilisateur averti sait qu'il y
+// a eu un souci et transmet le fichier ; il n'a pas à lire un diagnostic
+// technique au milieu de son devis.
+//
+// À trancher avant de figer quoi que ce soit : garde-t-on le mécanisme une fois
+// la bêta finie, et si oui, que devient le journal — rotation, purge, remontée
+// automatique ? En attendant, il se coupe sans toucher au code, par
+// worker-config.json → "beta": { "rapportAnomalies": false }.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// La phrase EXACTE que Claude doit reprendre dans son rapport, et rien de plus.
+// Elle est volontairement sobre : elle avertit sans inquiéter ni expliquer.
+const PHRASE_ANOMALIE = 'Rapport d\'activité mis à jour — voir le fichier log correspondant.';
+
+const GRAVITES = ['mineure', 'genante', 'bloquante'];
+
+const CONSIGNE_ANOMALIES = `== SIGNALER CE QUI CLOCHE (phase bêta) ==
+Le Worker est en rodage, et tu es le seul à voir en vrai ce que XSpro lui envoie.
+Si ce qu'on te donne ne tient pas debout — des données qui contredisent la réalité de l'affaire, un libellé de colonne qui ne décrit pas ce qu'elle contient, une règle impossible à respecter, une valeur attendue qui ne figure dans aucune liste de choix, une colonne dont tu aurais besoin et que le mode masque — appelle worker_signaler_anomalie et décris le fait tel que tu l'as constaté.
+Ne t'interromps pas pour autant : signale, puis fais de ton mieux avec ce que tu as.
+Ce journal est destiné au développeur du Worker, pas à l'utilisateur. Ne lui explique pas l'anomalie, elle ne le concerne pas — il transmettra le fichier. Si et seulement si tu as signalé au moins une anomalie, ajoute à ton rapport de fin cette phrase, et rien d'autre à ce sujet :
+« ${PHRASE_ANOMALIE} »`;
+
+/**
+ * Un fichier par jour, à côté de exports/, dans le dossier de données du Worker.
+ */
+function fichierAnomalies(dataRoot) {
+  const d = new Date();
+  const jour = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return path.join(dataRoot, 'logs', `anomalies-${jour}.jsonl`);
+}
+
 // ── Garde-fou réseau ──────────────────────────────────────────────────────────
 // Le serveur écoute sur toutes les interfaces avec un CORS permissif (cf.
 // server.js) : sans ces trois filtres, n'importe quelle page web ouverte chez
@@ -37,6 +84,153 @@ const IP_LOCALE = /^(?:::1|::ffff:127\.|127\.)/;
 const GESTE_CANAL_FERME =
   'Le canal MCP est désactivé dans worker-config.json ("mcp": { "actif": false }). '
   + 'Le réactiver, puis relancer le Worker.';
+
+// ── Le briefing ───────────────────────────────────────────────────────────────
+// Ce que Claude reçoit comme consignes métier. Deux sources possibles :
+//
+//   1. le bloc `mcp` du JSON pairé de la vue (views/<vue>.json) — des consignes
+//      COURTES, écrites pour ce canal : les règles et les exemples, rien de plus ;
+//   2. à défaut, le prompt système de l'IA par clé API, amputé de ce qui ne vaut
+//      que pour elle.
+//
+// Pourquoi deux jeux de prompts. Ceux de la clé API ont été écrits pour un modèle
+// de puissance limitée, joignable par une seule requête sans dialogue possible :
+// ils sont longs, méfiants, et se terminent par un contrat de réponse en JSON —
+// « Réponds UNIQUEMENT avec un tableau JSON valide [...] Pas de texte avant ni
+// après ». Par MCP, c'est exactement l'inverse qu'il faut faire : appeler des
+// outils, et parler à l'utilisateur. Reprendre ces prompts tels quels revenait à
+// donner une consigne fausse et à payer ~8 000 caractères de garde-fous devenus
+// sans objet. Les prompts de la clé API restent donc intouchés, et la divergence
+// entre les deux jeux est assumée (cf. doc/CANAL_MCP.md).
+
+const MARQUEUR_FORMAT   = '== FORMAT DE RÉPONSE ==';
+const MARQUEUR_COLONNES = '== COLONNES ==';
+const MODELE_MAX        = 3;   // lignes-modèle de XSpro reprises dans le briefing
+
+// Écrit une fois pour toutes les vues : la traduction du contrat d'actions du
+// chemin clé API en appels d'outils.
+const COMMENT_REPONDRE = `== COMMENT RÉPONDRE ==
+Tu n'écris pas de JSON : tu remplis la grille avec les outils.
+- Modifier des lignes existantes → worker_ecrire_cellules, un seul appel pour tout le lot, en ne posant que les champs que tu changes.
+- Ajouter des lignes → worker_inserer_lignes. Le « _apres » des règles est l'argument « apres » : un seul pour tout le lot, les lignes gardant l'ordre où tu les écris.
+- Retirer des lignes → worker_supprimer_lignes.
+- Quand tu as fini → worker_terminer, dont l'argument « rapport » est l'endroit où t'adresser à l'utilisateur.
+Une colonne à choix accepte aussi bien sa « valeur » que son « label ».
+Tes écritures sont des propositions : l'utilisateur les valide une à une dans la grille, et c'est lui seul qui renvoie le résultat à XSpro.`;
+
+// Ajouté au repli SEULEMENT : les prompts de la clé API renvoient à un bloc de
+// données nommé « DONNÉES ACTUELLES », qui n'existe que sur ce chemin-là. Une vue
+// reprise à la main n'emploie plus ce terme, la précision y serait du bruit.
+const RAPPEL_DONNEES_ACTUELLES =
+  '\n« DONNÉES ACTUELLES », dans les règles ci-dessus, désigne le tableau « lignes » de cette même réponse ; les « _id » y sont les mêmes.';
+
+/**
+ * Retire une section `== TITRE ==` et son contenu, jusqu'au titre suivant.
+ */
+function retirerSection(texte, marqueur) {
+  const i = texte.indexOf(marqueur);
+  if (i === -1) return texte;
+  const j = texte.indexOf('\n== ', i + marqueur.length);
+  return j === -1 ? texte.slice(0, i) : texte.slice(0, i) + texte.slice(j + 1);
+}
+
+/**
+ * Compose le bloc `mcp` de la vue et celui du mode.
+ *
+ * CHAMP PAR CHAMP, et les règles CONCATÉNÉES (celles de la vue, puis celles du
+ * mode) — là où les quatre autres champs prompt se remplacent en bloc. C'est
+ * délibéré : la règle du remplacement total oblige à recopier dans chaque mode ce
+ * qui vaut pour toute la vue, et c'est précisément ce qui a produit les encarts
+ * VOCABULAIRE dupliqués quatre fois dans detailsDevis (~7 500 caractères pour
+ * ~2 300 d'information réelle). Ici, la vue porte le commun, le mode porte le
+ * spécifique, et rien n'est écrit deux fois.
+ */
+function composerBlocMcp(racine, duMode) {
+  if (!racine && !duMode) return null;
+  const listeDe = (r) => (Array.isArray(r) ? r : (r ? [String(r)] : []));
+  return {
+    mission: duMode?.mission ?? racine?.mission ?? null,
+    regles:  [...listeDe(racine?.regles), ...listeDe(duMode?.regles)],
+    exemple: duMode?.exemple ?? racine?.exemple ?? null,
+  };
+}
+
+/**
+ * Rend le bloc `mcp` d'une vue : mission, règles, exemple.
+ */
+function rendreBlocMcp(bloc, session, colonnes) {
+  const parts = [];
+
+  if (bloc.mission) parts.push(String(bloc.mission).trim());
+
+  if (bloc.regles.length) {
+    parts.push('== RÈGLES ==\n' + bloc.regles.map(r => '- ' + String(r).trim()).join('\n'));
+  }
+
+  if (bloc.exemple) {
+    const e = typeof bloc.exemple === 'string' ? bloc.exemple.trim() : JSON.stringify(bloc.exemple, null, 2);
+    parts.push('== EXEMPLE ==\n' + e);
+  }
+
+  // Les lignes-modèle viennent du payload XSpro (data.modele) et non des fichiers
+  // de vue, où le champ `modele` est null partout. Projetées sur les colonnes du
+  // mode, comme le fait buildSystemPrompt — mais PLAFONNÉES : la grille contient
+  // déjà de vraies lignes, servies dans `lignes`, qui illustrent bien mieux les
+  // habitudes de l'affaire en cours que des exemples génériques. Trois suffisent à
+  // montrer la forme ; le chemin clé API, lui, les envoie toutes (il n'a pas de
+  // tour de dialogue pour en redemander).
+  const modele = session.data?.modele;
+  if (Array.isArray(modele) && modele.length) {
+    const lignes = modele.slice(0, MODELE_MAX).map((m) => {
+      const o = {};
+      for (const c of colonnes) o[c.cle] = m[c.cle] === undefined ? '' : m[c.cle];
+      return o;
+    });
+    const titre = modele.length > MODELE_MAX
+      ? `== EXEMPLES DE LIGNES FOURNIS PAR XSPRO (${MODELE_MAX} sur ${modele.length}) ==`
+      : '== EXEMPLES DE LIGNES FOURNIS PAR XSPRO ==';
+    parts.push(titre + '\n' + JSON.stringify(lignes, null, 2));
+  }
+
+  parts.push(COMMENT_REPONDRE);
+  return parts.join('\n\n');
+}
+
+/**
+ * Repli, pour une vue qui n'a pas encore de bloc `mcp` : le prompt système de
+ * l'IA par clé API, amputé de ce qui ne vaut que pour elle. Utilisable tout de
+ * suite, sans que personne ait eu à relire quoi que ce soit — mais ce n'est pas
+ * l'état visé : une vue reprise à la main dit les choses en trois fois moins.
+ */
+async function briefingReplie(session, modeId) {
+  const llmClient = require('./llmClient');
+
+  // buildPromptPreview lit session.activeMode (comme le fait l'aperçu de l'UI) :
+  // on le positionne puis on le RESTAURE — l'UI s'en sert pour plan:validate,
+  // l'écraser silencieusement changerait son prochain envoi.
+  const memo = session.activeMode;
+  session.activeMode = modeId;
+  let systeme;
+  try {
+    const apercu = await llmClient.buildPromptPreview(session, null, 'act', []);
+    systeme = apercu.system;
+  } finally {
+    session.activeMode = memo;
+  }
+
+  // 1. Couper le contrat de réponse : il exige du JSON et rien d'autre, soit
+  //    l'inverse de ce qu'il faut faire ici. Toujours en dernière position — une
+  //    assertion du harnais le vérifie sur chaque vue au repli, pour qu'un futur
+  //    remaniement de buildSystemPrompt se voie au test et non à l'usage.
+  const iFormat = systeme.indexOf(MARQUEUR_FORMAT);
+  if (iFormat !== -1) systeme = systeme.slice(0, iFormat);
+
+  // 2. Retirer la liste des colonnes : worker_contexte la sert déjà, structurée,
+  //    avec les types et les valeurs admises de chaque colonne.
+  systeme = retirerSection(systeme, MARQUEUR_COLONNES);
+
+  return systeme.trimEnd() + '\n\n' + COMMENT_REPONDRE + RAPPEL_DONNEES_ACTUELLES;
+}
 
 /**
  * Monte le canal sur l'application Express.
@@ -49,7 +243,9 @@ const GESTE_CANAL_FERME =
  */
 function installMcpChannel(app, deps) {
   const { SM, wsSend } = deps;
-  const actif = deps.actif !== false;
+  const actif            = deps.actif !== false;
+  const dataRoot         = deps.dataRoot || __dirname;
+  const rapportAnomalies = deps.rapportAnomalies !== false;   // cf. bandeau bêta
 
   // Statuts dans lesquels une écriture a un sens. Sont exclus :
   //   planning/acting  — l'IA par clé API travaille, deux sources écriraient les
@@ -295,23 +491,26 @@ function installMcpChannel(app, deps) {
       pendingCount:     SM.countPendingRows(session),
     };
 
-    // Briefing : le system prompt EXACT que recevrait l'IA par clé API pour ce
-    // mode (règles métier, format, modèle de lignes). C'est ce qui garantit que
-    // les deux canaux travaillent avec les mêmes consignes. On ne prend que
-    // `system` : `full[1]` redonne les lignes en CSV, doublon de `lignes`.
+    // Briefing : les consignes métier de la vue (cf. en tête de fichier).
     if (args.briefing !== false) {
-      const llmClient = require('./llmClient');
-      // buildPromptPreview lit session.activeMode (comme le fait l'aperçu de
-      // l'UI) : on le positionne puis on le RESTAURE — l'UI s'en sert pour
-      // plan:validate, l'écraser silencieusement changerait son prochain envoi.
-      const memo = session.activeMode;
-      session.activeMode = modeId;
-      try {
-        const apercu = await llmClient.buildPromptPreview(session, null, 'act', []);
-        sortie.briefing = apercu.system;
-      } finally {
-        session.activeMode = memo;
+      const bloc = composerBlocMcp(
+        session.effectiveWorkerConfig?.mcp || null,
+        (modeId && session.modes?.[modeId]?.mcp) || null,
+      );
+
+      if (bloc) {
+        sortie.briefing       = rendreBlocMcp(bloc, session, colonnes);
+        sortie.briefingSource = 'vue';
+      } else {
+        sortie.briefing       = await briefingReplie(session, modeId);
+        sortie.briefingSource = 'repli';
       }
+
+      // Phase bêta — cf. le bandeau en tête de fichier. Ajouté ici, au seul
+      // endroit où le briefing est servi, plutôt que dans chacune des deux
+      // sources : le jour où l'on coupe le drapeau, la consigne disparaît des
+      // douze combinaisons d'un coup.
+      if (rapportAnomalies) sortie.briefing += '\n\n' + CONSIGNE_ANOMALIES;
     }
 
     return sortie;
@@ -549,6 +748,60 @@ function installMcpChannel(app, deps) {
     return { marquees: connus.length, ignorees, ...etatSession(session) };
   }
 
+  // ── Verbe : anomalie (phase bêta) ───────────────────────────────────────────
+  // Cf. le bandeau en tête de fichier. Écrit dans un journal, jamais dans la
+  // grille — et n'émet DÉLIBÉRÉMENT aucun wsSend.
+  function verbeAnomalie(args) {
+    if (!rapportAnomalies) {
+      return {
+        erreur: 'Le rapport d\'anomalies est coupé sur ce Worker ("beta": { "rapportAnomalies": false } '
+          + 'dans worker-config.json). Rien n\'a été consigné.',
+        codeHttp: 409,
+      };
+    }
+
+    // Volontairement sans exigence de canal ni de statut : consigner n'écrit rien
+    // dans la grille, et une anomalie peut très bien se constater en simple
+    // lecture. La refuser pour une question de canal reviendrait à perdre
+    // l'information au moment précis où elle vaut le plus.
+    const r = resoudre(args, false);
+    if (r.erreur) return r;
+    const { session } = r;
+
+    const description = typeof args.description === 'string' ? args.description.trim() : '';
+    if (!description) {
+      return { erreur: 'args.description attendu : ce que tu as constaté, en clair.', codeHttp: 400 };
+    }
+
+    const entree = {
+      horodatage:  new Date().toISOString(),
+      gravite:     GRAVITES.includes(args.gravite) ? args.gravite : 'genante',
+      sessionId:   session.sessionId,
+      contextName: session.contextName,
+      mode:        args.mode || session.activeMode || null,
+      origine:     session.origin || 'xspro',
+      canal:       session.canal  || 'api',
+      description,
+      // Ce sur quoi porte le constat : clés de colonnes, _id de lignes, valeurs
+      // fautives. Libre de forme — c'est au développeur de le lire, pas au code.
+      elements:    args.elements === undefined ? null : args.elements,
+    };
+
+    const fichier = fichierAnomalies(dataRoot);
+    try {
+      fs.mkdirSync(path.dirname(fichier), { recursive: true });
+      fs.appendFileSync(fichier, JSON.stringify(entree) + '\n', 'utf-8');
+    } catch (e) {
+      return { erreur: `Journal d'anomalies inaccessible : ${e.message}`, codeHttp: 500 };
+    }
+
+    console.log(`[MCP] Anomalie consignée (${entree.gravite}) — ${session.contextName} : ${description.slice(0, 120)}`);
+
+    // On rend la phrase exacte à reprendre : Claude n'a pas à la retenir, et elle
+    // reste ainsi identique d'une session à l'autre.
+    return { consigne: true, journal: fichier, phraseARapporter: PHRASE_ANOMALIE };
+  }
+
   // ── Verbe : terminer ────────────────────────────────────────────────────────
   // L'équivalent de onDone : statut PAUSED (= en attente de relecture humaine) et
   // re-rendu complet de la grille. `session.rows = updatedRows` de onDone est sans
@@ -581,6 +834,7 @@ function installMcpChannel(app, deps) {
     inserer:   verbeInserer,
     supprimer: verbeSupprimer,
     terminer:  verbeTerminer,
+    anomalie:  verbeAnomalie,
   };
 
   // ── Route ───────────────────────────────────────────────────────────────────

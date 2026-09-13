@@ -105,9 +105,13 @@ function loadPairedJson(workerConfig) {
 }
 
 /**
- * Fusionne les 4 champs prompt déclaratifs d'un JSON pairé (racine ou entrée de
+ * Fusionne les 5 champs prompt déclaratifs d'un JSON pairé (racine ou entrée de
  * mode) sur un objet MANIFEST/MODE du .js. Même règle que resolveManifestField :
  * absent/null côté JSON = pas de surcharge, on garde la valeur .js telle quelle.
+ *
+ * ⚠ LISTE FERMÉE : un champ prompt qui n'est pas nommé ici est ignoré en silence,
+ *   sans erreur ni avertissement. Ajouter un champ au JSON pairé sans l'ajouter
+ *   ici donne un fichier qui a l'air correct et qui ne sert à rien.
  *
  * @param {Object} base    — MANIFEST ou entrée MODES[modeId] du .js (jamais muté)
  * @param {Object|null} jsonSection — racine du JSON pairé, ou jsonConfig.modes[modeId]
@@ -121,6 +125,12 @@ function mergePromptFields(base, jsonSection) {
     regles:          jsonSection.regles          ?? base.regles,
     promptsSuggeres: jsonSection.promptsSuggeres ?? base.promptsSuggeres,
     formatReponse:   jsonSection.formatReponse   ?? base.formatReponse,
+    // Consignes courtes destinées au canal MCP — { mission, regles, exemple }.
+    // Jeu de prompts distinct de celui de l'IA par clé API, et non une variante
+    // du précédent : les deux lecteurs n'ont ni la même puissance, ni le même
+    // canal (cf. doc/CANAL_MCP.md). Absent = la vue n'a pas été reprise, le canal
+    // se rabat sur le prompt clé API amputé (cf. mcpChannel.js, briefingMcp).
+    mcp:             jsonSection.mcp             ?? base.mcp,
   };
 }
 
@@ -354,6 +364,9 @@ function resolveEffectiveWorkerConfig(session) {
     export:          effectiveExport,
     editionParActions: effectiveEditionParActions,
     formatReponse:     effectiveFormatReponse,
+    // Consignes courtes du canal MCP (cf. mergePromptFields). Pas de repli sur
+    // workerConfig : XSpro n'en envoie pas et n'a pas à en connaître l'existence.
+    mcp:               mf.mcp ?? null,
     champsMultiligne: mf.champsMultiligne ?? workerConfig.champsMultiligne ?? [],
     champsArray:     mf.champsArray ?? workerConfig.champsArray ?? [],
     // Déclare les champs array dont les valeurs sont des indices numériques référençant
