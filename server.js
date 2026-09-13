@@ -96,6 +96,37 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
 
 const PORT = WORKER_CONFIG.port;
 
+// ── Mémoire du canal de remplissage ───────────────────────────────────────────
+// Le dernier canal CHOISI PAR L'UTILISATEUR (sélecteur « Remplissage » de la
+// grille), conservé d'une session à l'autre et d'un lancement à l'autre — l'exe
+// est relancé à chaque ouverture de XSpro, une mémoire en RAM ne durerait qu'une
+// séance.
+//
+// Seul un choix explicite l'alimente. Une session que XSpro force en MCP (cf.
+// POST /process) décide pour ELLE-MÊME et ne l'écrit pas : que XSpro n'ait pas de
+// clé à prêter à un instant donné ne dit rien de la façon dont l'utilisateur veut
+// travailler ensuite.
+//
+// Fichier purement local au Worker : il ne relie rien à XSpro.
+const CANAL_FILE = path.join(DATA_ROOT, '.worker-canal.json');
+
+let dernierCanalChoisi = WORKER_CONFIG.canalParDefaut;
+try {
+  const memo = JSON.parse(fs.readFileSync(CANAL_FILE, 'utf-8'));
+  if (memo.canal === 'mcp' || memo.canal === 'api') dernierCanalChoisi = memo.canal;
+} catch { /* absent ou illisible → canalParDefaut, comportement d'origine */ }
+
+function memoriserCanal(canal) {
+  dernierCanalChoisi = canal;
+  try {
+    fs.writeFileSync(CANAL_FILE, JSON.stringify({ canal, modifieLe: new Date().toISOString() }, null, 2));
+  } catch (e) {
+    // Sans effet sur la session en cours : elle a déjà basculé. Seule la mémoire
+    // entre deux lancements est perdue, ce n'est pas une raison d'échouer.
+    console.warn(`[Worker] Mémoire du canal non écrite : ${e.message}`);
+  }
+}
+
 // ── Verrou anti-double-instance ───────────────────────────────────────────────
 const LOCK_FILE = path.join(DATA_ROOT, '.worker.lock');
 
@@ -311,9 +342,23 @@ app.post('/process', async (req, res) => {
 
   // Canal de remplissage : 'api' (IA par clé API) ou 'mcp' (Claude). Un seul à la
   // fois — l'UI masque les sections de l'autre, et le serveur refuse l'entrée de
-  // celui qui n'est pas choisi (cf. 'canal:set' et mcpChannel.js). Point de départ
-  // seulement : l'utilisateur bascule depuis la grille.
-  session.canal = WORKER_CONFIG.canalParDefaut;
+  // celui qui n'est pas choisi (cf. 'canal:set' et mcpChannel.js).
+  //
+  // Deux règles, tenant au contrat de XSpro (cf. aiQuery.js) :
+  //   - payload.canal === 'mcp' — XSpro n'a AUCUNE clé API à prêter (il envoie
+  //     alors ia: null) et ajoute ce marqueur : on force, sinon la session naîtrait
+  //     avec une zone de prompt visible, un bloc ia vide, et aucune façon
+  //     d'aboutir. Le forçage vaut pour CETTE session seulement, il n'alimente pas
+  //     la mémoire ;
+  //   - sinon — on garde le dernier canal choisi par l'utilisateur. On ne s'aligne
+  //     PAS sur 'api' : que XSpro dispose d'une clé ne dit rien de la façon dont
+  //     l'utilisateur veut travailler.
+  //
+  // Le forçage est inconditionnel, même si le canal MCP est fermé
+  // (mcp.actif: false) : la session ne serait de toute façon remplissable par
+  // personne, et le canal répond alors par un diagnostic juste — « désactivé dans
+  // worker-config.json, le réactiver » — au lieu d'une erreur de LLM sans rapport.
+  session.canal = payload.canal === 'mcp' ? 'mcp' : dernierCanalChoisi;
 
   // Résolution du MANIFEST hook vue → session.effectiveWorkerConfig
   // Fait une seule fois ici, consommé par WS init et llmClient.js
@@ -450,6 +495,10 @@ wss.on('connection', (ws, req) => {
        // Canal de remplissage actif — pilote le masquage côté client (cf. grid.js
        // appliquerCanal) : la zone de prompt ou le panneau MCP, jamais les deux.
        canal:        session.canal || 'api',
+       // XSpro n'envoie aucun bloc `ia` quand il n'a pas de clé à prêter : le
+       // canal « clé API » est alors une voie sans issue pour cette session, et le
+       // client grise l'option plutôt que de laisser l'utilisateur s'y engager.
+       apiDisponible: !!session.ia?.endpoint,
        workerConfig: session.effectiveWorkerConfig,
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},
@@ -625,6 +674,9 @@ async function handleUIMessage(session, msg) {
         break;
       }
       session.canal = vise;
+      // Choix explicite de l'utilisateur : c'est LE seul geste qui fait mémoire
+      // pour les sessions suivantes (cf. CANAL_FILE).
+      memoriserCanal(vise);
       console.log(`[WS] Canal de remplissage → ${vise} pour ${session.sessionId}`);
       wsSend(session, { type: 'canal', canal: vise });
       break;
@@ -790,7 +842,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
       break;
     }
 
@@ -985,8 +1037,9 @@ function startStandaloneMode() {
   // fichier payload (y compris les anciens fichiers sans clé _origin).
   session.origin = 'standalone';
 
-  // Canal de remplissage — même logique qu'en mode serveur (cf. POST /process).
-  session.canal = WORKER_CONFIG.canalParDefaut;
+  // Canal de remplissage — pas de marqueur ici, le mode autonome n'a pas de XSpro
+  // en face : on reprend le dernier canal choisi (cf. POST /process).
+  session.canal = dernierCanalChoisi;
 
   // Résolution du MANIFEST hook vue (même logique qu'en mode serveur)
   resolveEffectiveWorkerConfig(session);

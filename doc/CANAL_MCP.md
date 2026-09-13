@@ -27,15 +27,41 @@ refusés hors canal `api` ; les verbes d'écriture MCP sont refusés hors canal 
 de **lecture** restent toujours autorisés, pour que Claude puisse voir l'état d'une session et
 expliquer pourquoi il ne peut pas écrire.
 
-Le canal de départ des nouvelles sessions vient de `worker-config.json` :
+## Qui décide du canal d'une session neuve
 
-```json
-"canalParDefaut": "api"     // ou "mcp"
-```
+Deux règles, et une mémoire.
 
-Régler `"mcp"` permet à Claude de préparer une session **sans que la grille ait été ouverte** :
-`wsSend` ne fait rien quand personne n'écoute, mais les valeurs sont bien posées dans la
-session, et l'`init` les transmet à l'ouverture.
+**XSpro le dit quand il n'a rien à prêter.** Depuis la révision du contrat `/process`
+(`XSpro/src/aiView/aiQuery.js`), XSpro envoie `ia: null` **et** un marqueur `canal: "mcp"` au
+premier niveau du corps, exactement lorsqu'aucun canal IA n'est actif de son côté sur une vue
+que le Worker sait traiter. Le Worker **force** alors le canal MCP : sans cela la session
+naîtrait avec une zone de prompt visible, un bloc `ia` vide, et aucune façon d'aboutir.
+
+Ce forçage vaut pour **cette session seulement**. Il ne fait pas mémoire : que XSpro n'ait pas
+de clé à prêter à un instant donné ne dit rien de la façon dont l'utilisateur veut travailler.
+
+**Sinon, on garde le dernier canal choisi par l'utilisateur.** On ne s'aligne surtout pas sur
+`api` par réflexe : qu'une session arrive avec une clé n'est pas une raison de ramener le
+Worker sur le chemin clé API si son utilisateur travaille avec Claude.
+
+**La mémoire** vit dans `.worker-canal.json`, à côté de `.worker.lock`, dans le dossier de
+données — purement local au Worker, il ne relie rien à XSpro. Elle est lue **une fois au
+démarrage** (la variable en mémoire fait foi ensuite) et écrite **uniquement** sur un
+basculement explicite du sélecteur « Remplissage ». Fichier absent ou illisible →
+`worker-config.json` → `"canalParDefaut"`, qui ne fixe donc plus que le tout premier départ.
+
+Régler `"canalParDefaut": "mcp"` reste utile sur un poste neuf : il permet à Claude de préparer
+une session **sans que la grille ait été ouverte** — `wsSend` ne fait rien quand personne
+n'écoute, mais les valeurs sont bien posées dans la session, et l'`init` les transmet à
+l'ouverture.
+
+**Quand XSpro n'a pas de clé et que le canal MCP est fermé** (`mcp.actif: false`), le forçage a
+lieu quand même. La session n'est de toute façon remplissable par personne, et le canal répond
+alors par un diagnostic juste — « désactivé dans worker-config.json, le réactiver » — au lieu
+d'une erreur de LLM sans rapport avec la cause.
+
+Sur une session forcée, l'option « Clé API » du sélecteur est **grisée**, avec la raison en
+info-bulle : il n'y a pas de clé, s'y engager ne mènerait nulle part.
 
 ## Les deux pièces
 

@@ -77,6 +77,7 @@
    champsRestreints: {},       // { [champ]: { [valeurType]: [valeursAutorisees] } } — restreint les dropdowns selon le type de la ligne (jamais 'type' lui-même)
    champsNonApplicables: {},   // { [valeurType]: [champs] } — champs hors sujet pour ce type : grisés ET non éditables (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES)
    canal:         'api',       // 'api' | 'mcp' — qui pré-remplit la grille (cf. appliquerCanal)
+   apiDisponible: true,        // false quand XSpro n'a prêté aucune clé API pour cette session
    origin:        'xspro',     // 'xspro' | 'standalone' — conditionne le lien ⚙ Config IA
    mcpCellules:   0,           // cellules reçues du canal MCP depuis l'ouverture (affichage seul)
    modes:         {},          // modes de travail (définis par le hook vue)
@@ -288,6 +289,7 @@ function onInit(msg) {
   // reste de l'affichage, pour qu'on ne voie jamais la zone de prompt clignoter sur
   // une session pilotée par Claude.
   state.origin = msg.origin || 'xspro';
+  state.apiDisponible = msg.apiDisponible !== false;
   appliquerCanal(msg.canal);
   const champSession = el('mcp-session-id');
   if (champSession) champSession.textContent = state.sessionId;
@@ -3127,7 +3129,20 @@ function appliquerCanal(canal) {
   const enMcp = state.canal === 'mcp';
 
   const sel = el('canal-selector');
-  if (sel) sel.value = state.canal;
+  if (sel) {
+    sel.value = state.canal;
+    // XSpro n'envoie aucun bloc IA quand il n'a pas de clé à prêter : basculer sur
+    // « Clé API » mènerait à une zone de prompt qui ne peut rien envoyer. On grise
+    // plutôt que de laisser l'utilisateur s'y engager, et on dit pourquoi.
+    const optApi = sel.querySelector('option[value="api"]');
+    if (optApi) {
+      optApi.disabled = !state.apiDisponible;
+      optApi.title    = state.apiDisponible ? '' : 'XSpro n\'a prêté aucune clé API pour cette session.';
+    }
+    sel.title = state.apiDisponible
+      ? 'Qui pré-remplit la grille : l\'IA par clé API, ou Claude via le canal MCP. Un seul à la fois.'
+      : 'XSpro n\'a prêté aucune clé API pour cette session : seul le canal MCP peut la remplir.';
+  }
 
   // Zone de saisie du prompt = chemin clé API ; panneau MCP = chemin Claude.
   if (enMcp) { hide('input-area'); show('panel-mcp'); }

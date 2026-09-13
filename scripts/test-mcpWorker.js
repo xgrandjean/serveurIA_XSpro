@@ -28,6 +28,9 @@ const http      = require('http');
 const RACINE  = path.join(__dirname, '..');
 const FACADE  = path.join(RACINE, 'tools', 'mcp-worker', 'server.js');
 const PAYLOAD = path.join(RACINE, 'standalone', 'standalone-payload-detailsDevis.json');
+// Mémoire du dernier canal choisi (cf. server.js). Le harnais la manipule, donc
+// il la restaure — même nom de fichier, même dossier de données.
+const CANAL_FILE = path.join(RACINE, '.worker-canal.json');
 const E2E     = process.argv.includes('--e2e');
 
 let PORT = 8888;
@@ -285,6 +288,13 @@ async function allerRetour(dejaJoignable) {
 
     const exportsAvant = listerExports();
 
+    // Le test bascule le canal, ce qui écrit la mémoire du dernier choix de
+    // l'utilisateur. On la rend telle qu'on l'a trouvée : un test ne doit pas
+    // changer le réglage de qui le lance.
+    const memoireAvant = (() => {
+        try { return fs.readFileSync(CANAL_FILE, 'utf8'); } catch (_) { return null; }
+    })();
+
     try {
         // 1. Une session, par le vrai point d'entrée de XSpro.
         const payload = JSON.parse(fs.readFileSync(PAYLOAD, 'utf8'));
@@ -420,11 +430,79 @@ async function allerRetour(dejaJoignable) {
         // 11. Les consignes servies sur TOUTES les vues.
         await verifierBriefings(f);
 
+        // 12. Ce que XSpro annonce, et ce que le Worker en fait.
+        await verifierNegociationCanal(f);
+
         ws.fermer();
         f.fermer();
     } finally {
+        try {
+            if (memoireAvant === null) fs.unlinkSync(CANAL_FILE);
+            else fs.writeFileSync(CANAL_FILE, memoireAvant);
+        } catch (_) { /* rien à restaurer */ }
         if (worker) { try { worker.kill(); } catch (_) {} }
     }
+}
+
+// ── La négociation du canal avec XSpro ────────────────────────────────────────
+// Deux micro-règles du contrat /process (cf. XSpro/src/aiView/aiQuery.js) :
+// marqueur « canal: mcp » présent → on force ; absent → on garde le dernier canal
+// CHOISI PAR L'UTILISATEUR, sans s'aligner sur 'api'. Et un forçage ne fait jamais
+// mémoire : il vaut pour sa session seule.
+async function verifierNegociationCanal(f) {
+    titre('Négociation du canal avec XSpro');
+
+    const payload = JSON.parse(fs.readFileSync(PAYLOAD, 'utf8'));
+    delete payload._origin;
+
+    async function creer(suffixe, avecMarqueur) {
+        const p = { ...payload, sessionId: `canal_${suffixe}_${Date.now()}` };
+        if (avecMarqueur) { p.ia = null; p.canal = 'mcp'; }    // ce que XSpro envoie sans clé à prêter
+        const corps = JSON.stringify(p);
+        await requete({ method: 'POST', path: '/process', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(corps) } }, corps);
+        const s = donnees(await f.outil('worker_sessions', {}));
+        return (s.sessions || []).find((x) => x.sessionId === p.sessionId);
+    }
+    const memoire = () => {
+        try { return JSON.parse(fs.readFileSync(CANAL_FILE, 'utf8')).canal; } catch (_) { return null; }
+    };
+
+    // Le choix se pose par le VRAI geste — le sélecteur de la grille. Écrire le
+    // fichier à la main ne suffirait pas : le Worker le lit une fois au démarrage,
+    // et c'est la variable en mémoire qui fait foi ensuite.
+    const memoireInitiale = memoire();
+    async function choisir(sessionId, canal) {
+        const ws = await connecterUI(sessionId);
+        const obtenu = await ws.basculer(canal);
+        ws.fermer();
+        return obtenu;
+    }
+
+    const reglage = await creer('reglage', false);
+    await choisir(reglage.sessionId, 'api');
+    verifier('le choix de l\'utilisateur est écrit sur disque', memoire() === 'api', 'mémoire = ' + memoire());
+
+    const force = await creer('force', true);
+    verifier('le marqueur de XSpro force le canal MCP',
+        !!(force && force.canal === 'mcp'), force && force.canal);
+    verifier('la session forcée est inscriptible sans aucune bascule manuelle',
+        !!(force && force.ecrivable === true), force && force.raison);
+    verifier('un forçage ne touche PAS la mémoire du choix utilisateur',
+        memoire() === 'api', 'mémoire = ' + memoire());
+
+    const suivante = await creer('suivante', false);
+    verifier('sans marqueur, on reprend le choix de l\'utilisateur',
+        !!(suivante && suivante.canal === 'api'), suivante && suivante.canal);
+
+    // Et l'inverse : l'utilisateur a choisi MCP, XSpro envoie une session avec clé.
+    await choisir(suivante.sessionId, 'mcp');
+    const avecCle = await creer('aveccle', false);
+    verifier('une session avec clé API ne ramène PAS le Worker sur « api »',
+        !!(avecCle && avecCle.canal === 'mcp'), avecCle && avecCle.canal);
+
+    // Remettre le Worker dans l'état trouvé — le fichier ET la variable en
+    // mémoire, que seul le vrai geste remet en place.
+    if (memoireInitiale) await choisir(avecCle.sessionId, memoireInitiale);
 }
 
 // ── Les briefings, sur les six vues ───────────────────────────────────────────

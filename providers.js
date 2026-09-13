@@ -104,7 +104,14 @@ function resolveProvider(ia) {
   }
 
   // 3. Fallback
-  console.warn(`[Providers] Provider inconnu pour endpoint "${ia.endpoint}" — fallback openai`);
+  // L'avertissement ne vaut que s'il y avait quelque chose à résoudre. Une session
+  // en canal MCP arrive sans bloc `ia` — XSpro n'envoie rien quand il n'a pas de
+  // clé à prêter (cf. server.js, POST /process) : il n'y a alors aucun provider
+  // « inconnu », il n'y en a délibérément aucun, et le signaler à chaque connexion
+  // WebSocket ferait passer un fonctionnement normal pour un incident.
+  if (ia.endpoint || ia.provider) {
+    console.warn(`[Providers] Provider inconnu pour endpoint "${ia.endpoint}" — fallback openai`);
+  }
   return { id: 'openai', config: PROVIDERS.openai };
 }
 

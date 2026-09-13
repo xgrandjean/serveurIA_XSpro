@@ -33,3 +33,6 @@ release/
 
 # Journal d'anomalies du canal MCP (phase beta) — donnees d'execution
 logs/
+
+# Memoire du dernier canal de remplissage choisi — etat local au Worker
+.worker-canal.json
