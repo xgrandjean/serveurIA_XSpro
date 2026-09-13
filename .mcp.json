@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "worker": {
+      "command": "node",
+      "args": ["tools/mcp-worker/server.js"]
+    }
+  }
+}

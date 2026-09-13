@@ -96,6 +96,33 @@ a.badge-model:hover {
   background: rgba(255,255,255,.24);
 }
 
+/* ── Sélecteur de canal de remplissage ──────────────────────────────────────── */
+/* Qui PRÉ-remplit la grille : l'IA par clé API, ou Claude via le canal MCP. Un seul
+   à la fois, les sections de l'autre sont masquées (cf. appliquerCanal, grid.js). */
+#canal-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,.72);
+  white-space: nowrap;
+}
+#canal-selector {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+/* Le menu déroulant est rendu par le système sur fond clair : sans cette règle,
+   du blanc sur blanc. */
+#canal-selector option { color: var(--text); background: #fff; }
+
 /* ── Badge statut ───────────────────────────────────────────────────────────── */
 .badge-status {
   font-size: 11px; font-weight: 700;
@@ -277,6 +304,35 @@ a.badge-model:hover {
   gap: 6px;
   background: #fff;
 }
+
+/* ── Panneau du canal MCP ───────────────────────────────────────────────────── */
+/* Prend la place de #input-area quand c'est Claude qui pré-remplit la grille.
+   Porte le numéro de session, dont Claude a besoin et que rien d'autre n'affiche. */
+#panel-mcp {
+  flex-shrink: 0;
+  border-top: 1px solid var(--grey-300);
+  padding: 10px;
+  background: var(--blue-xlight);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+#mcp-titre { font-size: 12px; font-weight: 700; color: var(--blue-dark); }
+#mcp-aide  { font-size: 11px; line-height: 1.45; color: var(--grey-700); margin: 0; }
+#mcp-session-row { display: flex; align-items: center; gap: 6px; }
+#mcp-session-id {
+  flex: 1;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid var(--grey-300);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;          /* un clic sélectionne tout : copie possible sans le bouton */
+}
+#mcp-etat { font-size: 11px; color: var(--text-light); font-style: italic; }
 
 #mode-selector {
   display: flex;

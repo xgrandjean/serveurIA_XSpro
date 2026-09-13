@@ -23,6 +23,16 @@
       <span id="info-affaire"></span>
     </div>
     <div id="header-right">
+      <!-- Canal de remplissage : qui pré-remplit la grille. Un seul à la fois, les
+           sections de l'autre sont masquées (cf. grid.js appliquerCanal). La saisie
+           à la main reste possible dans les deux cas : c'est la grille elle-même. -->
+      <label id="canal-label" title="Qui pré-remplit la grille : l'IA par clé API, ou Claude via le canal MCP. Un seul à la fois.">
+        Remplissage
+        <select id="canal-selector">
+          <option value="api">🤖 Clé API</option>
+          <option value="mcp">🔌 Claude (MCP)</option>
+        </select>
+      </label>
       <a id="lien-config-ia" class="badge-model hidden" href="/ia-config.html" title="Configurer le fournisseur/clé API utilisés en mode standalone">⚙ Config IA</a>
       <span id="model-badge" class="badge-model hidden" title=""></span>
       <span id="status-badge" class="badge-status status-idle">En attente</span>
@@ -108,6 +118,24 @@
           <div style="flex:1"></div>
         </div>
 
+      </div>
+
+      <!-- ── Panneau du canal MCP ───────────────────────────────────────────────
+           Remplace la zone de saisie quand c'est Claude qui pré-remplit. Affiche
+           le numéro de session : Claude en a besoin pour travailler, et rien
+           d'autre ne le montre dans cette page. -->
+      <div id="panel-mcp" class="hidden">
+        <div id="mcp-titre">🔌 Remplissage par Claude</div>
+        <p id="mcp-aide">
+          Donne ce numéro de session à Claude, puis décris-lui le travail dans sa
+          propre fenêtre. Les valeurs arrivent ici au fur et à mesure, en attente
+          de ta relecture — rien n'est renvoyé à XSpro sans toi.
+        </p>
+        <div id="mcp-session-row">
+          <code id="mcp-session-id">—</code>
+          <button id="btn-copy-session" class="btn-tool" title="Copier le numéro de session">📋 Copier</button>
+        </div>
+        <div id="mcp-etat">Aucune écriture reçue pour l'instant.</div>
       </div>
     </aside>
 

@@ -1,0 +1,12 @@
+{
+  "name": "mcp-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Façade MCP du canal de remplissage du AI Worker — traduit les outils MCP en appels au canal local. Aucune dépendance.",
+  "main": "server.js",
+  "bin": { "mcp-worker": "server.js" },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "UNLICENSED"
+}

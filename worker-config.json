@@ -9,7 +9,16 @@
     "Si un contextName est dans les deux listes, listeNoire l'emporte.",
     "",
     "callbackUrl           : URL de callback vers XSpro (si non fourni par XSpro).",
-    "callbackUrlPriority   : si true, le callbackUrl local prime sur celui de XSpro."
+    "callbackUrlPriority   : si true, le callbackUrl local prime sur celui de XSpro.",
+    "",
+    "canalParDefaut        : qui pre-remplit les NOUVELLES sessions — 'api' (l'IA par",
+    "                        cle API, comportement historique) ou 'mcp' (Claude via le",
+    "                        canal de pilotage). L'utilisateur bascule ensuite session",
+    "                        par session avec le selecteur « Remplissage » de la grille ;",
+    "                        ce reglage ne fixe que le point de depart. Mettre 'mcp' si",
+    "                        on travaille surtout avec Claude : il peut alors preparer",
+    "                        une session sans que la grille ait ete ouverte.",
+    "mcp.actif             : false ferme completement le canal de pilotage."
   ],
 
   "port": 8888,
@@ -18,6 +27,9 @@
   "callbackUrlPriority": false,
 
   "autoOpenUI": true,
+
+  "canalParDefaut": "api",
+  "mcp": { "actif": true },
 
   "contexts": {
     "listeBlanche": ["detailsDevis","formulaireGetDetailsTravaux","formulaireGetDetailsFichesTechniques","formulaireListeQuestions","formulaireGetDetailsFacturationClient","formulaireGetDetailsAF"],

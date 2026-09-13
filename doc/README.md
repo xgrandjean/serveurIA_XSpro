@@ -20,6 +20,8 @@ npm install
 | `npm run standalone:formulaireGetDetailsTravaux` | Mode test — fiche de travaux |
 | `npm run electron` | Application Electron |
 | `npm run electron:standalone` | Electron en mode standalone |
+| `npm run test:mcp` | Vérifie le canal MCP : protocole et garde-fous — voir [`CANAL_MCP.md`](./CANAL_MCP.md) |
+| `npm run test:mcp:e2e` | Idem, plus un aller-retour complet sur une vraie session |
 | `npm run build:for-xspro` | Compile `server.js` en exécutable (`pkg`) et le déploie directement dans `../XSpro/assets/model/` — voir [`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md) §6bis |
 
 ## Intégration XSpro
@@ -64,7 +66,14 @@ de la checklist complète avant de livrer un nouvel installateur XSpro : voir
   index.html
   grid.js
   style.css
+/tools/mcp-worker/
+  server.js          façade MCP (hors périmètre du build)
 ```
+
+Trois façons de remplir la grille cohabitent : l'IA par clé API, la saisie à la main, et
+Claude via le canal MCP (`mcpChannel.js` + `tools/mcp-worker/`) — un sélecteur
+« Remplissage » dans l'en-tête choisit laquelle est active. Aucune ne renvoie à XSpro
+sans l'utilisateur. Voir [`CANAL_MCP.md`](./CANAL_MCP.md).
 
 ## Vue : detailsDevis
 

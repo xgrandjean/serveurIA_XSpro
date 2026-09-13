@@ -76,6 +76,9 @@
    selectChoix:   {},
    champsRestreints: {},       // { [champ]: { [valeurType]: [valeursAutorisees] } } — restreint les dropdowns selon le type de la ligne (jamais 'type' lui-même)
    champsNonApplicables: {},   // { [valeurType]: [champs] } — champs hors sujet pour ce type : grisés ET non éditables (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES)
+   canal:         'api',       // 'api' | 'mcp' — qui pré-remplit la grille (cf. appliquerCanal)
+   origin:        'xspro',     // 'xspro' | 'standalone' — conditionne le lien ⚙ Config IA
+   mcpCellules:   0,           // cellules reçues du canal MCP depuis l'ouverture (affichage seul)
    modes:         {},          // modes de travail (définis par le hook vue)
    activeWorkMode: null,       // ID du mode de travail actif (ex: 'decomposition')
    basePromptsSuggeres: null,  // promptsSuggeres originaux (XSpro ou MANIFEST) pour restauration
@@ -143,6 +146,7 @@ function handleWSMessage(msg) {
   switch (msg.type) {
     case 'init':              onInit(msg);                                    break;
     case 'status':            onStatusChange(msg.status);                    break;
+    case 'canal':             onCanalChange(msg.canal);                      break;
     case 'plan':              onPlanReceived(msg.plan);                      break;
     case 'cell:update':       onCellUpdate(msg.rowIndex, msg.cle, msg.value); break;
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
@@ -280,12 +284,19 @@ function onInit(msg) {
 
   console.log('[Payload XSpro]', msg.xsproPayload);
 
+  // Canal de remplissage (cf. server.js session.canal) — pose le masquage AVANT le
+  // reste de l'affichage, pour qu'on ne voie jamais la zone de prompt clignoter sur
+  // une session pilotée par Claude.
+  state.origin = msg.origin || 'xspro';
+  appliquerCanal(msg.canal);
+  const champSession = el('mcp-session-id');
+  if (champSession) champSession.textContent = state.sessionId;
+
   // Lien "Config IA" (⚙, bandeau) : visible seulement en standalone — sans effet et
   // donc sans intérêt sur une session pilotée par XSpro, qui envoie toujours son
   // propre bloc IA (cf. standalone/ia-config.json, server.js startStandaloneMode).
   const lienConfigIa = el('lien-config-ia');
   if (lienConfigIa) {
-    lienConfigIa.classList.toggle('hidden', msg.origin !== 'standalone');
     // Fait suivre l'URL courante (sessionId inclus) pour que le lien "← Retour à la
     // grille" d'ia-config.html puisse revenir à CETTE session, pas à /index.html nu
     // (que grid.js refuse avec "⚠ sessionId manquant dans l'URL.").
@@ -1795,6 +1806,13 @@ state.gridApi.flashCells({ rowNodes: [node], columns: [cle], flashDuration: 150,
   }
   state.updatedCells++;
   updateProgress();
+
+  // En canal MCP il n'y a pas de fil de conversation qui se remplit : ce compteur
+  // est le seul signe visible que Claude travaille.
+  if (state.canal === 'mcp') {
+    state.mcpCellules++;
+    majEtatMcp(`${state.mcpCellules} cellule(s) reçue(s) de Claude.`);
+  }
 }
 
 // ── Restauration de cellule (édition manuelle rejetée par le serveur) ─────────
@@ -2280,6 +2298,24 @@ function bindUI() {
   el('btn-send').addEventListener('click', sendPrompt);
   el('prompt-input').addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'Enter') sendPrompt(); });
   el('prompt-input').addEventListener('input', updateSendButtonState);
+
+  // Canal de remplissage — le serveur fait foi : on lui demande la bascule et on
+  // n'applique le masquage qu'à sa réponse ('canal'). Il peut refuser, par exemple
+  // pendant qu'un run par clé API est en cours.
+  el('canal-selector')?.addEventListener('change', (e) => {
+    sendWS({ type: 'canal:set', canal: e.target.value });
+  });
+
+  el('btn-copy-session')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(state.sessionId);
+      majEtatMcp('Numéro de session copié.');
+    } catch {
+      // Presse-papier refusé (page non sécurisée, permission) : le numéro reste
+      // sélectionnable à la main, on ne fait pas échouer le geste en silence.
+      majEtatMcp('Copie impossible — sélectionne le numéro ci-dessus à la main.');
+    }
+  });
 
   // Mode de travail (work mode) — changement
   el('work-mode-selector').addEventListener('change', (e) => {
@@ -3078,6 +3114,56 @@ function setStatusBadge(cls, label) {
   b.title       = state.modeleIA ? `Modele : ${state.modeleIA}` : '';
 }
 
+// ── Canal de remplissage ──────────────────────────────────────────────────────
+// L'IA par clé API et Claude (canal MCP) sont deux façons de PRÉ-remplir la même
+// grille ; la saisie à la main en est une troisième, toujours disponible — ce
+// n'est pas un « mode », c'est la grille elle-même. Un seul canal automatique est
+// actif à la fois : les sections de l'autre sont masquées ici, et le serveur
+// refuse l'entrée de celui qui n'est pas choisi (cf. server.js 'canal:set' et
+// mcpChannel.js). Sans ce masquage, le panneau de prompt laisserait croire que la
+// clé API est aux commandes alors que c'est Claude qui remplit.
+function appliquerCanal(canal) {
+  state.canal = canal === 'mcp' ? 'mcp' : 'api';
+  const enMcp = state.canal === 'mcp';
+
+  const sel = el('canal-selector');
+  if (sel) sel.value = state.canal;
+
+  // Zone de saisie du prompt = chemin clé API ; panneau MCP = chemin Claude.
+  if (enMcp) { hide('input-area'); show('panel-mcp'); }
+  else       { show('input-area'); hide('panel-mcp'); }
+
+  // Le badge du modèle et le lien ⚙ Config IA ne parlent que de la clé API : les
+  // laisser en mode Claude désignerait un fournisseur qui ne sera pas appelé.
+  updateModelBadge();
+  majLienConfigIa();
+}
+
+// Réponse du serveur à une demande de bascule : lui seul décide (il peut refuser
+// pendant un run par clé API, cf. server.js 'canal:set').
+function onCanalChange(canal) {
+  const avant = state.canal;
+  appliquerCanal(canal);
+  if (state.canal === avant) return;
+
+  addMessage('system', state.canal === 'mcp'
+    ? '🔌 Remplissage par Claude (MCP). La zone de prompt est masquée : l\'IA par clé API ne sera pas appelée pour cette session.'
+    : '🤖 Remplissage par l\'IA à clé API. Le canal MCP est fermé pour cette session.');
+}
+
+function majLienConfigIa() {
+  const lien = el('lien-config-ia');
+  if (!lien) return;
+  lien.classList.toggle('hidden', state.origin !== 'standalone' || state.canal === 'mcp');
+}
+
+// État vivant du canal MCP — la contrepartie du fil de conversation pour le
+// chemin clé API : de quoi voir que quelque chose arrive, même grille au repos.
+function majEtatMcp(texte) {
+  const cible = el('mcp-etat');
+  if (cible) cible.textContent = texte;
+}
+
 // Affiche le nom du LLM dans le badge permanent de l'en-tete, des l'ouverture
 // (appele par onInit), et non uniquement en cours de requete. Sans modele connu
 // on cache le badge plutot que d'afficher "🤖 null" — meme repli que
@@ -3085,6 +3171,14 @@ function setStatusBadge(cls, label) {
 function updateModelBadge() {
   const b = el('model-badge');
   if (!b) return;
+  // En canal MCP, aucun appel ne partira vers ce modèle : afficher son nom
+  // désignerait un fournisseur hors jeu (cf. appliquerCanal).
+  if (state.canal === 'mcp') {
+    b.textContent = '';
+    b.title       = '';
+    b.classList.add('hidden');
+    return;
+  }
   if (state.modeleIA) {
     b.textContent = `🤖 ${state.modeleIA}`;
     b.title       = `Modèle IA : ${state.modeleIA}`;

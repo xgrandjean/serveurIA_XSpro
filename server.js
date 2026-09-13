@@ -20,6 +20,7 @@ const SM                                        = require('./sessionManager');
 const { resolveProvider, getSupportedTypes }    = require('./providers');
 const { buildAcceptString }                     = require('./fileTypes');
 const { resolveEffectiveWorkerConfig }          = require('./viewResolver');
+const { installMcpChannel }                     = require('./mcpChannel');
 
 // ── Résolution des chemins ────────────────────────────────────────────────────
 // ASSETS_ROOT : base des fichiers statiques en lecture seule (public/, views/,
@@ -56,7 +57,12 @@ if (STANDALONE_ARG) {
 
 // ── Configuration Worker (worker-config.json) ────────────────────────────────
 const WORKER_CONFIG_FILE = path.join(ASSETS_ROOT, 'worker-config.json');
-let WORKER_CONFIG = { port: 8888, contexts: { listeBlanche: [], listeNoire: [] } };
+let WORKER_CONFIG = {
+  port: 8888,
+  contexts: { listeBlanche: [], listeNoire: [] },
+  mcp: { actif: true },
+  canalParDefaut: 'api',
+};
 
 if (fs.existsSync(WORKER_CONFIG_FILE)) {
   try {
@@ -70,6 +76,14 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
         listeBlanche: Array.isArray(raw.contexts?.listeBlanche) ? raw.contexts.listeBlanche : [],
         listeNoire:   Array.isArray(raw.contexts?.listeNoire)   ? raw.contexts.listeNoire   : [],
       },
+      // Canal MCP : actif sauf refus explicite (cf. mcpChannel.js).
+      mcp: { actif: raw.mcp?.actif !== false },
+      // Canal de remplissage des NOUVELLES sessions : 'api' (l'IA par clé API,
+      // comportement historique) ou 'mcp' (Claude via le canal de pilotage).
+      // L'utilisateur peut basculer session par session depuis la grille ; ce
+      // réglage ne fixe que le point de départ. 'mcp' permet à Claude de préparer
+      // une session sans que personne ait ouvert la grille.
+      canalParDefaut: raw.canalParDefaut === 'mcp' ? 'mcp' : 'api',
     };
     // console.log(`[Worker] Config chargee : port=${WORKER_CONFIG.port}`);
   } catch (e) {
@@ -124,6 +138,13 @@ function isContextAllowed(contextName) {
 // ── Application Express ───────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+
+// ── Canal MCP ─────────────────────────────────────────────────────────────────
+// Monté ICI, donc AVANT le middleware CORS permissif plus bas : ces routes ne
+// doivent jamais recevoir Access-Control-Allow-Origin, sinon n'importe quelle
+// page ouverte dans le navigateur de l'utilisateur pourrait écrire dans sa
+// grille. Toute la logique est dans mcpChannel.js.
+installMcpChannel(app, { SM, wsSend, actif: WORKER_CONFIG.mcp.actif });
 
 // Fichiers statiques publics (UI)
 if (!fs.existsSync(PUBLIC_DIR)) {
@@ -280,6 +301,12 @@ app.post('/process', async (req, res) => {
   // viewResolver.js pour la priorité des promptsSuggeres par mode.
   session.origin = payload._origin === 'standalone' ? 'standalone' : 'xspro';
 
+  // Canal de remplissage : 'api' (IA par clé API) ou 'mcp' (Claude). Un seul à la
+  // fois — l'UI masque les sections de l'autre, et le serveur refuse l'entrée de
+  // celui qui n'est pas choisi (cf. 'canal:set' et mcpChannel.js). Point de départ
+  // seulement : l'utilisateur bascule depuis la grille.
+  session.canal = WORKER_CONFIG.canalParDefaut;
+
   // Résolution du MANIFEST hook vue → session.effectiveWorkerConfig
   // Fait une seule fois ici, consommé par WS init et llmClient.js
   resolveEffectiveWorkerConfig(session);
@@ -412,6 +439,9 @@ wss.on('connection', (ws, req) => {
        sessionId,
        contextName:  session.contextName,
        origin:       session.origin,
+       // Canal de remplissage actif — pilote le masquage côté client (cf. grid.js
+       // appliquerCanal) : la zone de prompt ou le panneau MCP, jamais les deux.
+       canal:        session.canal || 'api',
        workerConfig: session.effectiveWorkerConfig,
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},
@@ -573,8 +603,34 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // L'utilisateur bascule le canal de remplissage (sélecteur « Remplissage »).
+    // Un seul canal actif à la fois : le client masque les sections de l'autre, et
+    // le serveur refuse l'entrée de celui qui n'est pas choisi — ici pour le chemin
+    // clé API (cf. 'prompt:send' ci-dessous), dans mcpChannel.js pour le chemin MCP.
+    case 'canal:set': {
+      const vise = msg.canal === 'mcp' ? 'mcp' : 'api';
+      // Basculer pendant que l'IA travaille laisserait un run sans destination :
+      // les cell:update en vol continueraient d'arriver sur un canal désormais fermé.
+      if ([SM.STATUS.PLANNING, SM.STATUS.ACTING, SM.STATUS.DELIVERING].includes(session.status)) {
+        wsSend(session, { type: 'error', message: '⚠ Changement de canal impossible pendant que le traitement est en cours.' });
+        wsSend(session, { type: 'canal', canal: session.canal });   // rétablit le sélecteur
+        break;
+      }
+      session.canal = vise;
+      console.log(`[WS] Canal de remplissage → ${vise} pour ${session.sessionId}`);
+      wsSend(session, { type: 'canal', canal: vise });
+      break;
+    }
+
     // L'utilisateur lance un prompt (mode Plan ou Act direct)
     case 'prompt:send': {
+      // Défense en profondeur : la zone de prompt est déjà masquée côté client en
+      // canal MCP, mais une session ne doit pas pouvoir être remplie par les deux
+      // sources à la fois — l'utilisateur ne saurait plus d'où vient une valeur.
+      if ((session.canal || 'api') !== 'api') {
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » pour utiliser l\'IA par clé API.' });
+        break;
+      }
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
 
       // Mémoriser le mode actif UI pour plan:validate (qui n'a pas de nouveau activeMode)
@@ -617,6 +673,12 @@ async function handleUIMessage(session, msg) {
 
     // L'utilisateur valide le plan et lance l'exécution
     case 'plan:validate': {
+      // Même garde que 'prompt:send' : un plan élaboré avant une bascule de canal
+      // ne doit pas pouvoir être exécuté par la clé API après coup.
+      if ((session.canal || 'api') !== 'api') {
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » pour exécuter ce plan.' });
+        break;
+      }
       SM.setStatus(session, SM.STATUS.ACTING);
       wsSend(session, { type: 'status', status: SM.STATUS.ACTING });
       try {
@@ -720,7 +782,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
       break;
     }
 
@@ -914,6 +976,9 @@ function startStandaloneMode() {
   // est déjà la source de vérité pour ce chemin, indépendamment du contenu du
   // fichier payload (y compris les anciens fichiers sans clé _origin).
   session.origin = 'standalone';
+
+  // Canal de remplissage — même logique qu'en mode serveur (cf. POST /process).
+  session.canal = WORKER_CONFIG.canalParDefaut;
 
   // Résolution du MANIFEST hook vue (même logique qu'en mode serveur)
   resolveEffectiveWorkerConfig(session);
