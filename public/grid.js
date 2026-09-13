@@ -2316,14 +2316,19 @@ function bindUI() {
   });
 
   el('btn-copy-session')?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(state.sessionId);
-      majEtatMcp('Numéro de session copié.');
-    } catch {
-      // Presse-papier refusé (page non sécurisée, permission) : le numéro reste
-      // sélectionnable à la main, on ne fait pas échouer le geste en silence.
-      majEtatMcp('Copie impossible — sélectionne le numéro ci-dessus à la main.');
-    }
+    const bouton = el('btn-copy-session');
+    const copie  = await copierNumeroSession();
+
+    // La confirmation se met sur le BOUTON, pas seulement dans la ligne d'état en
+    // bas du panneau : celle-ci passe inaperçue, et une copie qu'on ne voit pas
+    // réussir, on la refait — ou pire, on colle l'ancien contenu du presse-papier.
+    const libelle = bouton.textContent;
+    bouton.textContent = copie ? '✓ Copié' : '⚠ Sélectionné';
+    setTimeout(() => { bouton.textContent = libelle; }, 1600);
+
+    majEtatMcp(copie
+      ? 'Numéro de session copié.'
+      : 'Le navigateur a refusé la copie — le numéro est sélectionné, fais Ctrl+C.');
   });
 
   // Mode de travail (work mode) — changement
@@ -3177,6 +3182,35 @@ function majLienConfigIa() {
   const lien = el('lien-config-ia');
   if (!lien) return;
   lien.classList.toggle('hidden', state.origin !== 'standalone' || state.canal === 'mcp');
+}
+
+// Copie le numéro de session dans le presse-papier.
+//
+// navigator.clipboard peut être refusé sans prévenir — permission non accordée,
+// page ouverte autrement qu'en localhost, navigateur embarqué. On se rabat alors
+// sur la sélection du texte puis l'ancienne commande de copie, qui passe là où
+// l'API moderne échoue ; et si elle échoue aussi, le numéro reste au moins
+// sélectionné, un Ctrl+C suffit.
+//
+// @returns {Promise<boolean>} true si le presse-papier a réellement été rempli
+async function copierNumeroSession() {
+  try {
+    await navigator.clipboard.writeText(state.sessionId);
+    return true;
+  } catch (_) { /* on tente la voie ancienne ci-dessous */ }
+
+  const champ = el('mcp-session-id');
+  if (!champ) return false;
+  try {
+    const plage = document.createRange();
+    plage.selectNodeContents(champ);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(plage);
+    return document.execCommand('copy');   // déprécié, mais accepté plus largement
+  } catch (_) {
+    return false;
+  }
 }
 
 // État vivant du canal MCP — la contrepartie du fil de conversation pour le
