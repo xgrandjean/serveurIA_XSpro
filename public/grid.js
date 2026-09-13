@@ -403,6 +403,13 @@ function onInit(msg) {
   initGrid(msg.workerConfig.colonnes, state.rows);
 
   addMessage('system', `Données chargées (${state.rows.length} lignes) — prêt.`);
+
+  // Rapport d'un lot MCP déjà passé : Claude a pu remplir cette grille alors que
+  // personne ne l'avait ouverte, et son 'act:done' n'avait alors aucun
+  // destinataire. On le rejoue ici, sinon l'utilisateur découvrirait des lignes
+  // en attente sans savoir qui les a posées ni ce qu'il doit vérifier.
+  if (msg.rapport) addMessage('ai', msg.rapport);
+
   setStatusBadge('connected', 'Prêt');
   setStatusMessage('Prêt');
   setAiRunning(false);

@@ -811,6 +811,13 @@ function installMcpChannel(app, deps) {
     if (r.erreur) return r;
     const { session } = r;
 
+    // Conservé sur la session, et pas seulement poussé : quand Claude a rempli une
+    // grille que personne n'avait ouverte — l'ergonomie même qu'on a voulue —
+    // wsSend n'a aucun destinataire et le rapport se perdrait. C'est pourtant là
+    // que se dit ce qui a été fait et ce qui reste à vérifier. L'init le rejoue à
+    // l'ouverture, comme il rejoue les lignes (cf. server.js).
+    session.dernierRapport = args.rapport || null;
+
     SM.setStatus(session, SM.STATUS.PAUSED);
     wsSend(session, {
       type:          'act:done',

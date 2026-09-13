@@ -499,6 +499,10 @@ wss.on('connection', (ws, req) => {
        // canal « clé API » est alors une voie sans issue pour cette session, et le
        // client grise l'option plutôt que de laisser l'utilisateur s'y engager.
        apiDisponible: !!session.ia?.endpoint,
+       // Rapport du dernier lot MCP, s'il y en a eu un : il a pu être écrit alors
+       // que personne n'avait la grille ouverte, auquel cas wsSend n'avait pas de
+       // destinataire (cf. mcpChannel.js, verbe terminer).
+       rapport:      session.dernierRapport || null,
        workerConfig: session.effectiveWorkerConfig,
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},

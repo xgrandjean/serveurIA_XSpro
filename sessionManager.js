@@ -520,6 +520,7 @@ function resetRows(session) {
   session.llmTurns  = [];
   session.dernierEnvoi = null;   // un reset efface aussi la trace du dernier envoi
   session.currentPlan = null;
+  session.dernierRapport = null;  // le rapport du dernier lot MCP ne décrit plus rien
   setStatus(session, STATUS.CONNECTED);
   console.log(`[SessionManager] Rows réinitialisés : ${session.sessionId}`);
 }

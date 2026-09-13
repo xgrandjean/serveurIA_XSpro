@@ -401,6 +401,15 @@ async function allerRetour(dejaJoignable) {
         await attendre(300);
         verifier('l\'UI a reçu la fin de lot', ws.recus['act:done'] >= 1, JSON.stringify(ws.recus));
 
+        // Le rapport doit survivre à une grille restée fermée : c'est le scénario
+        // même qu'on a voulu — Claude prépare, l'utilisateur découvre ensuite. Une
+        // UI neuve doit le retrouver dans son 'init'.
+        const ws2 = await connecterUI(payload.sessionId);
+        verifier('le rapport est rejoué à l\'ouverture de la grille',
+            !!(ws2.init && /Essai automatique/.test(ws2.init.rapport || '')),
+            ws2.init && String(ws2.init.rapport));
+        ws2.fermer();
+
         // 9. Le point capital : RIEN n'est parti.
         verifier('aucun export n\'a été produit — rien n\'est parti vers XSpro',
             listerExports().length === exportsAvant.length,
