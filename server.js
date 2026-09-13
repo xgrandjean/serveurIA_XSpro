@@ -142,8 +142,11 @@ function isProcessAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+// Ne retire QUE son propre verrou. Sans cette garde, une seconde instance qui
+// s'arrête (port déjà pris) effaçait en partant le verrou de celle qui tourne —
+// et XSpro, qui y lit le PID pour arrêter le serveur, ne trouvait plus personne.
 function cleanupLock() {
-  try { if (fs.existsSync(LOCK_FILE)) fs.unlinkSync(LOCK_FILE); } catch {}
+  try { if (readLockPid() === process.pid) fs.unlinkSync(LOCK_FILE); } catch {}
 }
 
 // ── Résolution des contextes autorisés ───────────────────────────────────────
@@ -1060,61 +1063,135 @@ function startStandaloneMode() {
 }
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
-// Filet de sécurité : si le port est déjà pris (autre instance), message clair
-// au lieu d'une stack trace d'erreur fatale.
-httpServer.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.log('────────────────────────────────────────────');
-    console.log(`ℹ️  Le port ${PORT} est déjà utilisé.`);
-    console.log('    Une instance du Worker est probablement déjà lancée.');
-    console.log('    Cas prévu et géré : cette instance s\'arrête, l\'autre continue de répondre.');
-    console.log('────────────────────────────────────────────');
-    process.exit(0);
-  }
-  console.error(`[Worker] Erreur serveur : ${err.message}`);
-  process.exit(1);
-});
+// Qui décide qu'un Worker tourne déjà ? LE PORT, et lui seul.
+//
+// Le verrou .worker.lock ne peut pas tenir ce rôle : DATA_ROOT change selon le
+// lancement — %APPDATA%\XSpro\serveurIA-data quand XSpro lance l'exe compilé, le
+// dossier des sources quand on tape `node server.js` à la main. Deux instances
+// écrivent alors à deux adresses et sont AVEUGLES l'une à l'autre. Mesuré le
+// 2026-09-13 : le seul verrou présent pointait un PID mort, tandis que le process
+// réellement en écoute n'était inscrit nulle part. Le port, lui, ne ment jamais.
+//
+// Le verrou continue d'être ÉCRIT : XSpro y lit le PID pour arrêter un serveur
+// qu'une autre de ses instances a démarré (src/ipc/ipcAI.js, _readWorkerLockPid).
+// Il renseigne désormais, il ne décide plus.
 
-// Contrôle anti-double-instance (indépendant du port) : si un verrou valide
-// pointe vers un PID encore vivant, on ne relance pas une seconde fois.
-const lockPid = readLockPid();
-if (lockPid && isProcessAlive(lockPid)) {
-  console.log('────────────────────────────────────────────');
-  console.log(`ℹ️  Le Worker tourne déjà (PID ${lockPid}).`);
-  console.log('    Une seule instance suffit — cette instance s\'arrête.');
-  console.log('────────────────────────────────────────────');
-  process.exit(0);
-} else if (lockPid) {
-  // Verrou périmé (crash sans nettoyage) → on le retire avant de redémarrer
-  cleanupLock();
+/** Interroge le port : rend l'identité du Worker en place, ou null (libre, ou autre programme). */
+function interrogerLePort() {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { host: '127.0.0.1', port: PORT, path: '/view-config/', method: 'GET', timeout: 1500 },
+      (res) => {
+        let corps = '';
+        res.on('data', (c) => { corps += c; });
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(corps);
+            resolve(j && j.worker === 'ai-worker' ? j : null);
+          } catch { resolve(null); }
+        });
+      },
+    );
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error',   () => resolve(null));
+    req.end();
+  });
 }
 
-// Nettoyage du verrou à la fermeture (quitter, Ctrl+C, terminaison)
-process.on('exit', cleanupLock);
-process.on('SIGINT',  () => { cleanupLock(); process.exit(0); });
-process.on('SIGTERM', () => { cleanupLock(); process.exit(0); });
+let arretEnCours = false;
 
-httpServer.listen(PORT, () => {
-  // Pose le verrou (PID courant) pour empêcher tout futur double-lancement
-  try { fs.writeFileSync(LOCK_FILE, String(process.pid)); } catch {}
+/**
+ * Passe la main à l'instance en place, au lieu de mourir.
+ *
+ * On ne l'arrête JAMAIS : une grille peut y attendre une validation, et la tuer
+ * court-circuiterait le repli Excel qui garantit qu'une génération ne se perd pas.
+ *
+ * On n'appelle pas non plus sa route /open-ui : elle exige un sessionId et répond
+ * 404 sans lui — elle sert à rattraper une session EN COURS, pas un double
+ * lancement, qui n'en a aucune. Ouvrir la page d'accueil du serveur en place rend
+ * le même service à l'usager.
+ */
+async function passerLaMain(motif) {
+  if (arretEnCours) return;          // httpServer ET wss peuvent signaler la même erreur
+  arretEnCours = true;
+  const uiUrl = `http://localhost:${PORT}/index.html`;
+  console.log('────────────────────────────────────────────');
+  console.log(`ℹ️  Le Worker tourne déjà sur le port ${PORT} (${motif}).`);
+  console.log('    Cette instance s\'arrête ; l\'autre continue de répondre.');
+  // Même réserve que pour l'ouverture d'une session (cf. POST /process) : XSpro pose
+  // AI_WORKER_DISABLE_AUTO_OPEN quand il pilote ce process, parce que le paquet `open`
+  // échoue une fois compilé par pkg — il ouvre alors lui-même. On annonce donc l'adresse
+  // dans tous les cas, et on n'ouvre que si personne d'autre ne s'en charge.
+  const ouvrable = WORKER_CONFIG.autoOpenUI && process.env.AI_WORKER_DISABLE_AUTO_OPEN !== '1';
+  console.log(`    Interface ${ouvrable ? 'ouverte' : 'disponible'} → ${uiUrl}`);
+  console.log('────────────────────────────────────────────');
+  if (ouvrable) await openBrowser(uiUrl);
+  process.exit(0);
+}
 
-  console.log(`============================================`);
-  console.log(`AI Worker  -  http://localhost:${PORT}`);
-  console.log(`Mode : ${IS_STANDALONE ? 'STANDALONE' : 'SERVEUR (ecoute XSpro)'}`);
-  if (IS_STANDALONE) {
-    console.log(`Payload : ${path.basename(STANDALONE_FILE)}`);
+/**
+ * Port pris entre le sondage et le listen — la course est étroite mais réelle.
+ *
+ * C'est ici que la seconde instance mourait : le serveur HTTP émet EADDRINUSE, et
+ * `ws` RÉ-ÉMET cette erreur sur l'instance WebSocketServer, qui n'avait aucun
+ * écouteur. Node levait donc une exception non gérée (code 1, trace complète)
+ * malgré le garde-fou posé sur httpServer. Les DEUX émetteurs doivent être écoutés.
+ */
+async function surEchecDuDemarrage(err) {
+  if (err && err.code === 'EADDRINUSE') {
+    const enPlace = await interrogerLePort();
+    if (enPlace) return passerLaMain('pris de vitesse au démarrage');
+    if (arretEnCours) return;
+    arretEnCours = true;
+    console.error(`[Worker] Le port ${PORT} est occupé par un autre programme — démarrage impossible.`);
+    return process.exit(1);
   }
-  console.log(`============================================`);
+  if (arretEnCours) return;
+  arretEnCours = true;
+  console.error(`[Worker] Erreur serveur : ${err.message}`);
+  process.exit(1);
+}
 
-  // Nettoyage exports anciens (lazy — exceljs peut ne pas être installé au premier lancement)
-  try {
-    const { cleanOldExports } = require('./excelExport');
-    cleanOldExports(7);
-  } catch (e) {
-    console.warn('[Worker] excelExport non disponible au démarrage :', e.message);
-  }
-  if (IS_STANDALONE) startStandaloneMode();
-});
+httpServer.on('error', surEchecDuDemarrage);
+wss.on('error',        surEchecDuDemarrage);
+
+async function demarrer() {
+  const enPlace = await interrogerLePort();
+  if (enPlace) return passerLaMain(`version ${enPlace.version}`);
+
+  // Le port est libre : un verrou qui traîne ne vient de personne d'actif.
+  const perime = readLockPid();
+  if (perime && !isProcessAlive(perime)) cleanupLock();
+
+  // Nettoyage du verrou à la fermeture (quitter, Ctrl+C, terminaison)
+  process.on('exit', cleanupLock);
+  process.on('SIGINT',  () => { cleanupLock(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanupLock(); process.exit(0); });
+
+  httpServer.listen(PORT, () => {
+    // Pose le verrou (PID courant) : c'est par lui que XSpro retrouve ce process
+    try { fs.writeFileSync(LOCK_FILE, String(process.pid)); } catch {}
+
+    console.log(`============================================`);
+    console.log(`AI Worker  -  http://localhost:${PORT}`);
+    console.log(`Mode : ${IS_STANDALONE ? 'STANDALONE' : 'SERVEUR (ecoute XSpro)'}`);
+    if (IS_STANDALONE) {
+      console.log(`Payload : ${path.basename(STANDALONE_FILE)}`);
+    }
+    console.log(`============================================`);
+
+    // Nettoyage exports anciens (lazy — exceljs peut ne pas être installé au premier lancement)
+    try {
+      const { cleanOldExports } = require('./excelExport');
+      cleanOldExports(7);
+    } catch (e) {
+      console.warn('[Worker] excelExport non disponible au démarrage :', e.message);
+    }
+    if (IS_STANDALONE) startStandaloneMode();
+  });
+}
+
+demarrer();
 
 // ── Exports (pour tests unitaires éventuels) ──────────────────────────────────
 module.exports = { deliverResult, wsSend };
