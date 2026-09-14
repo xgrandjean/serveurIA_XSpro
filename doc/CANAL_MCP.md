@@ -67,23 +67,89 @@ info-bulle : il n'y a pas de clé, s'y engager ne mènerait nulle part.
 
 ```
 mcpChannel.js                  la logique, les verbes, les garde-fous  → embarqué dans serveurIA.exe
-tools/mcp-worker/server.js     la façade MCP, qui ne fait que traduire → hors périmètre du build
+mcpStdio.js                    la façade MCP, qui ne fait que traduire → embarqué dans serveurIA.exe
+tools/mcp-worker/server.js     le point d'entrée du dépôt : trois lignes qui appellent demarrer()
 ```
 
 Même séparation que `XSpro/src/agent/agentBridge.js` + `XSpro/tools/mcp-xspro/server.js` : un
 client MCP ne peut rien faire de plus que ce que le canal autorise déjà.
 
-Le dossier `tools/` reste hors du build sans effort particulier : `pkg` ne suit que le graphe
-de `require` de `server.js`, et `scripts/copy-assets-for-xspro.js` a une liste fermée
-(`public`, `views`, `worker-config.json`). **Ne pas l'y ajouter.** En revanche `mcpChannel.js`
-est listé dans `build.files` de `package.json` — cette liste est explicite, un module oublié
-ferait planter l'application packagée au démarrage.
+**Pourquoi la façade vit à la racine.** `pkg` ne suit que le graphe de `require` de
+`server.js` : un module sous `tools/` n'entre pas dans `serveurIA.exe`, et la façade
+n'existerait alors que sur un poste de développement — dépôt cloné, Node installé, client MCP
+ouvert sur le dossier. L'utilisateur, lui, n'a que l'application : il n'aurait aucun moyen de
+brancher Claude, et la grille lui proposerait de copier un numéro de session sans que rien
+puisse le lire. C'est exactement ce qu'a révélé le premier essai de production.
 
-Déclaration, dans `.mcp.json` à la racine :
+Donc : `mcpStdio.js` est requis par `server.js`, et `tools/mcp-worker/server.js` n'est plus
+qu'un point d'entrée pour le dépôt. Le déplacer sous `tools/` le retirerait du build **sans
+aucun message d'erreur**. `mcpStdio.js` est aussi listé dans `build.files` de `package.json`
+— cette liste est explicite, un module oublié ferait planter l'application packagée.
+
+Déclaration, dans `.mcp.json` à la racine — pour le dépôt seulement :
 
 ```json
 { "mcpServers": { "worker": { "command": "node", "args": ["tools/mcp-worker/server.js"] } } }
 ```
+
+## Chez l'utilisateur : `serveurIA.exe --mcp`
+
+L'utilisateur n'installe pas le Worker, il installe XSpro — qui embarque `serveurIA.exe` et le
+copie dans son dossier de données au premier démarrage. Le même exe sert de deux façons :
+
+```
+serveurIA.exe          le Worker : Express, WebSocket, sessions   ← lancé par XSpro
+serveurIA.exe --mcp    la façade MCP sur stdin/stdout             ← lancé par Claude
+```
+
+Les deux processus sont indépendants : la façade ne fait que parler au Worker déjà lancé, par
+le canal HTTP local. On peut donc la brancher, la débrancher et la relancer sans jamais
+toucher aux sessions ouvertes.
+
+Le drapeau est traité **avant les `require`** de `server.js` : dans ce mode, stdout appartient
+au protocole, et rien d'autre ne doit démarrer — ni Express, ni WebSocket, ni verrou.
+
+**Le port.** La façade est lancée par Claude, jamais par XSpro : elle n'hérite pas de
+`AI_WORKER_ASSETS_DIR` et ne peut rien présumer de son voisinage. `racinesConfig()`
+(`mcpStdio.js`) essaie donc, dans l'ordre : cette variable si elle est là, le dossier de l'exe,
+puis `<exe>/serveurIA-data/` — la disposition réelle d'une installation, où XSpro pose l'exe
+dans `userData` et les assets dans ce sous-dossier. À défaut, 8888.
+
+## Le bouton « Connecter Claude »
+
+Reste à inscrire la façade chez Claude. C'est un bouton dans le panneau MCP de la grille, et
+non une commande à taper : `claudeConfig.js` écrit la clé `mcpServers.worker` de
+`~/.claude.json` — même fichier, même entrée que `claude mcp add -s user`.
+
+**Pourquoi c'est le Worker qui inscrit, et pas XSpro.** Lui seul connaît le chemin de sa propre
+façade, et il y a deux cas : l'exe compilé (`process.execPath` + `--mcp`) chez l'utilisateur,
+le point d'entrée du dépôt (`node tools/mcp-worker/server.js`) chez le développeur. Aucun des
+deux ne se devine depuis l'extérieur. Accessoirement, c'est le Worker qui sert la grille : le
+bouton est donc à l'endroit exact où l'utilisateur découvre qu'il lui faut Claude.
+
+**Ce que le panneau montre**, demandé à chaque affichage (`claude:etat`) :
+
+| État | Ce qu'on voit |
+|---|---|
+| branché | ligne verte, pas de bouton |
+| pas inscrit | ligne ambre, « Claude n'est pas branché sur ce poste » + bouton |
+| inscrit ailleurs | ligne ambre, « sur un autre exécutable » + bouton **Rebrancher** |
+| échec de l'écriture | ligne rouge, la cause, **et la commande à taper** |
+
+L'état est relu depuis le fichier après chaque écriture : c'est lui qui peint le panneau, jamais
+le message de retour. Si Claude tournait et a réécrit sa configuration entre temps, l'entrée a
+disparu — et le panneau le dit, au lieu d'annoncer un succès que rien ne confirme.
+
+**Précautions**, parce que ce fichier ne nous appartient pas : il est relu juste avant
+l'écriture, copié en `.claude.json.avant-xspro`, modifié à une seule clé, puis remis en place
+par un renommage atomique. Le reste — projets, historique, préférences — n'est jamais touché.
+
+**Un piège qui vaut d'être dit** : Claude lit sa configuration à l'ouverture d'une session.
+Après le branchement, il faut une fenêtre **neuve** ; celle qui est déjà ouverte ne verra rien.
+
+**Chez l'utilisateur**, le chemin inscrit est celui de la copie dans `userData`
+(`Globals.modelServeurIAExe`), jamais celui des assets : ceux-ci sont packés dans `app.asar`,
+d'où aucun exécutable ne se lance.
 
 ## Les sept outils
 

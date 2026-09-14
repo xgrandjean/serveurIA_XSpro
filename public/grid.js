@@ -148,6 +148,7 @@ function handleWSMessage(msg) {
     case 'init':              onInit(msg);                                    break;
     case 'status':            onStatusChange(msg.status);                    break;
     case 'canal':             onCanalChange(msg.canal);                      break;
+    case 'claude:etat':       majBranchementClaude(msg);                     break;
     case 'plan':              onPlanReceived(msg.plan);                      break;
     case 'cell:update':       onCellUpdate(msg.rowIndex, msg.cle, msg.value); break;
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
@@ -2331,6 +2332,27 @@ function bindUI() {
       : 'Le navigateur a refusé la copie — le numéro est sélectionné, fais Ctrl+C.');
   });
 
+  // Branchement de Claude : le Worker inscrit sa propre façade, la grille ne
+  // fait que demander. Le bouton se rend muet le temps de l'aller-retour — une
+  // inscription lancée deux fois écrirait deux fois le même fichier.
+  el('btn-connect-claude')?.addEventListener('click', () => {
+    const bouton = el('btn-connect-claude');
+    bouton.disabled    = true;
+    bouton.textContent = '⏳ Inscription…';
+    sendWS({ type: 'claude:brancher' });
+  });
+
+  el('btn-disconnect-claude')?.addEventListener('click', () => {
+    const bouton = el('btn-disconnect-claude');
+    bouton.disabled    = true;
+    bouton.textContent = '⏳…';
+    sendWS({ type: 'claude:debrancher' });
+  });
+
+  el('btn-copy-commande')?.addEventListener('click', () => {
+    copierAvecToast(el('mcp-commande-texte').textContent, 'La commande');
+  });
+
   // Mode de travail (work mode) — changement
   el('work-mode-selector').addEventListener('change', (e) => {
     onWorkModeChange(e.target.value || null);
@@ -3157,7 +3179,7 @@ function appliquerCanal(canal) {
   }
 
   // Zone de saisie du prompt = chemin clé API ; panneau MCP = chemin Claude.
-  if (enMcp) { hide('input-area'); show('panel-mcp'); }
+  if (enMcp) { hide('input-area'); show('panel-mcp'); demanderEtatClaude(); }
   else       { show('input-area'); hide('panel-mcp'); }
 
   // Le badge du modèle et le lien ⚙ Config IA ne parlent que de la clé API : les
@@ -3182,6 +3204,78 @@ function majLienConfigIa() {
   const lien = el('lien-config-ia');
   if (!lien) return;
   lien.classList.toggle('hidden', state.origin !== 'standalone' || state.canal === 'mcp');
+}
+
+// ── Branchement de Claude ────────────────────────────────────────────────────
+// Le Worker fait foi : lui seul connaît le chemin de sa propre façade — exe
+// compilé chez l'utilisateur, point d'entrée du dépôt chez le développeur (cf.
+// claudeConfig.js). La grille demande, peint, et ne devine rien.
+let _minuteurBranchement = null;
+
+function demanderEtatClaude() {
+  // Appelé à chaque affichage du panneau, donc parfois avant que la socket soit
+  // ouverte : sendWS se plaindrait à l'écran pour une question de confort.
+  if (state.ws?.readyState !== WebSocket.OPEN) return;
+  sendWS({ type: 'claude:etat' });
+
+  // Un Worker plus ancien que cette page ne connaît pas ce message et ne
+  // répondra jamais — la ligne resterait sur « Vérification… » indéfiniment.
+  // Le cas n'est pas théorique : XSpro rafraîchit les assets et l'exe
+  // séparément, et la copie de l'exe échoue s'il tourne encore (cf. ipcAI.js).
+  clearTimeout(_minuteurBranchement);
+  _minuteurBranchement = setTimeout(() => {
+    const zone = el('mcp-branchement');
+    if (!zone || zone.className !== 'mcp-branchement-inconnu') return;   // une réponse est arrivée
+    el('mcp-branchement-etat').textContent =
+      "Impossible de vérifier le branchement : ce Worker est plus ancien que cette page. "
+      + 'Fermer la grille et relancer XSpro, qui installera la version à jour.';
+  }, 3000);
+}
+
+// Peint l'état du branchement. « message » n'arrive qu'après une inscription :
+// il dit ce qui vient de se passer, les autres champs disent ce qui EST — et
+// c'est sur eux, jamais sur le message, qu'on décide de la couleur.
+function majBranchementClaude(msg) {
+  clearTimeout(_minuteurBranchement);
+  const zone    = el('mcp-branchement');
+  const texte   = el('mcp-branchement-etat');
+  const bouton  = el('btn-connect-claude');
+  const debrancher = el('btn-disconnect-claude');
+  if (!zone || !texte || !bouton) return;
+
+  bouton.disabled    = false;
+  bouton.textContent = msg.obsolete ? '🔌 Rebrancher Claude' : '🔌 Connecter Claude';
+  if (debrancher) { debrancher.disabled = false; debrancher.textContent = 'Débrancher'; }
+
+  if (msg.branche) {
+    zone.className = 'mcp-branchement-ok';
+    texte.textContent = msg.message
+      || 'Claude est branché sur ce poste : il a les outils du Worker.';
+    bouton.classList.add('hidden');
+    // Le retour en arrière n'est offert que là où il a un sens.
+    debrancher?.classList.remove('hidden');
+    montrerCommandeClaude(null);
+    return;
+  }
+
+  zone.className = msg.ok === false ? 'mcp-branchement-echec' : 'mcp-branchement-afaire';
+  bouton.classList.remove('hidden');
+  debrancher?.classList.add('hidden');
+  texte.textContent = msg.message || (msg.obsolete
+    ? 'Claude est inscrit, mais sur un autre exécutable que celui-ci : le rebrancher.'
+    : "Claude n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session.");
+
+  // La commande n'apparaît qu'en cas d'échec. En temps normal le bouton suffit,
+  // et un bloc de texte technique de plus ne ferait qu'inquiéter.
+  montrerCommandeClaude(msg.ok === false ? msg.commande : null);
+}
+
+function montrerCommandeClaude(commande) {
+  const bloc = el('mcp-commande');
+  if (!bloc) return;
+  if (!commande) { bloc.classList.add('hidden'); return; }
+  el('mcp-commande-texte').textContent = commande;
+  bloc.classList.remove('hidden');
 }
 
 // Copie le numéro de session dans le presse-papier.

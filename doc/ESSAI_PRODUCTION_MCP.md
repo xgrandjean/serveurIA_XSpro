@@ -25,6 +25,28 @@ l'ouverture de la grille.
   le code à jour ; pour éprouver la version livrée à XSpro, faire d'abord
   `npm run build:for-xspro`, puis tuer le `serveurIA.exe` resté en mémoire.
 
+## D'abord : brancher Claude (une fois par poste)
+
+Sans ce geste, rien de ce qui suit ne peut marcher — et c'est silencieux : la grille propose un
+numéro de session, Claude reçoit le numéro, et ne dispose d'aucun outil pour en faire quoi que
+ce soit. Le premier essai de production s'est arrêté exactement là.
+
+Dans la grille, panneau **🔌 Remplissage par Claude** : si la ligne du haut est ambre, cliquer
+**Connecter Claude**. Elle passe au vert, et c'est fini (cf. [`CANAL_MCP.md`](./CANAL_MCP.md),
+« Le bouton Connecter Claude »).
+
+**Puis ouvrir une fenêtre Claude NEUVE** : sa configuration est lue à l'ouverture. Celle qui est
+déjà ouverte ne verra rien, même après un branchement réussi.
+
+Pour vérifier : dans cette fenêtre neuve, demander les sessions du Worker. Les sept outils
+`worker_*` doivent être là. La façade et le Worker sont deux processus indépendants —
+brancher, rebrancher ou relancer la façade ne touche à aucune session ouverte.
+
+Si l'écriture échoue (poste verrouillé, droits insuffisants), le panneau affiche la commande
+équivalente, à taper une fois. La portée `user` est celle de l'utilisateur réel : il n'ouvre
+pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — une session Claude
+**sans dossier**, sans `.mcp.json` à approuver, rien d'autre que l'application installée.
+
 ## La marche à suivre
 
 1. **Éteindre les deux clés IA de XSpro** (dans ses réglages IA : `config_or.START` et

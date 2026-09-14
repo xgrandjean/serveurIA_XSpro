@@ -126,6 +126,21 @@
            d'autre ne le montre dans cette page. -->
       <div id="panel-mcp" class="hidden">
         <div id="mcp-titre">🔌 Remplissage par Claude</div>
+
+        <!-- Branchement — avant tout le reste : un numéro de session ne sert à
+             rien tant que Claude n'a pas les outils du Worker, et rien, ni ici
+             ni chez Claude, ne le dirait. -->
+        <div id="mcp-branchement" class="mcp-branchement-inconnu">
+          <span id="mcp-branchement-etat">Vérification du branchement…</span>
+          <button id="btn-connect-claude" class="btn-tool hidden">🔌 Connecter Claude</button>
+          <button id="btn-disconnect-claude" class="btn-lien hidden"
+                  title="Retirer l'inscription de Claude sur ce poste. Réversible : le bouton Connecter revient aussitôt.">Débrancher</button>
+        </div>
+        <div id="mcp-commande" class="hidden">
+          <code id="mcp-commande-texte"></code>
+          <button id="btn-copy-commande" class="btn-tool" title="Copier la commande">📋</button>
+        </div>
+
         <p id="mcp-aide">
           Donne ce numéro de session à Claude, puis décris-lui le travail dans sa
           propre fenêtre. Les valeurs arrivent ici au fur et à mesure, en attente

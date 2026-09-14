@@ -5,11 +5,24 @@
  * Modes :
  *   node server.js               → mode serveur (écoute XSpro)
  *   node server.js --standalone  → mode test (charge standalone-payload.json)
+ *   node server.js --mcp         → façade MCP sur stdin/stdout (cf. mcpStdio.js)
  *
  * Dépendances : npm install express ws open cors
  */
 
 'use strict';
+
+// ── Façade MCP (serveurIA.exe --mcp) ──────────────────────────────────────────
+// Avant tout le reste, et avant même les require : dans ce mode l'exe n'est pas
+// un serveur HTTP mais un serveur MCP sur stdin/stdout, où stdout est réservé au
+// protocole. Rien d'autre ne doit démarrer — ni Express, ni WebSocket, ni verrou.
+// C'est ce point d'entrée que Claude lance chez l'utilisateur, qui n'a ni le
+// dépôt ni Node : la façade parle ensuite au Worker déjà lancé par XSpro, par le
+// canal HTTP local, exactement comme le ferait le dépôt (cf. mcpStdio.js).
+if (process.argv.includes('--mcp')) {
+    require('./mcpStdio').demarrer();
+    return;
+}
 
 const express    = require('express');
 const http       = require('http');
@@ -21,6 +34,7 @@ const { resolveProvider, getSupportedTypes }    = require('./providers');
 const { buildAcceptString }                     = require('./fileTypes');
 const { resolveEffectiveWorkerConfig }          = require('./viewResolver');
 const { installMcpChannel }                     = require('./mcpChannel');
+const ClaudeConfig                              = require('./claudeConfig');
 
 // ── Résolution des chemins ────────────────────────────────────────────────────
 // ASSETS_ROOT : base des fichiers statiques en lecture seule (public/, views/,
@@ -686,6 +700,27 @@ async function handleUIMessage(session, msg) {
       memoriserCanal(vise);
       console.log(`[WS] Canal de remplissage → ${vise} pour ${session.sessionId}`);
       wsSend(session, { type: 'canal', canal: vise });
+      break;
+    }
+
+    // ── Branchement de Claude ────────────────────────────────────────────────
+    // Le panneau MCP demande où on en est à chaque affichage, et propose de
+    // brancher. C'est le Worker qui inscrit, parce qu'il est le seul à connaître
+    // le chemin de sa propre façade (cf. claudeConfig.js) : exe compilé chez
+    // l'utilisateur, point d'entrée du dépôt chez le développeur.
+    case 'claude:etat':
+      wsSend(session, Object.assign({ type: 'claude:etat' }, ClaudeConfig.etat()));
+      break;
+
+    case 'claude:debrancher':
+    case 'claude:brancher': {
+      const geste = msg.type === 'claude:debrancher' ? 'debrancher' : 'brancher';
+      const r = ClaudeConfig[geste]();
+      console.log('[Claude] ' + geste + ' demandé depuis la grille → ' + (r.ok ? 'fait' : 'échec'));
+      // L'état relu fait foi : le message dit ce qui vient de se passer, les
+      // autres champs disent ce qui EST, et c'est sur eux que le panneau se peint.
+      wsSend(session, Object.assign({ type: 'claude:etat' }, ClaudeConfig.etat(),
+                                    { message: r.message, ok: r.ok }));
       break;
     }
 
