@@ -86,10 +86,17 @@ qu'un point d'entrée pour le dépôt. Le déplacer sous `tools/` le retirerait 
 aucun message d'erreur**. `mcpStdio.js` est aussi listé dans `build.files` de `package.json`
 — cette liste est explicite, un module oublié ferait planter l'application packagée.
 
-Déclaration, dans `.mcp.json` à la racine — pour le dépôt seulement :
+Déclaration, dans `.mcp.json` à la racine — pour le dépôt seulement. Le nom
+`worker-dev`, et non `worker` : le bouton « Connecter Claude » de la grille inscrit
+`mcpServers.worker` en portée *user* (`~/.claude.json`), pointant vers l'exe
+(`serveurIA.exe --mcp`). Deux scopes déclarant le MÊME nom avec des commandes
+différentes font lever à Claude Code un avertissement « Conflicting scopes » à
+chaque session ouverte sur le dépôt. `worker-dev` offre la façade sans le conflit
+— les outils s'appellent toujours `worker_*` quoi qu'il arrive, le nom de serveur
+ne change rien aux noms d'outils.
 
 ```json
-{ "mcpServers": { "worker": { "command": "node", "args": ["tools/mcp-worker/server.js"] } } }
+{ "mcpServers": { "worker-dev": { "command": "node", "args": ["tools/mcp-worker/server.js"] } } }
 ```
 
 ## Chez l'utilisateur : `serveurIA.exe --mcp`
@@ -126,6 +133,34 @@ façade, et il y a deux cas : l'exe compilé (`process.execPath` + `--mcp`) chez
 le point d'entrée du dépôt (`node tools/mcp-worker/server.js`) chez le développeur. Aucun des
 deux ne se devine depuis l'extérieur. Accessoirement, c'est le Worker qui sert la grille : le
 bouton est donc à l'endroit exact où l'utilisateur découvre qu'il lui faut Claude.
+
+**D'où l'entrée prend effet.** L'inscription `mcpServers.worker` est lue par
+**Claude Code** (la commande `claude`, ou l'extension Claude Code dans VS Code) à
+l'ouverture d'une session — jamais par une fenêtre déjà ouverte. Pour l'essai,
+ouvrir une session sans dossier ouvert : seule l'entrée `user` s'applique alors.
+
+**L'application Claude de bureau a sa propre inscription.** Elle lit
+`claude_desktop_config.json` (distinct de `~/.claude.json`) et n'expose pas les
+serveurs stdio de la portée `user`. Le bouton « Connecter Claude » l'inscrit
+aussi — aux deux emplacements connus (installation classique `%APPDATA%\Claude`
+et Microsoft Store/MSIX) — et le panneau le dit d'une phrase. Il faut alors
+**fermer puis rouvrir l'application** : son fichier de configuration n'est lu
+qu'au démarrage. Un numéro collé dans une application non inscrite répond
+« aucun connecteur ne correspond », sans qu'aucun code du Worker soit en cause.
+
+**Un numéro de session ne suffit jamais.** Collé seul, Claude répond « ceci n'est
+qu'un identifiant, que veux-tu que j'en fasse » — et l'utilisateur croit que le
+canal est en panne, alors qu'il n'a simplement pas donné de consigne. Le bouton
+📋 de la grille copie une phrase complète qui force les outils
+`worker_sessions` puis `worker_contexte` (cf. `public/grid.js`,
+`consigneSession`).
+
+**Le mode de travail suit le sélecteur de la grille.** La grille annonce au
+serveur chaque changement de mode (`workmode:set`) ; `worker_contexte` applique
+par défaut le mode ainsi choisi. Priorité : un mode demandé explicitement >
+le sélecteur de la grille > le mode par défaut de la vue. `worker_sessions` le
+rapporte (`modeActif`). Après un changement de mode, Claude doit rappeler
+`worker_contexte` pour relire le contexte.
 
 **Ce que le panneau montre**, demandé à chaque affichage (`claude:etat`) :
 

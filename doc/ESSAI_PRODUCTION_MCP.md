@@ -42,6 +42,18 @@ Pour vérifier : dans cette fenêtre neuve, demander les sessions du Worker. Les
 `worker_*` doivent être là. La façade et le Worker sont deux processus indépendants —
 brancher, rebrancher ou relancer la façade ne touche à aucune session ouverte.
 
+Deux pièges, relevés lors de l'essai réel :
+
+- **Un numéro collé seul ne déclenche rien.** Claude répond « ceci n'est qu'un identifiant,
+  que veux-tu que j'en fasse » — et on croit que le canal est en panne. Il faut coller la
+  consigne complète (« Regarde les sessions en cours… »), dont le bouton 📋 de la grille
+  fournit une version prête à coller.
+- **L'application Claude de bureau a sa propre inscription.** Elle lit
+  `claude_desktop_config.json`, pas la portée `user` de Claude Code : sans inscription,
+  un numéro collé là-bas répond « aucun connecteur ne correspond » sans qu'aucun code du
+  Worker soit en cause. Depuis la version corrigée, le bouton « Connecter Claude » l'inscrit
+  aussi ; **penser à la fermer puis la rouvrir** après le branchement.
+
 Si l'écriture échoue (poste verrouillé, droits insuffisants), le panneau affiche la commande
 équivalente, à taper une fois. La portée `user` est celle de l'utilisateur réel : il n'ouvre
 pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — une session Claude
@@ -57,9 +69,13 @@ pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — un
    S'il manque, s'arrêter là : c'est le premier point à comprendre.
 4. Cliquer. **Le formulaire doit s'ouvrir directement**, verrouillé sur « Assistant externe ».
 5. Envoyer. **Une grille s'ouvre dans le navigateur.** Le sélecteur « Remplissage » en haut à
-   droite doit afficher « Claude (MCP) », et l'option « Clé API » doit être grisée.
+   droite doit afficher « Claude (MCP) », et l'option « Clé API » doit être grisée. Choisir le
+   **mode de travail** (Décomposition, Chiffrage…) dans le sélecteur du haut de la grille :
+   c'est lui que Claude appliquera — et qu'il annoncera dans `modeApplique`.
 6. Revenir dans Claude Code, **coller le texte ci-dessous et joindre le CCTP**. Le fichier se
    donne à Claude directement : en mode MCP la grille n'a pas de zone de pièce jointe.
+   Le bouton **📋 Copier la consigne** de la grille fournit l'amorce avec le numéro de
+   session — la coller telle quelle, puis compléter avec le CCTP.
 7. Regarder la grille se remplir pendant que Claude travaille.
 8. **Relire.** Les lignes proposées sont en couleur : vert pour un ajout, ambre pour une
    modification, rouge pour une suppression. Accepter ou refuser, ligne par ligne ou en bloc.
@@ -94,6 +110,8 @@ sans t'arreter pour autant.
   inventées.
 - **Des lignes qui n'arrivent pas dans XSpro, ou qui y arrivent déformées** — c'est le point
   central de l'essai.
+- Le mode choisi dans la grille qui ne change rien à ce que Claude voit (`modeApplique` reste
+  sur l'ancien mode) — c'est le point central du correctif « le mode suit le sélecteur ».
 
 ## Après l'essai
 

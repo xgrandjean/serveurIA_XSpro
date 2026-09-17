@@ -434,6 +434,7 @@ function installMcpChannel(app, deps) {
         contextName:      resume.contextName,
         statut:           session.status,
         canal:            session.canal || 'api',
+        modeActif:        session.activeMode || modeParDefaut(session.modes || {}),
         origine:          session.origin || 'xspro',
         lignes:           session.rows.length,
         pendingCount:     SM.countPendingRows(session),
@@ -465,7 +466,13 @@ function installMcpChannel(app, deps) {
       const dispo = Object.keys(modes).join(', ') || 'aucun';
       return { erreur: `Mode inconnu : « ${args.mode} ». Modes de cette vue : ${dispo}.`, codeHttp: 400 };
     }
-    const modeId = args.mode || modeParDefaut(modes);
+    // Priorité : un mode demandé par Claude > le mode choisi dans la grille
+    // (message WS 'workmode:set', cf. server.js) > le mode par défaut de la vue.
+    // Sans le second maillon, un utilisateur qui bascule le sélecteur en cours de
+    // session ne verrait JAMAIS son choix reflété — l'outil répondrait toujours le
+    // défaut (cf. l'essai de production : « je suis passé en Chiffrage, il continue
+    // en Décomposition »).
+    const modeId = args.mode || session.activeMode || modeParDefaut(modes);
 
     const colonnes = colonnesDuMode(session, modeId);
 
@@ -505,6 +512,15 @@ function installMcpChannel(app, deps) {
         sortie.briefing       = await briefingReplie(session, modeId);
         sortie.briefingSource = 'repli';
       }
+
+      // En-tête : rappeler quel mode est appliqué, et pourquoi. C'est là que Claude
+      // vérifie que le sélecteur de la grille a été pris en compte — le service déjà
+      // reçu ne se met pas à jour tout seul.
+      const libelleMode    = modeId ? `« ${modeId} »` : 'aucun';
+      const origineMode    = args.mode ? 'mode demandé explicitement' : 'mode sélectionné dans la grille';
+      sortie.briefing = `MODE DE TRAVAIL APPLIQUÉ : ${libelleMode} (${origineMode}).`
+        + ' Un changement de mode dans la grille ne se reflète ici qu\'après un nouvel'
+        + " appel de worker_contexte — le mode suit le sélecteur.\n\n" + sortie.briefing;
 
       // Phase bêta — cf. le bandeau en tête de fichier. Ajouté ici, au seul
       // endroit où le briefing est servi, plutôt que dans chacune des deux
@@ -566,18 +582,39 @@ function installMcpChannel(app, deps) {
   }
 
   /**
+   * Les colonnes remplissables MAINTENANT : celles du mode de travail actif de
+   * la session — ce que le sélecteur de la grille a choisi. Sans ce filtre,
+   * Claude pourrait écrire une colonne de prix alors que la grille tourne en
+   * mode Décomposition : la lecture (worker_contexte) ne montre même pas la
+   * colonne, mais l'écriture l'aurait acceptée, et les deux canaux divergeraient.
+   * Option assumée : le refus est RAPPORTÉ (ignorees), jamais silencieux.
+   */
+  function colonnesEcriture(session) {
+    const modeId = session.activeMode || modeParDefaut(session.modes || {});
+    return { modeId: modeId, autorisees: colonnesDuMode(session, modeId) };
+  }
+
+  /**
    * Prépare les valeurs d'une ligne : colonnes inconnues écartées et RAPPORTÉES
    * (sans cela une faute de frappe créerait un champ fantôme expédié à XSpro),
-   * choix résolus, types convertis.
+   * choix résolus, types convertis. `colonnesPermisees` restreint aux colonnes
+   * du mode de travail actif — une clé connue de la vue mais hors mode est
+   * rapportée comme telle, pas comme une colonne inconnue.
    */
-  function preparerValeurs(session, valeurs, id, ignorees) {
-    const parCle      = new Map((session.effectiveWorkerConfig?.colonnes || []).map(c => [c.cle, c]));
+  function preparerValeurs(session, valeurs, id, ignorees, colonnesPermisees, modeId) {
+    const toutes      = new Map((session.effectiveWorkerConfig?.colonnes || []).map(c => [c.cle, c]));
+    const parCle      = new Map((colonnesPermisees || session.effectiveWorkerConfig?.colonnes || []).map(c => [c.cle, c]));
     const selectChoix = session.selectChoix || {};
     const pretes      = [];
 
     for (const [cle, brut] of Object.entries(valeurs || {})) {
       const col = parCle.get(cle);
-      if (!col) { ignorees.push({ _id: id, cle, raison: 'colonne inconnue dans cette vue' }); continue; }
+      if (!col) {
+        ignorees.push({ _id: id, cle, raison: toutes.has(cle)
+          ? `colonne hors du mode de travail actif « ${modeId} » — elle n'y est pas remplissable`
+          : 'colonne inconnue dans cette vue' });
+        continue;
+      }
 
       const scDef = selectChoix[cle];
       if (scDef?.choix?.length) {
@@ -635,6 +672,7 @@ function installMcpChannel(app, deps) {
     const r = resoudre(args, true);
     if (r.erreur) return r;
     const { session } = r;
+    const { modeId: modeEcriture, autorisees } = colonnesEcriture(session);
 
     const lignes = Array.isArray(args.lignes) ? args.lignes : null;
     if (!lignes || !lignes.length) {
@@ -662,7 +700,7 @@ function installMcpChannel(app, deps) {
         continue;
       }
 
-      const pretes = preparerValeurs(session, ligne.valeurs, id, ignorees);
+      const pretes = preparerValeurs(session, ligne.valeurs, id, ignorees, autorisees, modeEcriture);
       for (const [cle, valeur] of pretes) {
         SM.setCellValue(session, rowIndex, cle, valeur);
         wsSend(session, { type: 'cell:update', rowIndex, cle, value: valeur });
@@ -685,6 +723,7 @@ function installMcpChannel(app, deps) {
     if (r.erreur) return r;
     const { session } = r;
     if (!session.reviewMode) return { erreur: REFUS_HORS_REVUE, codeHttp: 409 };
+    const { modeId: modeEcriture, autorisees } = colonnesEcriture(session);
 
     const lignes = Array.isArray(args.lignes) ? args.lignes : null;
     if (!lignes || !lignes.length) {
@@ -708,7 +747,7 @@ function installMcpChannel(app, deps) {
     const ids      = [];
     const ignorees = [];
     for (const champs of lignes) {
-      const pretes = preparerValeurs(session, champs, null, ignorees);
+      const pretes = preparerValeurs(session, champs, null, ignorees, autorisees, modeEcriture);
       SM.proposeInsertRow(session, apres, Object.fromEntries(pretes));
       // proposeInsertRow ne rend pas l'_id attribué, mais il vient de consommer
       // exactement un consumeNextId : c'est donc _nextId - 1. Le rendre est

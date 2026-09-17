@@ -703,6 +703,25 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // L'utilisateur change le mode de travail dans la grille (sélecteur du haut).
+    // C'est LE message qui relie ce choix au canal MCP : en canal `mcp` il n'y a
+    // pas de prompt:send, donc aucun autre transport ne porte le mode. Sans lui,
+    // worker_contexte retomberait sur le mode par défaut de LA VUE après une
+    // bascule du sélecteur (cf. mcpChannel.js, verbeContexte).
+    case 'workmode:set': {
+      const vise = msg.activeMode ?? null;
+      const modes = session.modes || {};
+      if (vise !== null && !modes[vise]) {
+        const dispo = Object.keys(modes).join(', ') || 'aucun';
+        wsSend(session, { type: 'error', message: `⚠ Mode inconnu : « ${vise} ». Modes de cette vue : ${dispo}.` });
+        break;
+      }
+      session.activeMode = vise;
+      console.log(`[WS] Mode de travail → ${String(vise)} pour ${session.sessionId}`);
+      // Pas de réponse dédiée : le prochain worker_contexte le reflète (modeApplique).
+      break;
+    }
+
     // ── Branchement de Claude ────────────────────────────────────────────────
     // Le panneau MCP demande où on en est à chaque affichage, et propose de
     // brancher. C'est le Worker qui inscrit, parce qu'il est le seul à connaître

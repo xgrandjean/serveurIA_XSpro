@@ -88,6 +88,7 @@ function etat() {
         return Object.assign({}, commun, {
             branche: false, entreePresente: false, configPresente: false,
             obsolete: false, illisible: e.code !== 'ENOENT',
+            application: etatApplication(),
         });
     }
 
@@ -100,7 +101,75 @@ function etat() {
         // ou l'entrée vient d'un dépôt. Le bouton propose alors de corriger.
         obsolete:       !!entree && !memeCommande(entree, attendu),
         illisible:      false,
+        application:    etatApplication(),
     });
+}
+
+/**
+ * Où en est l'inscription du serveur dans CHAQUE configuration de l'application
+ * Claude de bureau. Cette application lit `claude_desktop_config.json`, pas
+ * `~/.claude.json` : la portée « user » de Claude Code n'a aucun effet sur elle.
+ * C'est donc au bouton de s'en charger, pour qu'un utilisateur final n'ait
+ * jamais à toucher à ce fichier (cf. doc/CANAL_MCP.md, « Le bouton Connecter »).
+ *
+ * @returns {Array<{chemin:string, present:boolean, branche:boolean, entreePresente:boolean}>}
+ */
+function etatApplication() {
+    const attendu = commandeFacade();
+    return cheminsConfigApp().map((chemin) => {
+        let config = null;
+        try {
+            config = JSON.parse(fs.readFileSync(chemin, 'utf8'));
+        } catch (e) {
+            if (e.code !== 'ENOENT') config = 'illisible';
+        }
+        const entree = (config && config.mcpServers) ? config.mcpServers[NOM_SERVEUR] : null;
+        return {
+            chemin:         chemin,
+            present:        configAppPresente(chemin),
+            branche:        !!entree && memeCommande(entree, attendu),
+            entreePresente: !!entree,
+        };
+    });
+}
+
+/**
+ * Les emplacements possibles du `claude_desktop_config.json`, du plus classique
+ * (installation par le site) au plus récent (Microsoft Store — MSIX, chaque
+ * paquet porte un suffixe aléatoire « Claude_xxx » ; c'est la disposition d'une
+ * machine fraîchement équipée).
+ *
+ * CLAUDE_APP_CONFIG_PATH force un chemin unique : sert aux tests et au contrôle
+ * manuel sans jamais toucher à la configuration réelle de l'application.
+ */
+function cheminsConfigApp() {
+    if (process.env.CLAUDE_APP_CONFIG_PATH) return [process.env.CLAUDE_APP_CONFIG_PATH];
+    const candidats = [];
+    const appdata   = process.env.APPDATA;
+    if (appdata) candidats.push(path.join(appdata, 'Claude', 'claude_desktop_config.json'));
+    const paquets = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Packages') : null;
+    if (paquets) {
+        try {
+            for (const nom of fs.readdirSync(paquets)) {
+                if (/^Claude_/i.test(nom)) {
+                    candidats.push(path.join(paquets, nom, 'LocalCache', 'Roaming', 'Claude', 'claude_desktop_config.json'));
+                }
+            }
+        } catch (_) { /* dossier des paquets inaccessible : la disposition classique suffira */ }
+    }
+    return candidats;
+}
+
+// Une inscription n'a de sens que là où l'application a déjà tourné : fichier de
+// configuration présent, ou dossier de configuration présent. Ailleurs, ne pas
+// créer un fichier pour une application qui n'est pas installée.
+function configAppPresente(chemin) {
+    if (process.env.CLAUDE_APP_CONFIG_PATH) return true;   // mode forcé (tests)
+    return fs.existsSync(chemin) || fs.existsSync(path.dirname(chemin));
+}
+
+function configObjetValide(config) {
+    return config !== null && typeof config === 'object' && !Array.isArray(config);
 }
 
 // Sauvegarde : ce fichier ne nous appartient pas. Écrite UNE SEULE FOIS, au premier
@@ -114,6 +183,81 @@ function sauvegarderUneFois(chemin, brut) {
     try {
         if (!fs.existsSync(sauvegarde)) fs.writeFileSync(sauvegarde, brut);
     } catch (_) { /* non bloquant : une sauvegarde manquante n'empêche pas d'agir */ }
+}
+
+/**
+ * Inscrit la façade dans la (les) configuration(s) de l'application de bureau.
+ * N'échoue JAMAIS le branchement principal : une application absente ne doit pas
+ * empêcher l'inscription dans Claude Code — les échecs sont rapportés, pas lancés.
+ *
+ * @returns {Array<{chemin:string, ok:boolean, raison?:string}>}
+ */
+function brancherApplication() {
+    const attendu = commandeFacade();
+    const ecrits  = [];
+    for (const chemin of cheminsConfigApp()) {
+        if (!configAppPresente(chemin)) continue;
+
+        let config = {};
+        let brut   = null;
+        try {
+            brut   = fs.readFileSync(chemin, 'utf8');
+            config = JSON.parse(brut);
+        } catch (e) {
+            if (e.code !== 'ENOENT') { ecrits.push({ chemin, ok: false, raison: e.code || String(e.message) }); continue; }
+        }
+        if (!configObjetValide(config)) { ecrits.push({ chemin, ok: false, raison: 'forme inattendue' }); continue; }
+
+        sauvegarderUneFois(chemin, brut);
+        config.mcpServers = config.mcpServers || {};
+        config.mcpServers[NOM_SERVEUR] = { command: attendu.command, args: attendu.args };
+
+        const provisoire = chemin + '.xspro-tmp';
+        try {
+            fs.writeFileSync(provisoire, JSON.stringify(config, null, 2));
+            fs.renameSync(provisoire, chemin);
+            ecrits.push({ chemin, ok: true });
+        } catch (e) {
+            try { fs.unlinkSync(provisoire); } catch (_) { /* déjà parti */ }
+            ecrits.push({ chemin, ok: false, raison: e.code || String(e.message) });
+        }
+    }
+    return ecrits;
+}
+
+/**
+ * Retire l'inscription de la (des) configuration(s) de l'application de bureau.
+ * Même discipline que brancherApplication : meilleur effort, jamais bloquant.
+ */
+function debrancherApplication() {
+    const retires = [];
+    for (const chemin of cheminsConfigApp()) {
+        let brut, config;
+        try {
+            brut   = fs.readFileSync(chemin, 'utf8');
+            config = JSON.parse(brut);
+        } catch (e) {
+            if (e.code === 'ENOENT') continue;
+            retires.push({ chemin, ok: false, raison: e.code || String(e.message) });
+            continue;
+        }
+        if (!configObjetValide(config)) { retires.push({ chemin, ok: false, raison: 'forme inattendue' }); continue; }
+        if (!config.mcpServers || !config.mcpServers[NOM_SERVEUR]) continue;
+
+        sauvegarderUneFois(chemin, brut);
+        delete config.mcpServers[NOM_SERVEUR];
+
+        const provisoire = chemin + '.xspro-tmp';
+        try {
+            fs.writeFileSync(provisoire, JSON.stringify(config, null, 2));
+            fs.renameSync(provisoire, chemin);
+            retires.push({ chemin, ok: true });
+        } catch (e) {
+            try { fs.unlinkSync(provisoire); } catch (_) { /* déjà parti */ }
+            retires.push({ chemin, ok: false, raison: e.code || String(e.message) });
+        }
+    }
+    return retires;
 }
 
 /**
@@ -171,9 +315,21 @@ function brancher() {
             + 'et a réécrit sa configuration. Fermer Claude, réessayer — ou taper la commande.' };
     }
 
-    return { ok: true, message:
-        "Claude est branché. Ouvrir une fenêtre Claude NEUVE pour qu'il le voie : "
-        + "sa configuration est lue à l'ouverture, pas en cours de route." };
+    // La portée « user » est faite. Propager à l'application de bureau si elle
+    // existe : l'utilisateur final n'écrira jamais claude_desktop_config.json.
+    const ecritsApp  = brancherApplication();
+    const appEcrits  = ecritsApp.filter((e) => e.ok).length;
+    const appEnEchec = ecritsApp.filter((e) => !e.ok).length;
+
+    let message = "Claude est branché. Ouvrir une fenêtre Claude NEUVE pour qu'il le voie : "
+        + "sa configuration est lue à l'ouverture, pas en cours de route.";
+    if (appEcrits) {
+        message += " L'application Claude de bureau est inscrite elle aussi : la fermer puis la rouvrir.";
+    }
+    if (appEnEchec) {
+        message += ' Certaines configurations de l\'application de bureau n\'ont pas pu être inscrites.';
+    }
+    return { ok: true, message };
 }
 
 /**
@@ -198,6 +354,9 @@ function debrancher() {
     }
 
     if (!config || typeof config !== 'object' || !config.mcpServers || !config.mcpServers['worker']) {
+        // Rien côté Claude Code — mais l'application de bureau peut, elle, porter
+        // une inscription héritée : on la retire quand même.
+        debrancherApplication();
         return { ok: true, message: 'Rien à débrancher : aucune inscription « worker » dans la configuration de Claude.' };
     }
 
@@ -221,11 +380,16 @@ function debrancher() {
             + 'sa configuration. Fermer Claude, puis recommencer.' };
     }
 
+    // La portée « user » est finie. Retirer aussi l'inscription de l'application
+    // de bureau, si elle existait — même discipline de meilleur effort.
+    debrancherApplication();
+
     return { ok: true, message:
         'Claude est débranché. Les grilles ne pourront plus être remplies par lui.\n\n'
         + "Une fenêtre Claude déjà ouverte garde ses outils jusqu'à sa fermeture : la configuration "
-        + "n'est relue qu'à l'ouverture." };
+        + "n'est relue qu'à l'ouverture. L'application de bureau, si elle était inscrite, a été retirée." };
 }
 
 module.exports = { etat: etat, brancher: brancher, debrancher: debrancher, cheminConfig: cheminConfig,
-                   commandeLisible: commandeLisible, NOM_SERVEUR: NOM_SERVEUR };
+                   commandeLisible: commandeLisible, NOM_SERVEUR: NOM_SERVEUR,
+                   cheminsConfigApp: cheminsConfigApp, etatApplication: etatApplication };

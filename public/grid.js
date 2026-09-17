@@ -2328,8 +2328,8 @@ function bindUI() {
     setTimeout(() => { bouton.textContent = libelle; }, 1600);
 
     majEtatMcp(copie
-      ? 'Numéro de session copié.'
-      : 'Le navigateur a refusé la copie — le numéro est sélectionné, fais Ctrl+C.');
+      ? 'Consigne copiée — à coller dans une fenêtre Claude neuve.'
+      : 'Le navigateur a refusé la copie — la consigne est sélectionnée, fais Ctrl+C.');
   });
 
   // Branchement de Claude : le Worker inscrit sa propre façade, la grille ne
@@ -2900,6 +2900,13 @@ function onWorkModeChange(modeId) {
     // Si le mode n'a pas de promptsSuggeres, garder ceux de base
     populatePromptSuggestions(state.basePromptsSuggeres);
   }
+
+  // Le serveur ne connaît le mode que par ce message : en canal MCP, AUCUN autre
+  // transport n'existe (prompt:send y est refusé). Sans lui, worker_contexte
+  // retomberait sur le mode par défaut de la vue après une bascule du sélecteur.
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    sendWS({ type: 'workmode:set', activeMode: modeId });
+  }
 }
 
 // ── Conversation ──────────────────────────────────────────────────────────────
@@ -3247,10 +3254,12 @@ function majBranchementClaude(msg) {
   bouton.textContent = msg.obsolete ? '🔌 Rebrancher Claude' : '🔌 Connecter Claude';
   if (debrancher) { debrancher.disabled = false; debrancher.textContent = 'Débrancher'; }
 
+  const suiteApp = syntheseApplicationClaude(msg.application);
+
   if (msg.branche) {
     zone.className = 'mcp-branchement-ok';
-    texte.textContent = msg.message
-      || 'Claude est branché sur ce poste : il a les outils du Worker.';
+    texte.textContent = (msg.message
+      || 'Claude est branché sur ce poste : il a les outils du Worker.') + suiteApp;
     bouton.classList.add('hidden');
     // Le retour en arrière n'est offert que là où il a un sens.
     debrancher?.classList.remove('hidden');
@@ -3261,13 +3270,27 @@ function majBranchementClaude(msg) {
   zone.className = msg.ok === false ? 'mcp-branchement-echec' : 'mcp-branchement-afaire';
   bouton.classList.remove('hidden');
   debrancher?.classList.add('hidden');
-  texte.textContent = msg.message || (msg.obsolete
+  texte.textContent = (msg.message || (msg.obsolete
     ? 'Claude est inscrit, mais sur un autre exécutable que celui-ci : le rebrancher.'
-    : "Claude n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session.");
+    : "Claude n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session.")) + suiteApp;
 
   // La commande n'apparaît qu'en cas d'échec. En temps normal le bouton suffit,
   // et un bloc de texte technique de plus ne ferait qu'inquiéter.
   montrerCommandeClaude(msg.ok === false ? msg.commande : null);
+}
+
+// L'application Claude de bureau a sa propre configuration
+// (claude_desktop_config.json) : le panneau le dit, sinon un utilisateur de
+// cette application croirait Claude branché alors que ce client précis ne verra
+// rien. Une ligne au plus, rien si l'application n'est pas installée.
+function syntheseApplicationClaude(apps) {
+  if (!Array.isArray(apps) || !apps.length) return '';
+  const presente = apps.filter((a) => a.present);
+  if (!presente.length) return '';
+  if (presente.every((a) => a.branche)) {
+    return " L'application Claude de bureau est branchée : la fermer puis la rouvrir après un branchement.";
+  }
+  return " L'application Claude de bureau est présente mais pas branchée — « Débrancher » puis « Connecter » pour l'inscrire.";
 }
 
 function montrerCommandeClaude(commande) {
@@ -3278,30 +3301,49 @@ function montrerCommandeClaude(commande) {
   bloc.classList.remove('hidden');
 }
 
-// Copie le numéro de session dans le presse-papier.
+// Consigne prête à coller dans Claude. Un numéro de session collé SEUL fait
+// répondre « ceci n'est qu'un identifiant, que veux-tu que j'en fasse ? » et
+// l'utilisateur croit que le canal est en panne (cf. doc/ESSAI_PRODUCTION_MCP.md,
+// l'essai réel). La phrase force Claude à ouvrir worker_sessions puis
+// worker_contexte, au lieu de chercher un « connecteur » — il n'y en a pas, et
+// il n'y en aura jamais.
+function consigneSession() {
+  return 'Regarde les sessions en cours du Worker MCP (outil worker_sessions), '
+    + 'prends la session ' + String(state.sessionId || '') + ', '
+    + 'appelle worker_contexte et lis le briefing. '
+    + "Dis-moi d'abord ce que tu as compris du travail demandé — avant d'écrire quoi que ce soit.";
+}
+
+// Copie la consigne complète (et non le numéro nu) dans le presse-papier.
 //
 // navigator.clipboard peut être refusé sans prévenir — permission non accordée,
 // page ouverte autrement qu'en localhost, navigateur embarqué. On se rabat alors
-// sur la sélection du texte puis l'ancienne commande de copie, qui passe là où
-// l'API moderne échoue ; et si elle échoue aussi, le numéro reste au moins
-// sélectionné, un Ctrl+C suffit.
+// sur la sélection d'un <textarea> invisible puis l'ancienne commande de copie,
+// qui passe là où l'API moderne échoue ; et si elle échoue aussi, le texte reste
+// au moins sélectionné, un Ctrl+C suffit.
 //
 // @returns {Promise<boolean>} true si le presse-papier a réellement été rempli
 async function copierNumeroSession() {
+  const texte = consigneSession();
   try {
-    await navigator.clipboard.writeText(state.sessionId);
+    await navigator.clipboard.writeText(texte);
     return true;
   } catch (_) { /* on tente la voie ancienne ci-dessous */ }
 
-  const champ = el('mcp-session-id');
-  if (!champ) return false;
   try {
+    const champ  = document.createElement('textarea');
+    champ.value  = texte;
+    champ.style.position = 'fixed';
+    champ.style.opacity  = '0';
+    document.body.append(champ);
     const plage = document.createRange();
     plage.selectNodeContents(champ);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(plage);
-    return document.execCommand('copy');   // déprécié, mais accepté plus largement
+    const ok = document.execCommand('copy');   // déprécié, mais accepté plus largement
+    champ.remove();
+    return ok;
   } catch (_) {
     return false;
   }

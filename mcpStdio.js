@@ -46,15 +46,20 @@ const GESTE_DEMARRAGE =
 // deux outils. Il n'y a pas de négociation de port côté XSpro — la valeur est
 // fixe dans worker-config.json, recopié tel quel dans les assets livrés.
 //
-// Trois dispositions, essayées dans cet ordre. La façade est lancée par le client
-// MCP, jamais par XSpro : elle n'hérite d'aucun environnement et ne peut rien
-// présumer de son voisinage.
+// Quatre dispositions, essayées dans cet ordre. La façade est lancée par le
+// client MCP, jamais par XSpro : elle n'hérite d'aucun environnement et ne peut
+// rien présumer de son voisinage.
 //   1. AI_WORKER_ASSETS_DIR, si d'aventure l'environnement de XSpro a été hérité ;
 //   2. à côté du point d'entrée — le dépôt (`node server.js`), ou un exe posé
 //      dans le dossier de ses assets ;
-//   3. <exe>/serveurIA-data/ — l'installation réelle : XSpro copie l'exe dans
-//      userData et les assets dans ce sous-dossier (cf. XSpro/src/ipc/ipcAI.js,
-//      _ensureServeurIAAssets).
+//   3. <exe>/serveurIA-data/ — la disposition historique : XSpro copie l'exe et
+//      les assets dans le même dossier userData (cf. XSpro/src/ipc/ipcAI.js,
+//      _ensureServeurIAAssets) ;
+//   4. <userData>/serveurIA-data/ — la disposition réellement déployée : l'exe
+//      vit dans <userData>/XSpro/workspace/config et les assets (donc
+//      worker-config.json) deux niveaux au-dessus. Sans ce repli, un port
+//      configuré "port": 8889 serait silencieusement ignoré et toute la façade
+//      retomberait sur 8888.
 //
 // La version précédente cherchait `__dirname/../../worker-config.json` — hérité
 // de l'époque où ce fichier vivait sous tools/mcp-worker/. Depuis la racine, cela
@@ -65,6 +70,7 @@ function racinesConfig() {
     const racines = [];
     if (process.env.AI_WORKER_ASSETS_DIR) racines.push(process.env.AI_WORKER_ASSETS_DIR);
     racines.push(base, path.join(base, 'serveurIA-data'));
+    racines.push(path.join(path.dirname(path.dirname(base)), 'serveurIA-data'));
     return racines;
 }
 
@@ -193,7 +199,7 @@ const OUTILS = [
                 sessionId: SESSION_ID,
                 mode: {
                     type: 'string',
-                    description: 'Mode de travail (ex. "decomposition", "chiffrage"). Par défaut, le mode par défaut de la vue. Le mode détermine les colonnes autorisées ET les consignes.',
+                    description: 'Mode de travail (ex. "decomposition", "chiffrage"). Par défaut, le mode sélectionné dans la grille par l\'utilisateur (worker_sessions le rapporte). Le mode détermine les colonnes autorisées ET les consignes. Si l\'utilisateur change de mode dans la grille en cours de route, rappeler worker_contexte (briefing:false) : le mode suit le sélecteur.',
                 },
                 offset:   { type: 'integer', description: 'Première ligne à lire (0 = la première).' },
                 limite:   { type: 'integer', description: 'Nombre de lignes (1 à 500, 100 par défaut).' },

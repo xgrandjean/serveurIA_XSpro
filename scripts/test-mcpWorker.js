@@ -248,6 +248,11 @@ function attendre(ms) { return new Promise((r) => setTimeout(r, ms)); }
     // ── Phase 3 — aller-retour complet ───────────────────────────────────────
     if (E2E) await allerRetour(joignable);
 
+    // ── Phase 4 — branchement Claude (portées user + application de bureau) ──
+    // claudeConfig.js travaillant sur des fichiers TEMPORAIRES uniquement, la
+    // phase tourne toujours : aucun réglage réel du poste n'est touché.
+    await verifierBranchementClaude();
+
     console.log('');
     console.log('Outils exposés : ' + outils.map((o) => o.name).join(', '));
     console.log('');
@@ -351,6 +356,73 @@ async function allerRetour(dejaJoignable) {
         const apercu = await ws.apercu('chiffrage');
         verifier('l\'aperçu de prompt de l\'UI répond toujours après un appel MCP',
             !!(apercu && apercu.system && apercu.full), JSON.stringify(apercu).slice(0, 160));
+
+        // 4c. Le mode de travail suit le sélecteur de la grille. Sans le message
+        //     WS 'workmode:set', un utilisateur qui bascule le mode en cours de
+        //     session ne verrait JAMAIS son choix reflété — l'outil répondrait
+        //     toujours le mode par défaut de la vue.
+        const modesDispo = ((ctx && ctx.modesDisponibles) || []).map((m) => m.id);
+        const modeVue    = ctx && ctx.modeApplique;
+        const autre      = modesDispo.find((m) => m !== modeVue);
+        if (autre) {
+            // Repartir d'un serveur qui n'a rien reçu de la grille.
+            await ws.changerMode(null);
+            const retombe = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, briefing: false }));
+            verifier('sans choix de la grille, worker_contexte retombe sur le mode par défaut de la vue',
+                !!(retombe && retombe.modeApplique === modeVue),
+                retombe && String(retombe.modeApplique));
+
+            // Un changement de sélecteur se reflète ensuite SANS que Claude le précise.
+            await ws.changerMode(autre);
+            const apresChange = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, briefing: false }));
+            verifier('le mode choisi dans la grille s\'applique sans que Claude le précise',
+                !!(apresChange && apresChange.modeApplique === autre),
+                apresChange && String(apresChange.modeApplique));
+
+            // Équivalence de contenu : le mode de la grille sert exactement les
+            // mêmes colonnes que ce mode demandé explicitement.
+            const avecExplicite = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, mode: autre, briefing: false }));
+            verifier('le mode de la grille sert les mêmes colonnes que le mode demandé explicitement',
+                !!(apresChange && avecExplicite
+                    && JSON.stringify((apresChange.colonnes || []).map((c) => c.cle))
+                       === JSON.stringify((avecExplicite.colonnes || []).map((c) => c.cle))),
+                apresChange && (apresChange.colonnes || []).map((c) => c.cle).join(','));
+
+            // Un mode explicite reste prioritaire sur le choix de la grille.
+            const expliciteAutre = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, mode: modeVue, briefing: false }));
+            verifier('un mode explicite reste prioritaire sur le choix de la grille',
+                !!(expliciteAutre && expliciteAutre.modeApplique === modeVue),
+                expliciteAutre && String(expliciteAutre.modeApplique));
+
+            // worker_sessions le rapporte, pour que Claude le voie d'emblée.
+            const sessions2 = donnees(await f.outil('worker_sessions', {}));
+            const moi2      = sessions2 && sessions2.sessions.find((x) => x.sessionId === payload.sessionId);
+            verifier('worker_sessions expose le mode actif choisi dans la grille',
+                !!(moi2 && moi2.modeActif === autre),
+                moi2 && String(moi2.modeActif));
+
+            // Les écritures respectent le mode : une colonne du mode par défaut qui
+            // n'est pas remplissable dans le mode actif est refusée ET rapportée.
+            const horsMode = (ctx.colonnes || []).filter((c) => c.cle
+                && !(apresChange.colonnes || []).some((c2) => c2.cle === c.cle));
+            const cible = (apresChange.lignes || [])[0];
+            if (horsMode.length && cible) {
+                const cleTestee = horsMode[0].cle;
+                const refuse = donnees(await f.outil('worker_ecrire_cellules', {
+                    sessionId: payload.sessionId,
+                    lignes: [{ _id: cible._id, valeurs: { [cleTestee]: 'x' } }],
+                }));
+                const ignoree = ((refuse && refuse.ignorees) || []).find((i) => i.cle === cleTestee);
+                verifier('une colonne hors du mode actif est refusée ET rapportée',
+                    !!ignoree, JSON.stringify(refuse && refuse.ignorees).slice(0, 200));
+            }
+
+            // Revenir à l'état « la grille n'a rien choisi » : les étapes suivantes
+            // écrivent les colonnes du mode par défaut de la vue.
+            await ws.changerMode(null);
+        } else {
+            console.log('  (vue à un seul mode : phase « mode » sautée)');
+        }
 
         // 5. Insertion, puis écriture dans la ligne qu'on vient de créer.
         const ins = donnees(await f.outil('worker_inserer_lignes', {
@@ -618,6 +690,13 @@ function connecterUI(sessionId) {
                         ws.send(JSON.stringify({ type: 'prompt:preview', prompt: 'essai', mode: 'act', files: [], activeMode }));
                         setTimeout(() => res(null), 8000);
                     }),
+                    changerMode: (modeId) => {
+                        // Le message qui relie le sélecteur de la grille au canal MCP
+                        // (cf. server.js, 'workmode:set'). Pas de réponse dédiée : le
+                        // prochain worker_contexte le reflète.
+                        ws.send(JSON.stringify({ type: 'workmode:set', activeMode: modeId }));
+                        return Promise.resolve(true);
+                    },
                     fermer: () => { try { ws.close(); } catch (_) {} },
                 });
             }
@@ -626,4 +705,68 @@ function connecterUI(sessionId) {
         });
         ws.on('error', (e) => { clearTimeout(minuteur); reject(e); });
     });
+}
+
+// Phase branchement Claude — vérifie claudeConfig.js (portées « user » et
+// application de bureau) sur des fichiers TEMPORAIRES uniquement : aucun réglage
+// réel du poste n'est touché. CLAUDE_CONFIG_DIR et CLAUDE_APP_CONFIG_PATH sont
+// posés pour la durée de la phase puis restaurés.
+async function verifierBranchementClaude() {
+    titre('Branchement Claude (portées user et application de bureau)');
+    const os = require('os');
+    const ClaudeConfig = require('../claudeConfig');
+
+    const tmp     = fs.mkdtempSync(path.join(os.tmpdir(), 'test-claudeConfig-'));
+    const appFile = path.join(tmp, 'claude_desktop_config.json');
+    const avant = {
+        CLAUDE_CONFIG_DIR:      process.env.CLAUDE_CONFIG_DIR,
+        CLAUDE_APP_CONFIG_PATH: process.env.CLAUDE_APP_CONFIG_PATH,
+    };
+    process.env.CLAUDE_CONFIG_DIR      = tmp;
+    process.env.CLAUDE_APP_CONFIG_PATH = appFile;
+
+    try {
+        // Une configuration d'application préexistante avec d'autres clés — comme
+        // celle qu'une vraie installation porte avant toute inscription.
+        fs.writeFileSync(appFile, JSON.stringify(
+            { coworkUserFilesPath: 'C:\\\\x', preferences: { a: 1 } }, null, 2));
+
+        const e0 = ClaudeConfig.etat();
+        verifier('l\'état lit la configuration user du dossier temporaire',
+            !!(e0 && e0.chemin === path.join(tmp, '.claude.json')), e0 && String(e0.chemin));
+        verifier('l\'état repère la configuration de l\'application de bureau',
+            Array.isArray(e0.application) && e0.application.length === 1,
+            e0 && JSON.stringify(e0.application).slice(0, 120));
+
+        const r = ClaudeConfig.brancher();
+        verifier('brancher() réussit', !!(r && r.ok), r && r.message);
+
+        const usr = JSON.parse(fs.readFileSync(path.join(tmp, '.claude.json'), 'utf8'));
+        const app = JSON.parse(fs.readFileSync(appFile, 'utf8'));
+        verifier('l\'entrée user contient worker', !!(usr.mcpServers && usr.mcpServers.worker));
+        verifier('l\'application de bureau contient worker', !!(app.mcpServers && app.mcpServers.worker));
+        verifier('les clés existantes de l\'application sont préservées',
+            app.coworkUserFilesPath === 'C:\\\\x' && app.preferences && app.preferences.a === 1);
+
+        const e1 = ClaudeConfig.etat();
+        verifier('l\'état rapporte l\'application de bureau branchée',
+            Array.isArray(e1.application) && e1.application[0].branche === true,
+            e1 && JSON.stringify(e1.application).slice(0, 120));
+
+        const d = ClaudeConfig.debrancher();
+        const usr2 = JSON.parse(fs.readFileSync(path.join(tmp, '.claude.json'), 'utf8'));
+        const app2 = JSON.parse(fs.readFileSync(appFile, 'utf8'));
+        verifier('debrancher() réussit', !!(d && d.ok), d && d.message);
+        verifier('debrancher() retire worker de la portée user',
+            !(usr2.mcpServers && usr2.mcpServers.worker));
+        verifier('debrancher() retire worker de l\'application de bureau',
+            !(app2.mcpServers && app2.mcpServers.worker));
+        verifier('l\'application reste un JSON valide après débranchement', !!app2.preferences);
+    } finally {
+        if (avant.CLAUDE_CONFIG_DIR === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+        else process.env.CLAUDE_CONFIG_DIR = avant.CLAUDE_CONFIG_DIR;
+        if (avant.CLAUDE_APP_CONFIG_PATH === undefined) delete process.env.CLAUDE_APP_CONFIG_PATH;
+        else process.env.CLAUDE_APP_CONFIG_PATH = avant.CLAUDE_APP_CONFIG_PATH;
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+    }
 }
