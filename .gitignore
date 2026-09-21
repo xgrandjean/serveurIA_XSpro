@@ -36,3 +36,12 @@ logs/
 
 # Memoire du dernier canal de remplissage choisi — etat local au Worker
 .worker-canal.json
+
+# Verrou du Worker — PID du processus en cours, etat local
+.worker.lock
+
+# Charges d'essai du mode standalone — elles portent la cle API recopiee depuis
+# XSpro (bloc « ia » du payload), qui n'a rien a faire sur un depot public.
+# Restent sur le disque de chacun ; sorties de l'index le 2026-09-20.
+standalone/ia-config.json
+standalone/standalone-payload*.json
