@@ -912,6 +912,18 @@ async function handleUIMessage(session, msg) {
       if (Array.isArray(msg.rows)) {
         session.rows = msg.rows;
         console.log(`[WS] rows:sync — ${session.rows.length} lignes pour ${session.sessionId}`);
+
+        // Revalider TOUTE la grille, au même titre que rows:move juste en dessous, et
+        // pour la même raison : les trois appelants de syncRowsToServer (ajout,
+        // suppression, annulation de suppression) DÉCALENT les index de ligne. Or le
+        // client indexe ses surcharges de style par "rowIndex:cle" (cf. public/grid.js,
+        // state.cellStyleOverrides) : sans revalidation, les marqueurs rouges restent
+        // accrochés à l'ancienne position et la ligne qui remonte hérite de ceux de la
+        // ligne disparue. Constaté le 2026-09-21 : une ouverte creee puis supprimee
+        // laissait « contenu » et « points » barres en rouge sur le qcm qui prenait sa
+        // place, incoherence qui n'existait pas. L'utilisateur s'en sortait en resaisissant
+        // la meme valeur — un cell:edit revalide cette ligne-la et purge son prefixe.
+        revalidateAllRows(session);
       }
       break;
     }
