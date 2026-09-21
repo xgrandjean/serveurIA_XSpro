@@ -22,7 +22,8 @@
  * Chaque ligne finale (update/insert résolus) a ces clés :
  *
  *   type              string    "qcm" | "courte" | "ouverte" | "selection" | "cours"
- *   contenu           string    Sauts de ligne → <br>
+ *   contenu           string    Converti par marked (GFM, breaks:false) à la publication, questions
+ *                               comprises : ligne vide = paragraphe, simple \n avalé, <br> = coupure
  *   regle             string    "unique" | "multiple" | "texte" | "texte(10)" | "nombre" | ""
  *   correction        string    "auto" | "manuel" | "semi" | ""
  *   points            string    nombre > 0, entier ou décimal ("1", "0.5", "10") | "" (vide pour cours)

@@ -162,6 +162,28 @@ le sélecteur de la grille > le mode par défaut de la vue. `worker_sessions` le
 rapporte (`modeActif`). Après un changement de mode, Claude doit rappeler
 `worker_contexte` pour relire le contexte.
 
+**Mais cette priorité vaut pour la LECTURE seule.** Les écritures, elles, suivent
+toujours le sélecteur : `colonnesEcriture()` lit `session.activeMode` et ignore le
+mode demandé à `worker_contexte`. Lire en « analyse » pendant que la grille est
+restée en « creation » sert donc des colonnes que `worker_ecrire_cellules`
+écartera — refus rapporté dans `ignorees`, mais seulement après coup, une fois le
+travail composé. C'est arrivé en production sur listeQuestions : contexte lu en
+analyse pour ses colonnes annexes (`indication`, `explicationCorrection`,
+`consigneIA`), absentes du mode creation. `worker_contexte` annonce donc
+désormais le décalage avant qu'il coûte quelque chose : `modeInscriptible` dans
+chaque réponse, et `avertissementEcriture` (repris en tête du briefing) qui nomme
+les colonnes perdues et le geste qui les rend — basculer le sélecteur « Mode de
+travail » de la grille.
+
+**Vocabulaire des colonnes à choix.** `resoudreChoix()` n'accepte que la `valeur`
+ou le `label` exact d'un `selectChoix`, et les labels sont ceux que la grille
+affiche — pas toujours ceux que le briefing enseigne. Une vue peut déclarer
+`mcp.aliasChoix` (`{ cle: { mot: valeur } }`) pour rattraper l'écart ; les mots
+ainsi admis sont servis en lecture dans `colonnes[].aussiAcceptes`, et rappelés
+dans le motif de refus si une valeur est tout de même rejetée. Cas réel :
+listeQuestions enseigne « qcm, courte, ouverte, selection, cours » là où la grille
+affiche « Réponse courte », « Texte long », « Liste de choix », « Cours ».
+
 **Ce que le panneau montre**, demandé à chaque affichage (`claude:etat`) :
 
 | État | Ce qu'on voit |

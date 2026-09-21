@@ -397,6 +397,13 @@ function installMcpChannel(app, deps) {
         // `valeur` est ce qui est stocké dans la ligne, `label` ce que la grille
         // affiche. worker_ecrire_cellules accepte les deux et normalise.
         d.choix = sc.choix.map(c => ({ valeur: c.valeur, label: c.label }));
+
+        // Les mots du briefing, quand ce ne sont pas les labels de la grille
+        // (cf. resoudreChoix). Servis ici pour que la liste LUE soit exactement
+        // la liste ACCEPTÉE à l'écriture : sans cela, suivre la consigne de la
+        // vue échoue, et la lecture ne laisse rien deviner.
+        const alias = session.effectiveWorkerConfig?.mcp?.aliasChoix?.[col.cle];
+        if (alias && Object.keys(alias).length) d.aussiAcceptes = Object.keys(alias);
       }
       return d;
     });
@@ -476,6 +483,29 @@ function installMcpChannel(app, deps) {
 
     const colonnes = colonnesDuMode(session, modeId);
 
+    // Le mode d'ÉCRITURE ne suit PAS args.mode : colonnesEcriture() lit
+    // session.activeMode, c'est-à-dire le sélecteur de la grille. Lire en
+    // « analyse » pendant que la grille est restée en « creation » sert donc des
+    // colonnes que worker_ecrire_cellules écartera — et le refus n'arrivait
+    // qu'APRÈS coup, dans « ignorees », une fois le travail composé. Le cas s'est
+    // produit : contexte lu en analyse pour ses colonnes annexes (indication,
+    // explicationCorrection, consigneIA), qui ne sont pas remplissables en
+    // creation. On l'annonce donc avant, avec le geste qui le lève.
+    const modeEcriture = session.activeMode || modeParDefaut(modes);
+    let avertissementEcriture = null;
+    if (modeEcriture !== modeId) {
+      const inscriptibles = new Set(colonnesDuMode(session, modeEcriture).map(c => c.cle));
+      const horsEcriture  = colonnes.map(c => c.cle).filter(c => !inscriptibles.has(c));
+      avertissementEcriture =
+        `Lecture en mode « ${modeId} », mais les écritures suivent le sélecteur `
+        + `« Mode de travail » de la grille, resté sur « ${modeEcriture} ». `
+        + (horsEcriture.length
+            ? `worker_ecrire_cellules écartera ces colonnes : ${horsEcriture.join(', ')}. `
+            : 'Les colonnes des deux modes coïncident, aucune écriture ne sera perdue. ')
+        + 'Geste qui le lève : demander à l\'utilisateur de basculer le sélecteur '
+        + `« Mode de travail » de la grille sur « ${modeId} ».`;
+    }
+
     // Pagination : une vue peut porter beaucoup de lignes, et la réponse part
     // dans le contexte d'un modèle.
     const offset = Math.max(0, Number(args.offset) || 0);
@@ -489,6 +519,10 @@ function installMcpChannel(app, deps) {
       canal:            session.canal || 'api',
       reviewMode:       !!session.reviewMode,
       modeApplique:     modeId,
+      // Le mode dont dépendent les ÉCRITURES — pas toujours celui qu'on vient de
+      // lire. Servi même sans briefing : une relecture briefing:false est
+      // justement ce qui précède une écriture.
+      modeInscriptible: modeEcriture,
       modesDisponibles: listerModes(session),
       colonnes:         decrireColonnes(session, colonnes),
       infosParent:      session.data?.infosParent || {},
@@ -497,6 +531,8 @@ function installMcpChannel(app, deps) {
       pagination:       { offset, limite, total: session.rows.length },
       pendingCount:     SM.countPendingRows(session),
     };
+
+    if (avertissementEcriture) sortie.avertissementEcriture = avertissementEcriture;
 
     // Briefing : les consignes métier de la vue (cf. en tête de fichier).
     if (args.briefing !== false) {
@@ -520,7 +556,9 @@ function installMcpChannel(app, deps) {
       const origineMode    = args.mode ? 'mode demandé explicitement' : 'mode sélectionné dans la grille';
       sortie.briefing = `MODE DE TRAVAIL APPLIQUÉ : ${libelleMode} (${origineMode}).`
         + ' Un changement de mode dans la grille ne se reflète ici qu\'après un nouvel'
-        + " appel de worker_contexte — le mode suit le sélecteur.\n\n" + sortie.briefing;
+        + ' appel de worker_contexte — le mode suit le sélecteur.'
+        + (avertissementEcriture ? '\n\n⚠️ ÉCRITURE : ' + avertissementEcriture : '')
+        + "\n\n" + sortie.briefing;
 
       // Phase bêta — cf. le bandeau en tête de fichier. Ajouté ici, au seul
       // endroit où le briefing est servi, plutôt que dans chacune des deux
@@ -572,12 +610,28 @@ function installMcpChannel(app, deps) {
    *
    * Pas de repli sur scDef.fallback ici : une valeur inconnue est rapportée à
    * l'appelant plutôt que remplacée en silence.
+   *
+   * En dernier recours, les alias déclarés par la vue (mcp.aliasChoix). Ils
+   * existent parce que le briefing d'une vue peut enseigner un vocabulaire qui
+   * n'est PAS celui des labels de la grille : sur listeQuestions, la consigne et
+   * le libellé de la colonne disent tous deux « qcm, courte, ouverte, selection,
+   * cours », là où la grille affiche « Réponse courte », « Texte long », « Liste
+   * de choix », « Cours ». Écrire le mot que la consigne enseigne échouait donc,
+   * et rien en lecture ne permettait de le prévoir : decrireColonnes() sert
+   * exactement la liste que les boucles ci-dessus comparent. Les alias sont
+   * déclarés par la vue, jamais devinés, et ne peuvent viser qu'une valeur qui
+   * existe déjà dans la liste de choix.
    */
-  function resoudreChoix(brut, scDef) {
+  function resoudreChoix(brut, scDef, alias) {
     for (const e of scDef.choix) if (e.valeur === brut) return { ok: true, valeur: e.valeur };
     const s = String(brut).trim();
     for (const e of scDef.choix) if (String(e.label).trim() === s) return { ok: true, valeur: e.valeur };
     for (const e of scDef.choix) if (String(e.valeur) === s) return { ok: true, valeur: e.valeur };
+
+    if (alias) {
+      const cible = Object.prototype.hasOwnProperty.call(alias, s) ? alias[s] : alias[s.toLowerCase()];
+      if (cible !== undefined && scDef.choix.some(e => e.valeur === cible)) return { ok: true, valeur: cible };
+    }
     return { ok: false };
   }
 
@@ -618,10 +672,12 @@ function installMcpChannel(app, deps) {
 
       const scDef = selectChoix[cle];
       if (scDef?.choix?.length) {
-        const r = resoudreChoix(brut, scDef);
+        const alias = session.effectiveWorkerConfig?.mcp?.aliasChoix?.[cle] || null;
+        const r = resoudreChoix(brut, scDef, alias);
         if (!r.ok) {
           const attendus = scDef.choix.map(c => `${JSON.stringify(c.valeur)} (${c.label})`).join(', ');
-          ignorees.push({ _id: id, cle, raison: `valeur hors des choix de cette colonne — attendu : ${attendus}` });
+          const aussi    = alias ? ` — ou l'un de ces mots : ${Object.keys(alias).join(', ')}` : '';
+          ignorees.push({ _id: id, cle, raison: `valeur hors des choix de cette colonne — attendu : ${attendus}${aussi}` });
           continue;
         }
         pretes.push([cle, r.valeur]);
