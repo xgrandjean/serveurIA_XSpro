@@ -341,8 +341,22 @@ const MODES = {
       // ordreQuestion:         { width: 70 },
     },
 
-    colonnesUiHidden:  ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
-    colonnesLlmHidden: ['indication',  'explicationCorrection', 'commentaire','consigneIA','ordreQuestion'],
+    // Le mode Creation masquait aussi indication, explicationCorrection, commentaire et
+    // consigneIA — heritage de l'epoque ou l'on simplifiait la tache d'un LLM limite.
+    // Demasquees le 2026-09-21 : sur cette vue, toutes les colonnes servent quel que soit
+    // le mode, et le masquage creait un TROU FONCTIONNEL. Une question ouverte en
+    // texte(10) + semi est corrigee en s'appuyant sur consigneIA ; la consigneIA etant
+    // masquee en Creation, il etait impossible d'y creer une ouverte complete — il fallait
+    // la creer, puis rebasculer en Correction pour lui donner sa consigne. Meme chose pour
+    // explicationCorrection, destinee a l'explication rendue a l'apprenant apres sa copie.
+    //
+    // Cote canal MCP, le masquage se payait deux fois : worker_ecrire_cellules ecarte
+    // silencieusement une colonne hors du mode actif (colonnesEcriture, mcpChannel.js), ce
+    // qui obligeait a faire basculer le selecteur en cours de travail.
+    //
+    // ordreQuestion reste masque : c'est un placeholder, cf. _docOrdreQuestion du JSON paire.
+    colonnesUiHidden:  ['ordreQuestion'],
+    colonnesLlmHidden: ['ordreQuestion'],
 
     systemPrompt: promptConfig.modes.creation.systemPrompt,
 

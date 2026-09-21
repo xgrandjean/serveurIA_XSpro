@@ -105,7 +105,6 @@ const GESTE_CANAL_FERME =
 
 const MARQUEUR_FORMAT   = '== FORMAT DE RÉPONSE ==';
 const MARQUEUR_COLONNES = '== COLONNES ==';
-const MODELE_MAX        = 3;   // lignes-modèle de XSpro reprises dans le briefing
 
 // Écrit une fois pour toutes les vues : la traduction du contrat d'actions du
 // chemin clé API en appels d'outils.
@@ -174,22 +173,34 @@ function rendreBlocMcp(bloc, session, colonnes) {
 
   // Les lignes-modèle viennent du payload XSpro (data.modele) et non des fichiers
   // de vue, où le champ `modele` est null partout. Projetées sur les colonnes du
-  // mode, comme le fait buildSystemPrompt — mais PLAFONNÉES : la grille contient
-  // déjà de vraies lignes, servies dans `lignes`, qui illustrent bien mieux les
-  // habitudes de l'affaire en cours que des exemples génériques. Trois suffisent à
-  // montrer la forme ; le chemin clé API, lui, les envoie toutes (il n'a pas de
-  // tour de dialogue pour en redemander).
+  // mode, comme le fait buildSystemPrompt.
+  //
+  // SERVIES EN ENTIER depuis le 2026-09-21. Elles étaient plafonnées à trois, pour
+  // ne pas encombrer de répétitions un LLM peu puissant. Mais le plafond était un
+  // slice(0, 3) : il gardait les trois PREMIÈRES, soit sur listeQuestions deux blocs
+  // de cours presque identiques et un qcm — jamais une ouverte, une courte ni une
+  // selection, c'est-à-dire précisément les types dont les règles sont les plus
+  // subtiles (couplage regle/correction, choixCorrect en indices ou en textes). Un
+  // jeu d'exemples amputé de ses cas difficiles coûte plus cher qu'il n'économise,
+  // et le raisonnement d'origine ne vaut plus pour les modèles d'aujourd'hui.
+  //
+  // Le titre insiste sur leur nature : servies en entier, ces lignes ressemblent à
+  // un vrai questionnaire, et rien ne les distinguerait du contenu de la grille.
   const modele = session.data?.modele;
   if (Array.isArray(modele) && modele.length) {
-    const lignes = modele.slice(0, MODELE_MAX).map((m) => {
+    const lignes = modele.map((m) => {
       const o = {};
       for (const c of colonnes) o[c.cle] = m[c.cle] === undefined ? '' : m[c.cle];
       return o;
     });
-    const titre = modele.length > MODELE_MAX
-      ? `== EXEMPLES DE LIGNES FOURNIS PAR XSPRO (${MODELE_MAX} sur ${modele.length}) ==`
-      : '== EXEMPLES DE LIGNES FOURNIS PAR XSPRO ==';
-    parts.push(titre + '\n' + JSON.stringify(lignes, null, 2));
+    parts.push(
+      '== EXEMPLE DE QUESTIONNAIRE COMPLET ==\n'
+      + 'Lignes FICTIVES, servies pour la seule forme : les combinaisons valides de chaque\n'
+      + 'type, et la façon de remplir chaque colonne. Elles ne font PAS partie de la grille\n'
+      + "et n'ont aucun rapport avec le sujet en cours — les vraies lignes sont dans\n"
+      + "« lignes ». Ne jamais les recopier, ni s'y référer comme à du contenu existant.\n"
+      + JSON.stringify(lignes, null, 2)
+    );
   }
 
   parts.push(COMMENT_REPONDRE);

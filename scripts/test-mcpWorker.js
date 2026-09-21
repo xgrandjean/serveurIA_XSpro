@@ -638,8 +638,14 @@ async function verifierBriefings(f) {
     verifier('aucun briefing ne porte le contrat de réponse de la clé API', fautifs.length === 0, fautifs.join(' | '));
     verifier('les deux vues reprises servent leurs consignes courtes', deLaVue === 4, `vue=${deLaVue}, repli=${duRepli}`);
     verifier('les vues non reprises passent par le repli', duRepli > 0, `repli=${duRepli}`);
-    verifier('aucun briefing ne dépasse 8 000 caractères',
-        tailles.every((t) => t <= 8000), 'max = ' + Math.max(...tailles));
+    // Seuil relevé de 8 000 à 12 000 le 2026-09-21, quand les lignes-modèle ont cessé
+    // d'être plafonnées à trois (cf. rendreBlocMcp). Ce n'est pas un budget de jetons,
+    // c'est un garde-fou contre l'emballement : il doit se déclencher si un briefing
+    // double, pas à chaque ajout légitime. Mesure du jour sur les charges d'essai :
+    // max 8 603, contre 6 894 avant. En production le jeu d'exemples est plus fourni
+    // (11 lignes contre 8 sur listeQuestions), ce qui situe le vrai maximum vers 10 000.
+    verifier('aucun briefing ne dépasse 12 000 caractères',
+        tailles.every((t) => t <= 12000), 'max = ' + Math.max(...tailles));
 
     console.log('  (' + tailles.length + ' briefings, de ' + Math.min(...tailles) + ' à ' + Math.max(...tailles) + ' caractères)');
 }
