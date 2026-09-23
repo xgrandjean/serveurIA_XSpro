@@ -1002,9 +1002,14 @@ function revalidateAllRows(session) {
     const invalidFields = session.viewHook.getInvalidFields?.(row) || [];
     const missingFields = session.viewHook.getMissingFields?.(row) || [];
     const combined = Array.from(new Set([...invalidFields, ...missingFields]));
-    if (combined.length > 0) {
-      wsSend(session, { type: 'cell:validate', rowIndex, invalidFields: combined, message: null });
-    }
+    // Emis pour CHAQUE ligne, y compris saine (combined vide) : cote client,
+    // onRowValidate commence par effacer les surcharges de la ligne avant de
+    // reposer celles qu'on lui donne. Ne rien envoyer pour une ligne saine la
+    // laissait donc porter les marqueurs rouges de la ligne qui occupait sa
+    // POSITION auparavant (state.cellStyleOverrides est indexe par rowIndex, pas
+    // par _id) : constate le 2026-09-22 apres le rejet d'une insertion proposee,
+    // qui decale toutes les lignes suivantes d'un cran.
+    wsSend(session, { type: 'cell:validate', rowIndex, invalidFields: combined, message: null });
   });
 }
 

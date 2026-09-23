@@ -1852,10 +1852,12 @@ function onRowStyle(rowIndex, style) {
 // ── Validation ligne : mise en évidence des cellules fautives ────────────────
 function onRowValidate(msg) {
   const { rowIndex, invalidFields = [], pendingFields, pendingCount, message } = msg;
-  const keyPrefix = `${rowIndex}:`;
-  // Supprimer toutes les overrides de cellules pour cette ligne
+  // Comparaison sur l'indice DECOUPE, et non sur un prefixe de chaine : `${6}:`
+  // est aussi le prefixe de "60:contenu" et "61:regle", et nettoyer la ligne 6
+  // effacait alors les marqueurs des lignes 60 a 69 d'une grille assez longue.
+  // Supprimer toutes les overrides de cellules pour cette ligne, et elle seule.
   Object.keys(state.cellStyleOverrides).forEach(k => {
-    if (k.startsWith(keyPrefix)) delete state.cellStyleOverrides[k];
+    if (Number(k.slice(0, k.indexOf(':'))) === rowIndex) delete state.cellStyleOverrides[k];
   });
   if (invalidFields.length > 0) {
 // Style rouge pour chaque champ invalide, plus un repère triangle ⚠ en coin (superposé via
