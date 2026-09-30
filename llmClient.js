@@ -1269,10 +1269,17 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
  */
 function coerceAvecChoix(value, col, selectChoix = {}) {
   const scDef = col && selectChoix ? selectChoix[col.cle] : null;
-  if (scDef && scDef.sendLabel && Array.isArray(scDef.choix) && typeof value === 'string') {
-    const s = value.trim();
-    const parLabel = scDef.choix.find(e => String(e.label).trim() === s);
+  if (scDef && Array.isArray(scDef.choix) && value !== '' && value !== null && value !== undefined) {
+    const s = String(value).trim();
+    const parLabel = scDef.sendLabel ? scDef.choix.find(e => String(e.label).trim() === s) : null;
     if (parLabel) return parLabel.valeur;
+    // Une valeur de la liste, comparée en TEXTE et rendue avec le type de la liste : XSpro
+    // n'envoie pas toujours de `type` sur ces colonnes (niveauListe, tauxHoraire dans une vraie
+    // charge), et coerceValue en faisait alors une chaîne — « 3 » — que normalizeSelectChoixValue
+    // ne reconnaissait plus (3 !== « 3 ») et remplaçait par son repli : toute ligne de détail
+    // devenait un chapitre. Le verbe du canal MCP (resoudreChoix) compare déjà en texte.
+    const parValeur = scDef.choix.find(e => String(e.valeur) === s);
+    if (parValeur) return parValeur.valeur;
   }
   return coerceValue(value, col);
 }
@@ -1310,9 +1317,12 @@ function coerceValue(value, col) {
 function normalizeSelectChoixValue(rawValue, scDef, row) {
   if (!scDef || !scDef.choix?.length) return rawValue;
 
-  // 1. Indice valide → garder
+  // 1. Indice valide → garder, rendu avec le type de la liste. Comparé en texte : le JSON du
+  //    modèle rend volontiers "3" pour 3, et une colonne sans `type` est convertie en chaîne
+  //    (cf. coerceAvecChoix) — une égalité stricte envoyait ces valeurs légitimes au repli.
+  const texteBrut = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
   for (const entry of scDef.choix) {
-    if (entry.valeur === rawValue) return rawValue;
+    if (entry.valeur === rawValue || String(entry.valeur) === texteBrut) return entry.valeur;
   }
 
   // 2. Label connu → convertir

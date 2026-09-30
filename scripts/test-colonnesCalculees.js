@@ -213,6 +213,40 @@ const lignes = (niveaux) => niveaux.map((n, i) => ({ _id: i + 1, niveauListe: n,
             numeros[6] === '2.1' && numeros.slice(-3).join(',') === '3,3.1,', JSON.stringify(numeros));
     }
 
+    // ── 5. Une vraie charge de XSpro : pas de `type` sur niveauListe ──────────
+    titre('Charge réelle de XSpro (colonnes sans type)');
+    {
+        const llmClient = require('../llmClient');
+        // XSpro n'envoie pas de `type` sur les colonnes à choix : le niveau déduit du numéro
+        // passait par String(), puis le repli des listes de choix le ramenait à 1.
+        const payload = { ...payloadBase, sessionId: `calculees_reel_${Date.now()}`,
+            workerConfig: { ...payloadBase.workerConfig, colonnes: payloadBase.workerConfig.colonnes.map(({ type, ...c }) => c), export: { nomOnglet: 'x', colonnesExport: [] } } };
+        const session = SM.createSession(payload);
+        session.origin = 'xspro'; session.canal = 'api'; session.ia = { ...session.ia, model: 'faux-reel' };
+        resolveEffectiveWorkerConfig(session);
+        SM.setStatus(session, SM.STATUS.ACTING);
+        session.activeMode = 'decomposition';
+        verifier('la colonne niveauListe de XSpro n\'a pas de type, la colonne numero est là quand même',
+            !session.effectiveWorkerConfig.colonnes.find((c) => c.cle === 'niveauListe').type && !!session.effectiveWorkerConfig.colonnes.find((c) => c.cle === 'numero'));
+        global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify([
+            { _action: 'insert', _apres: 'fin', numero: '3', designation: 'PLOMBERIE' },
+            { _action: 'insert', _apres: 'fin', numero: '3.1', designation: 'Tube PER 16', unite: 'm', quantiteTotale: 40 },
+            { _action: 'insert', _apres: 'fin', numero: '3.1.1', designation: 'Raccord' },
+            { _action: 'update', _id: 2, numero: '1.1.1' },
+            { _action: 'update', _id: 3, tauxHoraire: '2' },
+        ]) }, finish_reason: 'stop' }], usage: { total_tokens: 1 } }), text: async () => '' });
+        let rows = null;
+        await llmClient.run(session, 'x', 'act', { onCellUpdate: () => {}, onDone: (r) => { rows = r; } }, []);
+        verifier('les niveaux déduits du numéro sont justes même sans type de colonne : 1, 2, 3',
+            !!rows && rows.slice(-3).map((r) => r.niveauListe).join(',') === '1,2,3', rows && JSON.stringify(rows.slice(-3).map((r) => [r.designation, r.niveauListe])));
+        verifier('une mise à jour de numero sur une ligne existante aussi (sous-chapitre → ligne de détail)',
+            !!rows && rows[1].niveauListe === 3, rows && JSON.stringify(rows[1].niveauListe));
+        // (tauxHoraire n'est pas vérifiable ici : placeholder dans les modes connectés, et la
+        // règle de la vue le force ensuite à 1 dès qu'il y a des heures — c'est voulu.)
+        verifier('… et les numéros recalculés suivent : 3, 3.1, 3.1.1',
+            !!rows && Calculees.enrichir(session, rows).slice(-3).map((r) => r.numero).join(',') === '3,3.1,3.1.1');
+    }
+
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
     console.log('');
     console.log(reussis + ' PASS, ' + echoues + ' FAIL');
