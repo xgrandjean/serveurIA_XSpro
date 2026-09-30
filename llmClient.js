@@ -15,6 +15,7 @@
 'use strict';
 
 const SM                               = require('./sessionManager');
+const Journal                          = require('./journalTraitement');
 const { resolveProvider, getHandler }  = require('./providers');
 const { FILE_TYPES, resolveFileType }  = require('./fileTypes');
 const { runHandler }                   = require('./fileHandlers');
@@ -134,7 +135,10 @@ Réponds uniquement avec le JSON corrigé, sans texte ni balise autour.`;
  * @param {Object}       session     — session courante
  * @param {string|null}  userPrompt  — texte utilisateur
  * @param {'plan'|'act'} mode
- * @param {Object}       callbacks   — { onPlan, onCellUpdate, onDone }
+ * @param {Object}       callbacks   — { onPlan, onCellUpdate, onDone, onEtape }
+ *   onEtape(ligne) — une ligne du journal du traitement (journalTraitement.js), poussée
+ *   en direct vers la grille par server.js ; le journal complet reste sur
+ *   session.journalTraitement. Facultatif, comme les autres.
  *   onDone(updatedRows, meta) — meta.warnings: Array, ex. troncature_historique /
  *   troncature_taille (cf. README-prompts.md §6). meta.actionsResume : { inserted,
  *   updated, deleted } (uniquement en editionParActions — cf. applyRowActions),
@@ -145,7 +149,14 @@ Réponds uniquement avec le JSON corrigé, sans texte ni balise autour.`;
  */
 async function run(session, userPrompt, mode, callbacks, files = []) {
   const { ia, data } = session;
-  const { onPlan, onCellUpdate, onDone } = callbacks;
+  const { onPlan, onCellUpdate, onDone, onEtape } = callbacks;
+
+  // Le journal du traitement — la même forme que celui de XSProAssist, pour comparer les
+  // deux canaux sur des faits (cf. journalTraitement.js). Ouvert avant tout : un échec de
+  // préparation est déjà une issue.
+  const journal = Journal.ouvrir(session,
+    { canal: 'api', modele: ia.model || null, mode, modeTravail: session.activeMode || null, demande: userPrompt },
+    { notifier: onEtape || null });
 
   // ── 1. Résolution du provider ───────────────────────────────────────────────
   const { id: providerId } = resolveProvider(ia);
@@ -195,6 +206,16 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
 
   // ── 4. System prompt (+ additions du hook vue) ─────────────────────────────
   const systemPrompt = buildSystemPrompt(overriddenConfig, data, colsLLM, viewHook, mode);
+
+  // Le mode JSON (response_format json_object) force un OBJET en tête de réponse. Quand le
+  // FORMAT DE RÉPONSE demande un TABLEAU (les modes décomposition/création : un tableau
+  // d'actions insert), un modèle qui obéit aux deux consignes à la fois produit un objet aux
+  // clés répétées, illisible — constaté avec mistral-small sur Albert, deux fois sur deux,
+  // correction comprise. Le mode JSON n'est donc demandé que pour un contrat objet
+  // ({ rapport, actions }, ou le contrat positionnel historique... qui est un tableau lui
+  // aussi : jamais). Le journal note ce qui a été fait (jsonMode).
+  const formatEffectif = String(overriddenConfig.formatReponse || '');
+  const contratObjet   = /"rapport"/.test(formatEffectif) || /objet JSON/i.test(formatEffectif);
 
   // ── 5. Rows avec valeurs par défaut + hook vue ─────────────────────────────
   const rowsWithDefaults = applyPlaceholderDefaults(
@@ -260,7 +281,40 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   console.log(`[LLM] ${mode.toUpperCase()} → ${ia.endpoint} (${ia.model})`);
   console.log(`[LLM] Messages : ${truncated.length} total, system ${systemPromptSize} chars, user ${userMsgSize} chars, total ${totalSize} chars`);
   console.log(`[LLM] Timeout config : ${mode === 'act' ? Math.max((ia.timeoutMs || 30000) * 4, 120000) : (ia.timeoutMs || 30000)}ms (mode ${mode})`);
-  const rawResponse = await callLLM(ia, truncated, mode);
+
+  journal.etape({ evenement: 'debut', modele: ia.model || null, mode, modeTravail: activeModeId || null,
+                  lignes: rowsForLLM.length, tailleEnvoi: totalSize, messages: truncated.length,
+                  historises: slotPolicies ? Math.max(0, truncated.length - 2) : 0 });
+
+  // Un appel au modèle, journalisé : durée, réponse coupée ou non, jetons, mode JSON —
+  // ce que callLLM sait et que sa réponse (un texte) ne dit pas.
+  let tourModele = 0;
+  async function appelJournalise(messagesEnvoyes) {
+    const meta = {};
+    const tour = ++tourModele;
+    const taille = messagesEnvoyes.reduce((a, m) => a + (typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length), 0);
+    try {
+      const contenu = await callLLM(ia, messagesEnvoyes, mode, meta, { jsonMode: contratObjet });
+      journal.etape({ evenement: 'modele', tour, dureeMs: meta.dureeMs === undefined ? null : meta.dureeMs, ok: true,
+                      tailleEnvoi: taille, tailleReponse: contenu.length,
+                      ...(meta.jetons ? { jetons: meta.jetons } : {}),
+                      ...(meta.finishReason ? { finish_reason: meta.finishReason } : {}),
+                      jsonMode: !!meta.jsonMode, essais: meta.essais || 1 });
+      return contenu;
+    } catch (err) {
+      journal.etape({ evenement: 'modele', tour, dureeMs: meta.dureeMs === undefined ? null : meta.dureeMs, ok: false,
+                      tailleEnvoi: taille, ...(err.httpStatus ? { status: err.httpStatus } : {}), cause: err.cause || null });
+      throw err;
+    }
+  }
+
+  let rawResponse;
+  try {
+    rawResponse = await appelJournalise(truncated);
+  } catch (err) {
+    journal.fin(err.cause === 'timeout' || err.cause === 'network' ? 'injoignable' : 'erreur', err.message);
+    throw err;
+  }
 
   // ── 9b. Mode ACT : parsing + filet de correction sur JSON invalide ─────────
   // Doit se faire AVANT l'écriture de l'historique (§10) pour que celui-ci
@@ -271,9 +325,9 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   function parseActResponse(resp) {
     if (editionParActions) {
       const applied = applyRowActions(resp, session.rows, colonnes, selectChoix, session);
-      return { rows: applied.rows, resume: applied.resume, rapport: applied.rapport };
+      return { rows: applied.rows, resume: applied.resume, rapport: applied.rapport, declarees: applied.declarees, sansEffet: applied.sansEffet };
     }
-    return { rows: parseAndMergeRows(resp, session.rows, colonnes, selectChoix), resume: null, rapport: null };
+    return { rows: parseAndMergeRows(resp, session.rows, colonnes, selectChoix), resume: null, rapport: null, declarees: null, sansEffet: null };
   }
 
   let finalResponse = rawResponse;
@@ -285,13 +339,14 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
       parseResult = parseActResponse(rawResponse);
     } catch (err1) {
       console.warn(`[LLM] JSON invalide (${String(err1.message).slice(0, 150)}) — renvoi correctif au LLM`);
+      journal.etape({ evenement: 'relance', motif: `JSON invalide : ${String(err1.message).slice(0, 160)}` });
       try {
         const correctionMessages = [
           ...truncated,
           { role: 'assistant', content: rawResponse },
           { role: 'user', content: buildJsonCorrectionPrompt(err1) },
         ];
-        const retryResponse = await callLLM(ia, correctionMessages, mode);
+        const retryResponse = await appelJournalise(correctionMessages);
         finalResponse = retryResponse;
         parseResult = parseActResponse(retryResponse);
         console.log('[LLM] Correction JSON réussie au 2e essai');
@@ -336,11 +391,20 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
 
   // Échec définitif (2 tentatives de parsing épuisées) : l'historique est déjà à jour
   // pour rester exploitable en debug (cf. ci-dessus), on remonte l'erreur maintenant.
-  if (parseError) throw parseError;
+  if (parseError) {
+    // Une réponse coupée par la limite de sortie est la cause la plus probable d'un JSON
+    // invalide qu'aucune correction ne rattrape : le journal le dit, l'erreur aussi.
+    const coupee = journal.journal.etapes.some((e) => e.evenement === 'modele' && e.finish_reason === 'length');
+    journal.fin('erreur', `${coupee ? 'réponse coupée par la limite de sortie du modèle — ' : ''}JSON invalide après correction : ${String(parseError.message).slice(0, 160)}`,
+                { coupee });
+    if (coupee) parseError.suggestion = 'La réponse du modèle a été coupée (limite de sortie) : réduire le lot de lignes, ou choisir un modèle qui écrit plus long.';
+    throw parseError;
+  }
 
   // ── 11. Traitement selon le mode ───────────────────────────────────────────
   if (mode === 'plan') {
     session.currentPlan = finalResponse;
+    journal.fin('plan', null, { tailleReponse: finalResponse.length });
     if (onPlan) onPlan(finalResponse);
     return;
   }
@@ -363,6 +427,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   // index : une comparaison position par position enverrait des cell:update sur de
   // mauvaises lignes. On saute ce rendu intermédiaire ; le résultat final passe par
   // onDone (remplacement complet du tableau, cf. act:done côté grid.js).
+  let cellulesPosees = 0;
   if (onCellUpdate && !editionParActions) {
     for (let i = 0; i < updatedRows.length; i++) {
       const orig = session.rows[i] || {};
@@ -372,11 +437,25 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
         const oldVal = orig[col.cle];
         if (newVal !== undefined && String(newVal) !== String(oldVal)) {
           onCellUpdate(i, col.cle, newVal);
+          cellulesPosees++;
           await sleep(30);
         }
       }
     }
   }
+
+  // Ce qui a été retenu, contre ce que le modèle déclarait (contrat par actions) — cf. le
+  // journal, et applyRowActions pour l'écart.
+  journal.fin('terminee', null, {
+    inserees:   actionsResume ? actionsResume.inserted : Math.max(0, updatedRows.length - session.rows.length),
+    modifiees:  actionsResume ? actionsResume.updated  : null,
+    supprimees: actionsResume ? actionsResume.deleted  : 0,
+    cellules:   editionParActions ? null : cellulesPosees,
+    declarees:  parseResult.declarees || null,
+    sansEffet:  parseResult.sansEffet === undefined ? null : parseResult.sansEffet,
+    rapport:    !!rapportIA,
+    avertissements: warnings.map((w) => w.type),
+  });
 
   if (onDone) onDone(updatedRows, { warnings, actionsResume, rapport: rapportIA });
 }
@@ -686,9 +765,14 @@ async function buildUserContent(textContent, files = [], providerId = 'openai') 
  * @param {Object}   ia       — config IA { endpoint, apiKey, model, timeoutMs }
  * @param {Array}    messages — messages format OpenAI [{ role, content }]
  * @param {string}   mode     — 'plan' | 'act' (pour adapter le timeout et max_tokens)
+ * @param {Object}   [meta]   — renseigné au retour, pour le journal : dureeMs, finishReason,
+ *                              jetons (usage.total_tokens), jsonMode, essais, status. La valeur
+ *                              rendue reste le texte, rien d'existant ne change.
+ * @param {Object}   [options] — { jsonMode: false } pour ne pas demander response_format
+ *                              json_object : le contrat attend un tableau (cf. run).
  * @returns {Promise<string>} — contenu textuel de la réponse LLM
  */
-async function callLLM(ia, messages, mode = 'act') {
+async function callLLM(ia, messages, mode = 'act', meta = {}, options = {}) {
   // Timeout adaptatif : 30s pour PLAN, 120s pour ACT (4x le timeout config, min 120s)
   const baseTimeout = ia.timeoutMs || 30000;
   const timeoutMs = mode === 'act' ? Math.max(baseTimeout * 4, 120000) : baseTimeout;
@@ -715,6 +799,8 @@ async function callLLM(ia, messages, mode = 'act') {
 
     let startTime = Date.now();
     let response;
+    meta.essais   = (meta.essais || 0) + 1;
+    meta.jsonMode = useJsonMode;
     try {
       response = await fetch(ia.endpoint, {
         method:  'POST',
@@ -728,6 +814,7 @@ async function callLLM(ia, messages, mode = 'act') {
     } catch (fetchError) {
       clearTimeout(timeoutId);
       // AbortError (timeout) vs autre erreur réseau
+      meta.dureeMs = Date.now() - startTime;
       if (fetchError.name === 'AbortError') {
         const cause = 'timeout';
         const suggestion = `Le LLM n'a pas répondu dans le délai imparti de ${timeoutMs / 1000}s. Tu peux augmenter ia.timeoutMs dans le payload ou réessayer.`;
@@ -737,12 +824,18 @@ async function callLLM(ia, messages, mode = 'act') {
       const cause = 'network';
       const suggestion = 'Vérifie ta connexion réseau et que l\'endpoint est accessible.';
       console.error(`[LLM] Erreur réseau (${mode}) :`, fetchError.message);
-      throw Object.assign(new Error(`⚠ Erreur réseau : ${fetchError.message}`), { cause, suggestion, httpStatus: null });
+      // « fetch failed » ne dit rien : la cause de undici (ECONNRESET, UND_ERR_SOCKET, ENOTFOUND…)
+      // dit si c'est le réseau, le DNS, ou le serveur qui a coupé la connexion — vu avec Gemini,
+      // qui ferme la connexion au bout de 60 s quand le modèle est saturé.
+      const detail = fetchError.cause ? ` (${fetchError.cause.code || fetchError.cause.message})` : '';
+      throw Object.assign(new Error(`⚠ Erreur réseau : ${fetchError.message}${detail}`), { cause, suggestion, httpStatus: null });
     } finally {
       clearTimeout(timeoutId);
     }
 
     const elapsed = Date.now() - startTime;
+    meta.dureeMs = elapsed;
+    meta.status  = response.status;
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => '');
@@ -778,6 +871,9 @@ async function callLLM(ia, messages, mode = 'act') {
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
+    meta.finishReason = data?.choices?.[0]?.finish_reason || null;
+    meta.jetons       = Number(data?.usage?.total_tokens) || null;
+    if (meta.finishReason === 'length') console.warn(`[LLM] Réponse COUPÉE par la limite de sortie (finish_reason=length, ${mode})`);
     if (!content) {
       const cause = 'empty_response';
       const suggestion = 'Le LLM a répondu mais sans contenu textuel — vérifie les logs de la requête.';
@@ -799,7 +895,7 @@ async function callLLM(ia, messages, mode = 'act') {
   // ensuite (cf. plan JSON mode auto, doc/ ou mémoire projet).
   const capKey = `${ia.endpoint}::${ia.model}`;
   const jsonModeState = jsonModeSupportCache.get(capKey); // true | false | undefined
-  const attemptJsonMode = mode === 'act' && jsonModeState !== false;
+  const attemptJsonMode = mode === 'act' && options.jsonMode !== false && jsonModeState !== false;
 
   if (!attemptJsonMode) return doRequest(false);
 
@@ -870,7 +966,7 @@ function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}
     for (const [key, val] of Object.entries(llmRow)) {
       if (placeholderKeys.has(key)) continue;
       const col = colonnes.find(c => c.cle === key);
-      result[key] = coerceValue(val, col);
+      result[key] = coerceAvecChoix(val, col, selectChoix);
     }
     // Normalisation selectChoix après coerce (label → valeur)
     normalizeSelectChoixRow(result, selectChoix);
@@ -1029,7 +1125,7 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
       // (indication, explicationCorrection...) est absent de `orig`. '' est aussi la valeur
       // correcte a restaurer en cas de rejet : le champ etait vide.
       const col = colonnes.find(c => c.cle === key);
-      const nouvelle = coerceValue(val, col);
+      const nouvelle = coerceAvecChoix(val, col, selectChoix);
 
       // Une "modification" qui ne modifie rien ne doit ni etre marquee ni etre comptee :
       // sinon l'utilisateur lit "N lignes modifiees" alors que rien n'a bouge, et voit des
@@ -1134,7 +1230,30 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
   }
   console.log(`[LLM] Actions appliquees — inserees:${resume.inserted} modifiees:${resume.updated} supprimees:${resume.deleted}`);
 
-  return { rows: result, resume, rapport };
+  // `declarees` : ce que le modèle a demandé ; `resume` : ce qui a changé. L'écart va au
+  // journal du traitement (cf. run), pas seulement dans ce log.
+  const declarees = { inserees: insertedCount, modifiees: updatesById.size, supprimees: deletedIds.size };
+  return { rows: result, resume, rapport, declarees, sansEffet: idsSansEffet.length };
+}
+
+/**
+ * Le label d'une colonne à choix (sendLabel) est résolu en sa valeur AVANT la conversion de
+ * type — et non après, comme le faisait la chaîne coerceValue → normalizeSelectChoixRow. Sur une
+ * colonne integer, « ○ ◆ ○ » passait d'abord par parseInt, donnait 0, et 0 est une valeur de la
+ * liste : le label enseigné par le FORMAT DE RÉPONSE finissait en niveau 0. Constaté le
+ * 2026-09-30 avec mistral-small (Albert) sur detailsDevis : toutes les lignes insérées perdaient
+ * leur niveau, alors que XSProAssist, dont le verbe résout le label d'abord (mcpChannel.js,
+ * resoudreChoix), les rangeait juste. Une valeur qui n'est pas un label connu suit le chemin
+ * d'avant ; normalizeSelectChoixRow reste appelé ensuite, sans effet sur une valeur déjà résolue.
+ */
+function coerceAvecChoix(value, col, selectChoix = {}) {
+  const scDef = col && selectChoix ? selectChoix[col.cle] : null;
+  if (scDef && scDef.sendLabel && Array.isArray(scDef.choix) && typeof value === 'string') {
+    const s = value.trim();
+    const parLabel = scDef.choix.find(e => String(e.label).trim() === s);
+    if (parLabel) return parLabel.valeur;
+  }
+  return coerceValue(value, col);
 }
 
 function coerceValue(value, col) {
@@ -1209,7 +1328,7 @@ function sanitizeNewRow(llmRow, colonnes, placeholderKeys, selectChoix = {}) {
   for (const col of colonnes) {
     row[col.cle] = placeholderKeys.has(col.cle)
       ? ''
-      : (llmRow[col.cle] !== undefined ? coerceValue(llmRow[col.cle], col) : '');
+      : (llmRow[col.cle] !== undefined ? coerceAvecChoix(llmRow[col.cle], col, selectChoix) : '');
   }
   normalizeSelectChoixRow(row, selectChoix);
   return row;

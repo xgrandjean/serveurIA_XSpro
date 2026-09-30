@@ -23,6 +23,8 @@ npm install
 | `npm run test:mcp` | Vérifie le canal MCP : protocole et garde-fous — voir [`CANAL_MCP.md`](./CANAL_MCP.md) |
 | `npm run test:mcp:e2e` | Idem, plus un aller-retour complet sur une vraie session, et XSProAssist de bout en bout avec un faux modèle |
 | `npm run test:assist` | XSProAssist (`xsproassist.js`) avec un faux modèle en mémoire — voir [`XSPROASSIST.md`](./XSPROASSIST.md) |
+| `npm run test:journal` | Le journal du chemin clé API (`journalTraitement.js`, `llmClient.run`) avec un faux `fetch` |
+| `npm run comparer -- --ia=<fichier>` | Compare clé API et XSProAssist sur les mêmes demandes, avec un vrai modèle (`--simuler` : un modèle idéal, sans appel) — voir [`XSPROASSIST.md`](./XSPROASSIST.md) |
 | `npm run build:for-xspro` | Compile `server.js` en exécutable (`pkg`) et le déploie directement dans `../XSpro/assets/model/` — voir [`XSPRO_INTEGRATION.md`](./XSPRO_INTEGRATION.md) §6bis |
 
 ## Intégration XSpro

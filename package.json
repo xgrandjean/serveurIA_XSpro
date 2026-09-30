@@ -17,6 +17,8 @@
     "test:mcp": "node scripts/test-mcpWorker.js",
     "test:mcp:e2e": "node scripts/test-mcpWorker.js --e2e",
     "test:assist": "node scripts/test-xsproassist.js",
+    "test:journal": "node scripts/test-journal.js",
+    "comparer": "node scripts/comparer-canaux.js",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",

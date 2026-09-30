@@ -822,6 +822,9 @@ async function handleUIMessage(session, msg) {
         const llmClient = require('./llmClient');
         await llmClient.run(session, prompt, mode, {
           onPlan:       (plan)              => wsSend(session, { type: 'plan', plan }),
+          // Le journal du traitement, en direct — la même ligne que XSProAssist pousse
+          // (cf. journalTraitement.js) : la grille l'affiche dans le fil.
+          onEtape:      (etape)             => wsSend(session, { type: 'journal:etape', etape }),
           onCellUpdate: (rowIndex, cle, val) => {
             SM.setCellValue(session, rowIndex, cle, val);
             wsSend(session, { type: 'cell:update', rowIndex, cle, value: val });
@@ -865,6 +868,7 @@ async function handleUIMessage(session, msg) {
         const llmClient = require('./llmClient');
         // session.activeMode mémorisé lors du prompt:send qui a déclenché le plan
         await llmClient.run(session, null, 'act', {
+          onEtape:      (etape)             => wsSend(session, { type: 'journal:etape', etape }),
           onCellUpdate: (rowIndex, cle, val) => {
             SM.setCellValue(session, rowIndex, cle, val);
             wsSend(session, { type: 'cell:update', rowIndex, cle, value: val });

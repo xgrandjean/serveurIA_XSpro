@@ -150,7 +150,46 @@ npm run test:mcp:e2e    + XSProAssist de bout en bout : un faux modèle servi pa
                         session au bloc « ia » pointé dessus, la bascule et la demande par la
                         WebSocket comme la grille, le journal, act:done, le rejeu à l'ouverture,
                         le refus d'écriture MCP pendant ce temps, un modèle sans outils (400)
+npm run test:journal    le journal du chemin clé API (llmClient.run) avec un faux fetch : cas
+                        nominal, retenu contre déclaré, correction JSON, réponse coupée, modèle
+                        injoignable, mode JSON replié, plan, et mesuresDe
 ```
+
+## Comparer les deux canaux
+
+```
+npm run comparer -- --ia=<fichier>  [--modele=<nom>] [--demandes=1,3] [--canaux=api,assist] [--port=8899]
+npm run comparer -- --simuler       [mêmes options]
+```
+
+`scripts/comparer-canaux.js` joue les **mêmes demandes** sur la **même grille** (la charge
+`detailsDevis`) par les deux canaux, avec le **même modèle** — le bloc `ia` d'un fichier, d'une
+charge `standalone-payload-*.json`, ou du `parametresAi.json` de XSpro dont `config_or` (puis
+`config_hf`) est pris comme le fait `AI:getWorkerIaConfig` ; `--modele` essaie un autre modèle
+du même fournisseur. Il lance **son propre Worker** sur un port à lui, sans ouverture de
+navigateur et avec ses propres fichiers d'état : un Worker déjà en marche n'est jamais
+réutilisé — lancé en standalone, il ouvre un onglet à chaque session créée, et cet onglet
+s'approprie la WebSocket de la session, si bien qu'un client de mesure n'en reçoit plus rien.
+Pour chaque couple demande × canal : une session par `POST /process`, la bascule et la demande
+par la WebSocket comme la grille, la fin attendue, le journal relu, et ce qui est retenu dans
+la grille (lignes ajoutées avec leur niveau et leur désignation, cellules modifiées
+avant/après). Le tableau imprimé et `logs/comparaison-<horodatage>.json` portent durée, appels,
+jetons, taille des envois, relances, refus, retenu contre déclaré.
+
+`--simuler` remplace le modèle par un « Albert idéal » servi par HTTP, qui suit les consignes à
+la lettre et répond sans délai, dans le contrat que chaque canal attend (le tableau ou l'objet
+du FORMAT DE RÉPONSE pour la clé API, des appels d'outils pour XSProAssist). Il montre ce que
+coûte chaque chemin quand le modèle fait tout juste — taille des envois, nombre d'appels,
+mécanique du retenu — pas ce que vaut un vrai modèle. Sans `--simuler`, le script appelle un
+**vrai** modèle : chaque ligne du tableau a coûté des appels.
+
+**Le mode JSON suit le contrat.** La comparaison réelle a d'abord montré la clé API échouant
+deux fois sur deux avec `mistral-small` sur Albert : `response_format: json_object` force un
+objet en tête de réponse, alors que le FORMAT DE RÉPONSE des modes décomposition/création
+demande un tableau d'actions ; le modèle, obéissant aux deux, rendait un objet aux clés
+répétées, illisible même après correction. Depuis, `llmClient.run` ne demande le mode JSON que
+pour un contrat objet (`{ rapport, actions }`), et le journal note ce qui a été fait
+(`jsonMode`).
 
 ## Limites connues
 
