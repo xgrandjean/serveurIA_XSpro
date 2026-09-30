@@ -17,15 +17,22 @@ Un sélecteur « Remplissage » dans l'en-tête de la grille choisit qui pré-re
 | Canal | Visible dans l'UI | Masqué |
 |---|---|---|
 | `api` | zone de prompt, badge du modèle, ⚙ Config IA | le panneau MCP |
+| `assist` | zone de prompt, badge du modèle, ⚙ Config IA, le journal dans le fil | le panneau MCP, le choix Plan/Act |
 | `mcp` | le panneau MCP (numéro de session, état) | zone de prompt, badge du modèle, ⚙ Config IA |
+
+Le canal `assist` est **XSProAssist** — un agent hébergé par le Worker, qui passe par les mêmes
+verbes que la façade MCP avec la clé de la session ; il a sa propre note,
+[`XSPROASSIST.md`](./XSPROASSIST.md). Chaque verbe d'écriture sait qui l'appelle (`origine` :
+`mcp` ou `assist`) et n'accepte que l'appelant dont la session porte le canal : en canal
+`assist`, Claude reçoit un refus qui nomme XSProAssist et le geste qui le lève.
 
 La grille, la barre de revue et le fil de conversation restent visibles dans les deux cas : la
 saisie à la main n'est pas un « mode », c'est la grille elle-même.
 
-Le verrou est aussi côté serveur, dans les deux sens : `prompt:send` et `plan:validate` sont
-refusés hors canal `api` ; les verbes d'écriture MCP sont refusés hors canal `mcp`. Les verbes
-de **lecture** restent toujours autorisés, pour que Claude puisse voir l'état d'une session et
-expliquer pourquoi il ne peut pas écrire.
+Le verrou est aussi côté serveur, dans les deux sens : `prompt:send` est refusé en canal `mcp`
+(il sert la clé API et XSProAssist), `plan:validate` hors canal `api` ; les verbes d'écriture
+MCP sont refusés hors canal `mcp`. Les verbes de **lecture** restent toujours autorisés, pour
+que Claude puisse voir l'état d'une session et expliquer pourquoi il ne peut pas écrire.
 
 ## Qui décide du canal d'une session neuve
 
@@ -356,9 +363,10 @@ trois filtres, montés **avant** ce middleware CORS :
 `"mcp": { "actif": false }` dans `worker-config.json` ferme complètement le canal.
 
 **Statut** — une écriture n'est acceptée que sur `idle`, `connected`, `paused`, `error`. Sont
-refusés : `planning`/`acting` (l'IA par clé API travaille, deux sources écriraient les mêmes
-lignes), `delivering`, et `done` — une session livrée a vu ses lignes partir chez XSpro, une
-écriture ne repartirait pas.
+refusés : `planning`/`acting` (l'IA par clé API ou XSProAssist travaille, deux sources
+écriraient les mêmes lignes), `delivering`, et `done` — une session livrée a vu ses lignes
+partir chez XSpro, une écriture ne repartirait pas. XSProAssist, lui, écrit pendant `acting` :
+c'est lui qui travaille, et le verbe le sait (`origine`).
 
 **Lignes** — insertion et suppression sont refusées hors mode revue : une ligne
 `__pendingDelete` y survivrait à `snapshotRows` et partirait quand même chez XSpro, alors

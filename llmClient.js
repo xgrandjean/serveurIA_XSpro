@@ -1319,4 +1319,6 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
-module.exports = { run, buildSystemPrompt, buildDataCSV, buildUserMessage, buildPromptPreview };
+// buildUserContent : le routage des fichiers joints par provider, réutilisé tel quel par
+// XSProAssist (xsproassist.js) — la même pièce jointe part de la même façon sur les deux canaux.
+module.exports = { run, buildSystemPrompt, buildDataCSV, buildUserMessage, buildPromptPreview, buildUserContent };

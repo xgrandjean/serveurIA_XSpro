@@ -34,7 +34,13 @@ const { resolveProvider, getSupportedTypes }    = require('./providers');
 const { buildAcceptString }                     = require('./fileTypes');
 const { resolveEffectiveWorkerConfig }          = require('./viewResolver');
 const { installMcpChannel }                     = require('./mcpChannel');
+const { OUTILS: OUTILS_MCP }                    = require('./mcpStdio');
+const XSProAssist                               = require('./xsproassist');
 const ClaudeConfig                              = require('./claudeConfig');
+
+// Les trois canaux de remplissage d'une session : l'IA par clé API (un coup), XSProAssist
+// (l'agent hébergé ici, même clé, cf. xsproassist.js), Claude par le canal MCP.
+const CANAUX = ['api', 'assist', 'mcp'];
 
 // ── Résolution des chemins ────────────────────────────────────────────────────
 // ASSETS_ROOT : base des fichiers statiques en lecture seule (public/, views/,
@@ -94,11 +100,11 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
       // Canal MCP : actif sauf refus explicite (cf. mcpChannel.js).
       mcp: { actif: raw.mcp?.actif !== false },
       // Canal de remplissage des NOUVELLES sessions : 'api' (l'IA par clé API,
-      // comportement historique) ou 'mcp' (Claude via le canal de pilotage).
-      // L'utilisateur peut basculer session par session depuis la grille ; ce
-      // réglage ne fixe que le point de départ. 'mcp' permet à Claude de préparer
-      // une session sans que personne ait ouvert la grille.
-      canalParDefaut: raw.canalParDefaut === 'mcp' ? 'mcp' : 'api',
+      // comportement historique), 'assist' (XSProAssist) ou 'mcp' (Claude via le
+      // canal de pilotage). L'utilisateur peut basculer session par session depuis
+      // la grille ; ce réglage ne fixe que le point de départ. 'mcp' permet à
+      // Claude de préparer une session sans que personne ait ouvert la grille.
+      canalParDefaut: CANAUX.includes(raw.canalParDefaut) ? raw.canalParDefaut : 'api',
       // Instruments de phase bêta — cf. le bandeau en tête de mcpChannel.js.
       beta: { rapportAnomalies: raw.beta?.rapportAnomalies !== false },
     };
@@ -127,7 +133,7 @@ const CANAL_FILE = path.join(DATA_ROOT, '.worker-canal.json');
 let dernierCanalChoisi = WORKER_CONFIG.canalParDefaut;
 try {
   const memo = JSON.parse(fs.readFileSync(CANAL_FILE, 'utf-8'));
-  if (memo.canal === 'mcp' || memo.canal === 'api') dernierCanalChoisi = memo.canal;
+  if (CANAUX.includes(memo.canal)) dernierCanalChoisi = memo.canal;
 } catch { /* absent ou illisible → canalParDefaut, comportement d'origine */ }
 
 function memoriserCanal(canal) {
@@ -195,11 +201,26 @@ app.use(express.json({ limit: '10mb' }));
 // doivent jamais recevoir Access-Control-Allow-Origin, sinon n'importe quelle
 // page ouverte dans le navigateur de l'utilisateur pourrait écrire dans sa
 // grille. Toute la logique est dans mcpChannel.js.
-installMcpChannel(app, {
+const canalMcp = installMcpChannel(app, {
   SM, wsSend,
   actif:            WORKER_CONFIG.mcp.actif,
   dataRoot:         DATA_ROOT,
   rapportAnomalies: WORKER_CONFIG.beta.rapportAnomalies,
+});
+
+// ── XSProAssist ───────────────────────────────────────────────────────────────
+// Le troisième canal de remplissage : un agent hébergé ici même, qui passe par
+// les verbes du canal MCP — mêmes outils, mêmes garde-fous — avec le modèle du
+// bloc `ia` de la session. Toute la logique est dans xsproassist.js ; ici on ne
+// fait que lui donner ce dont il a besoin, et le lancer sur 'prompt:send'.
+const xsproassist = XSProAssist.creerAssistant({
+  SM, wsSend,
+  verbes:             canalMcp.verbes,
+  outils:             OUTILS_MCP,
+  contenuUtilisateur: (texte, files, providerId) => require('./llmClient').buildUserContent(texte, files, providerId),
+  providerDe:         (ia) => resolveProvider(ia || {}).id,
+  rapportAnomalies:   WORKER_CONFIG.beta.rapportAnomalies,
+  journal:            (texte) => console.log(`[XSProAssist] ${texte}`),
 });
 
 // Fichiers statiques publics (UI)
@@ -520,6 +541,10 @@ wss.on('connection', (ws, req) => {
        // que personne n'avait la grille ouverte, auquel cas wsSend n'avait pas de
        // destinataire (cf. mcpChannel.js, verbe terminer).
        rapport:      session.dernierRapport || null,
+       // Journal du dernier traitement (clé API ou XSProAssist, cf.
+       // journalTraitement.js), pour la même raison : ses étapes sont poussées en
+       // direct (journal:etape), et rejouées ici.
+       journal:      session.journalTraitement || null,
        workerConfig: session.effectiveWorkerConfig,
        rows:         session.rows,
        infosParent:  session.data.infosParent || {},
@@ -686,7 +711,7 @@ async function handleUIMessage(session, msg) {
     // le serveur refuse l'entrée de celui qui n'est pas choisi — ici pour le chemin
     // clé API (cf. 'prompt:send' ci-dessous), dans mcpChannel.js pour le chemin MCP.
     case 'canal:set': {
-      const vise = msg.canal === 'mcp' ? 'mcp' : 'api';
+      const vise = CANAUX.includes(msg.canal) ? msg.canal : 'api';
       // Basculer pendant que l'IA travaille laisserait un run sans destination :
       // les cell:update en vol continueraient d'arriver sur un canal désormais fermé.
       if ([SM.STATUS.PLANNING, SM.STATUS.ACTING, SM.STATUS.DELIVERING].includes(session.status)) {
@@ -743,13 +768,14 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
-    // L'utilisateur lance un prompt (mode Plan ou Act direct)
+    // L'utilisateur lance un prompt (mode Plan ou Act direct) — clé API, ou XSProAssist
     case 'prompt:send': {
       // Défense en profondeur : la zone de prompt est déjà masquée côté client en
       // canal MCP, mais une session ne doit pas pouvoir être remplie par les deux
       // sources à la fois — l'utilisateur ne saurait plus d'où vient une valeur.
-      if ((session.canal || 'api') !== 'api') {
-        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » pour utiliser l\'IA par clé API.' });
+      const canal = session.canal || 'api';
+      if (canal === 'mcp') {
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
         break;
       }
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
@@ -758,6 +784,37 @@ async function handleUIMessage(session, msg) {
       session.activeMode = activeMode;
 
       SM.pushHistory(session, 'user', prompt);
+
+      // XSProAssist : pas de plan, il agit — par les verbes du canal, la session en
+      // `acting` le temps du traitement (ce statut ferme la grille et le canal MCP
+      // pendant qu'il écrit). Il conclut lui-même par worker_terminer → act:done ;
+      // s'il n'a rien conclu, la grille attend encore une fin : on la lui donne, en
+      // disant l'échec tel quel — jamais de repli silencieux sur la clé API.
+      if (canal === 'assist') {
+        SM.setStatus(session, SM.STATUS.ACTING);
+        wsSend(session, { type: 'status', status: session.status });
+        let bilan;
+        try {
+          bilan = await xsproassist.traiter(session, { demande: prompt, files, activeMode });
+        } catch (e) {
+          bilan = { issue: 'erreur', motif: e.message || 'erreur inconnue', conclu: false };
+          console.error(`[WS] Erreur session ${session.sessionId} (XSProAssist) :`, e.message);
+        }
+        if (bilan.rapport) SM.pushHistory(session, 'assistant', bilan.rapport);
+        if (!bilan.conclu) {
+          SM.setStatus(session, SM.STATUS.ERROR);
+          wsSend(session, {
+            type:       'error',
+            message:    `XSProAssist — ${bilan.motif || bilan.issue}`,
+            cause:      bilan.cause || bilan.issue,
+            suggestion: null,
+            httpStatus: bilan.status || null,
+            timestamp:  Date.now(),
+          });
+        }
+        break;
+      }
+
       SM.setStatus(session, mode === 'plan' ? SM.STATUS.PLANNING : SM.STATUS.ACTING);
       wsSend(session, { type: 'status', status: session.status });
 
@@ -795,9 +852,11 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur valide le plan et lance l'exécution
     case 'plan:validate': {
       // Même garde que 'prompt:send' : un plan élaboré avant une bascule de canal
-      // ne doit pas pouvoir être exécuté par la clé API après coup.
+      // ne doit pas pouvoir être exécuté par la clé API après coup. XSProAssist
+      // n'a pas de plan : il agit, ou dit pourquoi il ne peut pas.
       if ((session.canal || 'api') !== 'api') {
-        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » pour exécuter ce plan.' });
+        const qui = session.canal === 'assist' ? 'XSProAssist' : 'Claude (MCP)';
+        wsSend(session, { type: 'error', message: `⚠ Cette session est en remplissage par ${qui}. Basculer le sélecteur « Remplissage » sur « Clé API » pour exécuter ce plan.` });
         break;
       }
       SM.setStatus(session, SM.STATUS.ACTING);
@@ -903,7 +962,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0 });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null });
       break;
     }
 
@@ -951,6 +1010,9 @@ async function handleUIMessage(session, msg) {
     case 'session:newtask': {
       session.history = [];
       session.currentPlan = null;
+      // XSProAssist rejoue ses demandes passées comme la clé API rejoue ses tours : une
+      // nouvelle tâche repart sans elles (cf. xsproassist.js, historiqueAssist).
+      session.historiqueAssist = [];
       SM.setStatus(session, SM.STATUS.CONNECTED);
       wsSend(session, { type: 'session:newtask' });
       console.log(`[WS] Nouvelle tâche pour ${session.sessionId} — historique vidé, données conservées`);

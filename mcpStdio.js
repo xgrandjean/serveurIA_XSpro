@@ -444,4 +444,6 @@ function demarrer() {
     process.stderr.write('[mcp-worker] prêt (' + OUTILS.length + ' outils)\n');
 }
 
-module.exports = { demarrer };
+// OUTILS est aussi lu par xsproassist.js : XSProAssist donne à son modèle les mêmes
+// outils que la façade donne à Claude, descriptions comprises. Une seule déclaration.
+module.exports = { demarrer, OUTILS };

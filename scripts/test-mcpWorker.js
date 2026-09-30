@@ -15,7 +15,9 @@
  *   node scripts/test-mcpWorker.js          protocole + garde-fous
  *   node scripts/test-mcpWorker.js --e2e    + un aller-retour complet sur une
  *                                           vraie session (lance un Worker au
- *                                           besoin, n'ouvre aucun navigateur)
+ *                                           besoin, n'ouvre aucun navigateur),
+ *                                           et XSProAssist avec un faux modèle
+ *                                           servi par HTTP (rien n'est payé)
  */
 
 'use strict';
@@ -514,6 +516,9 @@ async function allerRetour(dejaJoignable) {
         // 12. Ce que XSpro annonce, et ce que le Worker en fait.
         await verifierNegociationCanal(f);
 
+        // 13. Le troisième canal, de bout en bout, avec un faux modèle.
+        await verifierXSProAssist(f);
+
         ws.fermer();
         f.fermer();
     } finally {
@@ -584,6 +589,163 @@ async function verifierNegociationCanal(f) {
     // Remettre le Worker dans l'état trouvé — le fichier ET la variable en
     // mémoire, que seul le vrai geste remet en place.
     if (memoireInitiale) await choisir(avecCle.sessionId, memoireInitiale);
+}
+
+// ── XSProAssist, de bout en bout ──────────────────────────────────────────────
+// Le troisième canal (xsproassist.js), avec un FAUX modèle servi par un serveur
+// HTTP local : la session reçoit un bloc `ia` qui pointe dessus, la grille bascule
+// sur « XSProAssist » et envoie une demande, exactement comme le ferait
+// l'utilisateur. On vérifie ce que la grille reçoit (statut, journal, cellules,
+// fin de lot avec rapport), ce que la façade MCP voit pendant ce temps (canal,
+// écriture refusée avec le geste qui la lève), ce qui est rejoué à l'ouverture
+// suivante, et qu'un modèle qui refuse les outils est dit tel quel.
+function fauxModeleHttp() {
+    const appels = [];
+    const etat   = { mode: 'nominal' };
+    const srv = http.createServer((req, res) => {
+        let corps = '';
+        req.on('data', (c) => { corps += c; });
+        req.on('end', () => {
+            let body = {};
+            try { body = JSON.parse(corps); } catch (_) { /* corps illisible */ }
+            appels.push({ messages: body.messages || [], tools: body.tools || [], tool_choice: body.tool_choice, auth: req.headers.authorization || '' });
+            if (etat.mode === 'refus400') {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: { message: 'Function calling is not enabled for this model' } }));
+            }
+            // Premier tour : une écriture ; une fois son résultat reçu : la conclusion.
+            const dejaEcrit = (body.messages || []).some((m) => m.role === 'tool');
+            const tool_calls = dejaEcrit
+                ? [{ id: 'call_fin', type: 'function', function: { name: 'worker_terminer',
+                     arguments: JSON.stringify({ rapport: 'Essai XSProAssist : premier chapitre revu.' }) } }]
+                : [{ id: 'call_ecr', type: 'function', function: { name: 'worker_ecrire_cellules',
+                     arguments: JSON.stringify({ lignes: [{ _id: 1, valeurs: { designation: 'Chapitre revu par XSProAssist' } }] }) } }];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ model: body.model, choices: [{ message: { role: 'assistant', content: '', tool_calls }, finish_reason: 'tool_calls' }] }));
+        });
+    });
+    return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve({
+        url: `http://127.0.0.1:${srv.address().port}/v1/chat/completions`,
+        appels, etat,
+        fermer: () => { try { srv.close(); } catch (_) {} },
+    })));
+}
+
+async function verifierXSProAssist(f) {
+    titre('XSProAssist (faux modèle par HTTP)');
+    const modele = await fauxModeleHttp();
+    const memoire = () => {
+        try { return JSON.parse(fs.readFileSync(CANAL_FILE, 'utf8')).canal; } catch (_) { return null; }
+    };
+    const memoireInitiale = memoire();
+    const exportsAvant = listerExports().length;
+    let derniereUI = null;
+
+    async function creer(suffixe) {
+        const p = JSON.parse(fs.readFileSync(PAYLOAD, 'utf8'));
+        delete p._origin;
+        p.sessionId = `assist_e2e_${suffixe}_${Date.now()}`;
+        // Le bloc « ia » que XSpro prêterait, pointé sur le faux modèle.
+        p.ia = { apiKey: 'cle-factice', endpoint: modele.url, provider: 'openai', model: 'faux-modele', timeoutMs: 5000, maxPromptLength: 25000 };
+        const corps = JSON.stringify(p);
+        const rp = await requete({ method: 'POST', path: '/process', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(corps) } }, corps);
+        return { sessionId: p.sessionId, code: rp.code };
+    }
+
+    try {
+        // 1. Une session, la grille, la bascule sur XSProAssist.
+        const s1 = await creer('nominal');
+        verifier('POST /process accepte la session au faux modèle', s1.code === 200, 'HTTP ' + s1.code);
+        const ws = await connecterUI(s1.sessionId);
+        derniereUI = ws;
+        verifier('la grille peut basculer sur XSProAssist', (await ws.basculer('assist')) === 'assist');
+        verifier('le choix est mémorisé comme les deux autres', memoire() === 'assist', 'mémoire = ' + memoire());
+
+        // 2. Pendant ce temps, la façade MCP voit le canal et ne peut pas écrire.
+        const vues = donnees(await f.outil('worker_sessions', {}));
+        const moi  = vues && vues.sessions.find((s) => s.sessionId === s1.sessionId);
+        verifier('worker_sessions rapporte le canal « assist », non inscriptible pour Claude',
+            !!(moi && moi.canal === 'assist' && moi.ecrivable === false && /XSProAssist/.test(moi.raison || '')),
+            moi && JSON.stringify({ canal: moi.canal, ecrivable: moi.ecrivable, raison: moi.raison }).slice(0, 200));
+        const refus = await f.outil('worker_ecrire_cellules', { sessionId: s1.sessionId, lignes: [{ _id: 1, valeurs: { designation: 'non' } }] });
+        verifier('worker_ecrire_cellules est refusé, et le message nomme le geste',
+            refus.result.isError === true && /XSProAssist/.test(texte(refus)) && /Claude \(MCP\)/.test(texte(refus)), texte(refus).slice(0, 160));
+
+        // 3. La demande, par le même message que la zone de prompt de la grille.
+        const attenteFin = ws.attendre('act:done', 20000);
+        ws.envoyer({ type: 'prompt:send', prompt: 'Revois le premier chapitre.', mode: 'act', files: [], activeMode: null });
+        const fin = await attenteFin;
+        verifier('act:done arrive, avec le rapport du modèle',
+            !!(fin && /Essai XSProAssist/.test(fin.rapport || '')), fin && String(fin.rapport));
+        // act:done part de worker_terminer lui-même : les deux dernières lignes du journal
+        // (l'outil, puis la fin) le suivent de quelques millisecondes.
+        const journalClos = () => ws.messages.some((m) => m.type === 'journal:etape' && m.etape.evenement === 'fin');
+        for (let i = 0; i < 5 && !journalClos(); i++) await ws.attendre('journal:etape', 2000);
+        verifier('la grille est passée par « acting » puis a reçu la cellule et sa validation',
+            ws.messages.some((m) => m.type === 'status' && m.status === 'acting') && ws.recus['cell:update'] >= 1 && ws.recus['cell:validate'] >= 1,
+            JSON.stringify(ws.recus));
+        const etapes = ws.messages.filter((m) => m.type === 'journal:etape').map((m) => m.etape);
+        verifier('le journal est arrivé en direct : début, 2 appels au modèle, 2 outils, fin',
+            etapes.filter((e) => e.evenement === 'debut').length === 1 && etapes.filter((e) => e.evenement === 'modele').length === 2
+            && etapes.filter((e) => e.evenement === 'outil').length === 2 && etapes.some((e) => e.evenement === 'fin' && e.issue === 'terminee'),
+            etapes.map((e) => e.evenement + (e.nom ? ':' + e.nom : '')).join(','));
+
+        // 4. Ce que le faux modèle a reçu.
+        verifier('le modèle a été appelé deux fois, avec la clé, les outils et tool_choice auto',
+            modele.appels.length === 2 && modele.appels.every((a) => a.auth === 'Bearer cle-factice' && a.tools.length >= 5 && a.tool_choice === 'auto'),
+            JSON.stringify(modele.appels.map((a) => [a.tools.length, a.tool_choice, a.auth])));
+        verifier('le premier appel porte la consigne système (briefing compris) et la demande',
+            !!(modele.appels[0] && modele.appels[0].messages[0].role === 'system' && /== COMMENT RÉPONDRE ==/.test(modele.appels[0].messages[0].content)
+               && /Revois le premier chapitre/.test(String(modele.appels[0].messages[1].content))));
+        verifier('aucun outil donné au modèle ne demande sessionId',
+            modele.appels[0].tools.every((t) => !(t.function.parameters.properties || {}).sessionId));
+        verifier('le second appel rejoue le résultat de l\'outil',
+            !!(modele.appels[1] && modele.appels[1].messages.some((m) => m.role === 'tool' && /cellulesEcrites/.test(m.content))));
+
+        // 5. Après coup : la session est en relecture, la valeur est posée, en attente.
+        const relu = donnees(await f.outil('worker_contexte', { sessionId: s1.sessionId, briefing: false }));
+        verifier('la session est en attente de relecture, la cellule posée et en attente',
+            !!(relu && relu.statut === 'paused' && relu.pendingCount >= 1 && relu.lignes[0].designation === 'Chapitre revu par XSProAssist'
+               && relu.lignes[0]._attente && (relu.lignes[0]._attente.champs || []).includes('designation')),
+            relu && JSON.stringify({ statut: relu.statut, pendingCount: relu.pendingCount, l0: relu.lignes && relu.lignes[0] }).slice(0, 240));
+
+        // 6. Une grille rouverte retrouve le journal et le rapport.
+        const ws2 = await connecterUI(s1.sessionId);
+        verifier('le journal du traitement est rejoué à l\'ouverture de la grille',
+            !!(ws2.init && ws2.init.journal && ws2.init.journal.fin && ws2.init.journal.fin.issue === 'terminee'
+               && /Essai XSProAssist/.test(ws2.init.rapport || '')),
+            ws2.init && JSON.stringify({ journal: !!ws2.init.journal, rapport: ws2.init.rapport }).slice(0, 200));
+        ws2.fermer();
+        ws.fermer();
+
+        // 7. Un modèle qui ne sait pas appeler d'outils : dit tel quel, rien d'écrit.
+        modele.etat.mode = 'refus400';
+        const s2 = await creer('refus');
+        const wsR = await connecterUI(s2.sessionId);
+        derniereUI = wsR;
+        await wsR.basculer('assist');
+        const attenteErreur = wsR.attendre('error', 20000);
+        wsR.envoyer({ type: 'prompt:send', prompt: 'Revois le premier chapitre.', mode: 'act', files: [], activeMode: null });
+        const erreur = await attenteErreur;
+        verifier('un modèle qui refuse les outils est annoncé, avec le geste (Clé API), sans repli silencieux',
+            !!(erreur && /XSProAssist/.test(erreur.message) && /Clé API/.test(erreur.message) && erreur.httpStatus === 400),
+            erreur && JSON.stringify(erreur).slice(0, 240));
+        verifier('rien n\'a été écrit dans cette session', wsR.recus['cell:update'] === undefined && wsR.recus['act:done'] === undefined, JSON.stringify(wsR.recus));
+        const finR = wsR.messages.filter((m) => m.type === 'journal:etape').map((m) => m.etape).find((e) => e.evenement === 'fin');
+        verifier('le journal dit « injoignable »', !!(finR && finR.issue === 'injoignable'), JSON.stringify(finR));
+
+        // 8. Rien n'est parti.
+        verifier('aucun export n\'a été produit par XSProAssist', listerExports().length === exportsAvant,
+            'avant ' + exportsAvant + ', après ' + listerExports().length);
+
+        // Remettre le choix de l'utilisateur, par le vrai geste.
+        await wsR.basculer(memoireInitiale || 'api');
+        wsR.fermer();
+        derniereUI = null;
+    } finally {
+        if (derniereUI) { try { derniereUI.fermer(); } catch (_) {} }
+        modele.fermer();
+    }
 }
 
 // ── Les briefings, sur les six vues ───────────────────────────────────────────
@@ -671,6 +833,8 @@ function connecterUI(sessionId) {
     const WebSocket = require('ws');
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?sessionId=${sessionId}`);
     const recus = {};
+    const messages = [];                 // tout ce que la grille a reçu, dans l'ordre
+    const attentes = [];                 // { type, res } — cf. attendre()
     let init = null;
     let attenteCanal = null;
     let attenteApercu = null;
@@ -681,11 +845,23 @@ function connecterUI(sessionId) {
             let m;
             try { m = JSON.parse(raw); } catch (_) { return; }
             recus[m.type] = (recus[m.type] || 0) + 1;
+            messages.push(m);
+            for (let i = attentes.length - 1; i >= 0; i--) {
+                if (attentes[i].type === m.type) { const a = attentes.splice(i, 1)[0]; a.res(m); }
+            }
             if (m.type === 'init') {
                 init = m;
                 clearTimeout(minuteur);
                 resolve({
-                    init, recus,
+                    init, recus, messages,
+                    // Envoie comme la grille, et attend le PROCHAIN message d'un type
+                    // donné (null au bout de `ms`) — de quoi suivre un traitement
+                    // jusqu'à sa fin (act:done) ou son échec (error).
+                    envoyer:  (msg) => ws.send(JSON.stringify(msg)),
+                    attendre: (type, ms = 10000) => new Promise((res) => {
+                        attentes.push({ type, res });
+                        setTimeout(() => res(null), ms);
+                    }),
                     basculer: (canal) => new Promise((res) => {
                         attenteCanal = res;
                         ws.send(JSON.stringify({ type: 'canal:set', canal }));

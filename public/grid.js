@@ -76,7 +76,7 @@
    selectChoix:   {},
    champsRestreints: {},       // { [champ]: { [valeurType]: [valeursAutorisees] } } — restreint les dropdowns selon le type de la ligne (jamais 'type' lui-même)
    champsNonApplicables: {},   // { [valeurType]: [champs] } — champs hors sujet pour ce type : grisés ET non éditables (cf. views/formulaireListeQuestions.js CHAMPS_NON_APPLICABLES)
-   canal:         'api',       // 'api' | 'mcp' — qui pré-remplit la grille (cf. appliquerCanal)
+   canal:         'api',       // 'api' | 'assist' | 'mcp' — qui pré-remplit la grille (cf. appliquerCanal)
    apiDisponible: true,        // false quand XSpro n'a prêté aucune clé API pour cette session
    origin:        'xspro',     // 'xspro' | 'standalone' — conditionne le lien ⚙ Config IA
    mcpCellules:   0,           // cellules reçues du canal MCP depuis l'ouverture (affichage seul)
@@ -148,6 +148,7 @@ function handleWSMessage(msg) {
     case 'init':              onInit(msg);                                    break;
     case 'status':            onStatusChange(msg.status);                    break;
     case 'canal':             onCanalChange(msg.canal);                      break;
+    case 'journal:etape':     onEtapeJournal(msg.etape);                     break;
     case 'claude:etat':       majBranchementClaude(msg);                     break;
     case 'plan':              onPlanReceived(msg.plan);                      break;
     case 'cell:update':       onCellUpdate(msg.rowIndex, msg.cle, msg.value); break;
@@ -408,7 +409,9 @@ function onInit(msg) {
   // Rapport d'un lot MCP déjà passé : Claude a pu remplir cette grille alors que
   // personne ne l'avait ouverte, et son 'act:done' n'avait alors aucun
   // destinataire. On le rejoue ici, sinon l'utilisateur découvrirait des lignes
-  // en attente sans savoir qui les a posées ni ce qu'il doit vérifier.
+  // en attente sans savoir qui les a posées ni ce qu'il doit vérifier. Le journal
+  // du dernier traitement (clé API ou XSProAssist), de même, avant le rapport.
+  if (msg.journal) rejouerJournal(msg.journal);
   if (msg.rapport) addMessage('ai', msg.rapport);
 
   setStatusBadge('connected', 'Prêt');
@@ -2695,9 +2698,11 @@ function sendPrompt() {
   state.attachedFiles = [];
   renderChips();
   setAiRunning(true);
-  addMessage('system', state.reviewMode
-    ? libelleTraitement()
-    : libelleTraitement(`Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}`));
+  addMessage('system', state.canal === 'assist'
+    ? `🧭 XSProAssist travaille${state.modeleIA ? ` (${state.modeleIA})` : ''}… — ses étapes s'affichent ici au fur et à mesure.`
+    : state.reviewMode
+      ? libelleTraitement()
+      : libelleTraitement(`Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}`));
 }
 
 // ── Modes de travail ────────────────────────────────────────────────────────────
@@ -3160,39 +3165,51 @@ function setStatusBadge(cls, label) {
 }
 
 // ── Canal de remplissage ──────────────────────────────────────────────────────
-// L'IA par clé API et Claude (canal MCP) sont deux façons de PRÉ-remplir la même
-// grille ; la saisie à la main en est une troisième, toujours disponible — ce
-// n'est pas un « mode », c'est la grille elle-même. Un seul canal automatique est
-// actif à la fois : les sections de l'autre sont masquées ici, et le serveur
-// refuse l'entrée de celui qui n'est pas choisi (cf. server.js 'canal:set' et
-// mcpChannel.js). Sans ce masquage, le panneau de prompt laisserait croire que la
-// clé API est aux commandes alors que c'est Claude qui remplit.
+// L'IA par clé API, XSProAssist et Claude (canal MCP) sont trois façons de
+// PRÉ-remplir la même grille ; la saisie à la main en est une quatrième, toujours
+// disponible — ce n'est pas un « mode », c'est la grille elle-même. Un seul canal
+// automatique est actif à la fois : les sections des autres sont masquées ici, et
+// le serveur refuse l'entrée de ceux qui ne sont pas choisis (cf. server.js
+// 'canal:set' et mcpChannel.js). Sans ce masquage, le panneau de prompt
+// laisserait croire que la clé API est aux commandes alors que c'est Claude qui
+// remplit. XSProAssist, lui, se pilote depuis la même zone de prompt que la clé
+// API : c'est un agent qui lit la demande et rend un rapport, pas un client à
+// brancher.
 function appliquerCanal(canal) {
-  state.canal = canal === 'mcp' ? 'mcp' : 'api';
-  const enMcp = state.canal === 'mcp';
+  state.canal = ['mcp', 'assist'].includes(canal) ? canal : 'api';
+  const enMcp    = state.canal === 'mcp';
+  const enAssist = state.canal === 'assist';
 
   const sel = el('canal-selector');
   if (sel) {
     sel.value = state.canal;
-    // XSpro n'envoie aucun bloc IA quand il n'a pas de clé à prêter : basculer sur
-    // « Clé API » mènerait à une zone de prompt qui ne peut rien envoyer. On grise
-    // plutôt que de laisser l'utilisateur s'y engager, et on dit pourquoi.
-    const optApi = sel.querySelector('option[value="api"]');
-    if (optApi) {
-      optApi.disabled = !state.apiDisponible;
-      optApi.title    = state.apiDisponible ? '' : 'XSpro n\'a prêté aucune clé API pour cette session.';
+    // XSpro n'envoie aucun bloc IA quand il n'a pas de clé à prêter : la clé API,
+    // et XSProAssist qui travaille avec elle, mèneraient à une zone de prompt qui
+    // ne peut rien envoyer. On grise plutôt que de laisser l'utilisateur s'y
+    // engager, et on dit pourquoi.
+    for (const valeur of ['api', 'assist']) {
+      const opt = sel.querySelector(`option[value="${valeur}"]`);
+      if (!opt) continue;
+      opt.disabled = !state.apiDisponible;
+      opt.title    = state.apiDisponible ? '' : 'XSpro n\'a prêté aucune clé API pour cette session.';
     }
     sel.title = state.apiDisponible
-      ? 'Qui pré-remplit la grille : l\'IA par clé API, ou Claude via le canal MCP. Un seul à la fois.'
+      ? 'Qui pré-remplit la grille : l\'IA par clé API en un coup, XSProAssist (un agent hébergé par le Worker, avec la même clé), ou Claude via le canal MCP. Un seul à la fois.'
       : 'XSpro n\'a prêté aucune clé API pour cette session : seul le canal MCP peut la remplir.';
   }
 
-  // Zone de saisie du prompt = chemin clé API ; panneau MCP = chemin Claude.
+  // Zone de saisie du prompt = clé API et XSProAssist ; panneau MCP = Claude.
   if (enMcp) { hide('input-area'); show('panel-mcp'); demanderEtatClaude(); }
   else       { show('input-area'); hide('panel-mcp'); }
 
+  // XSProAssist agit, il ne planifie pas : le choix Plan/Act n'a pas de sens pour
+  // lui (il est déjà masqué en mode revue, où sont les six vues du projet).
+  if (enAssist) { hide('mode-selector'); state.mode = 'act'; }
+  else if (!state.reviewMode) show('mode-selector');
+
   // Le badge du modèle et le lien ⚙ Config IA ne parlent que de la clé API : les
   // laisser en mode Claude désignerait un fournisseur qui ne sera pas appelé.
+  // XSProAssist travaille avec cette même clé : ils restent.
   updateModelBadge();
   majLienConfigIa();
 }
@@ -3204,9 +3221,86 @@ function onCanalChange(canal) {
   appliquerCanal(canal);
   if (state.canal === avant) return;
 
-  addMessage('system', state.canal === 'mcp'
-    ? '🔌 Remplissage par Claude (MCP). La zone de prompt est masquée : l\'IA par clé API ne sera pas appelée pour cette session.'
-    : '🤖 Remplissage par l\'IA à clé API. Le canal MCP est fermé pour cette session.');
+  const textes = {
+    mcp:    '🔌 Remplissage par Claude (MCP). La zone de prompt est masquée : ni l\'IA par clé API ni XSProAssist ne seront appelés pour cette session.',
+    assist: '🧭 Remplissage par XSProAssist : l\'assistant hébergé par le Worker lit ta demande, remplit la grille par les mêmes outils que Claude, et rend un rapport. Ses propositions restent à valider ici. Le canal MCP est fermé pour cette session.',
+    api:    '🤖 Remplissage par l\'IA à clé API. Le canal MCP est fermé pour cette session.',
+  };
+  addMessage('system', textes[state.canal]);
+}
+
+// ── Le journal d'un traitement (clé API, XSProAssist) ─────────────────────────
+// Chaque étape arrive en direct (journal:etape, cf. journalTraitement.js côté
+// serveur) et se lit comme une ligne du fil : les appels au modèle et leur durée,
+// la taille de l'envoi, une réponse coupée, une correction demandée, chaque appel
+// d'outil. C'est la contrepartie, sur des faits, du rendu cellule par cellule et
+// du compteur du panneau MCP — et ce qui permet de comparer les deux canaux. À
+// l'ouverture, le journal du dernier traitement est rejoué (init.journal) :
+// l'utilisateur peut découvrir des lignes en attente posées grille fermée.
+const NOMS_CANAL = { api: '🤖 IA clé API', assist: '🧭 XSProAssist', mcp: '🔌 Claude (MCP)' };
+const ISSUES_JOURNAL = { terminee: 'terminé', plan: 'plan rendu', sansConclusion: 'sans conclusion', injoignable: 'modèle injoignable', erreur: 'erreur' };
+
+function kcar(n) { return n >= 10000 ? `${Math.round(n / 1000)} k car.` : `${n} car.`; }
+
+function texteEtape(e, canal) {
+  const nom = NOMS_CANAL[canal] || canal || 'traitement';
+  const s = (ms) => (ms === null || ms === undefined ? '?' : `${(Number(ms) / 1000).toFixed(1)} s`);
+  switch (e.evenement) {
+    case 'debut': {
+      const d = [];
+      if (e.modeTravail) d.push(`mode « ${e.modeTravail} »`);
+      if (e.mode === 'plan') d.push('plan');
+      if (typeof e.lignes === 'number') d.push(`${e.lignes} ligne(s)`);
+      if (e.tailleEnvoi) d.push(`envoi ${kcar(e.tailleEnvoi)}`);
+      if (e.historises) d.push(`${e.historises} message(s) d'historique`);
+      return `${nom}${e.modele ? ` (${e.modele})` : ''} démarre${d.length ? ' — ' + d.join(', ') : ''}.`;
+    }
+    case 'modele': {
+      if (!e.ok) return `⚠ appel au modèle n°${e.tour} : échec${e.status ? ` (HTTP ${e.status})` : ''}${e.cause ? `, ${e.cause}` : ''}, ${s(e.dureeMs)}`;
+      const d = [s(e.dureeMs)];
+      if (e.appels !== undefined) d.push(`${e.appels} appel(s) d'outil`);
+      if (e.tailleReponse) d.push(`réponse ${kcar(e.tailleReponse)}`);
+      if (e.jetons) d.push(`${e.jetons} jetons`);
+      if (e.jsonMode) d.push('mode JSON');
+      if (e.essais > 1) d.push(`${e.essais} essais`);
+      if (e.finish_reason === 'length') d.push('RÉPONSE COUPÉE par la limite de sortie');
+      return `↔ appel au modèle n°${e.tour} : ${d.join(', ')}`;
+    }
+    case 'outil':
+      return e.ok ? `🛠 ${e.nom} → ${e.resume || 'ok'}` : `✗ ${e.nom} refusé : ${e.erreur || ''}`;
+    case 'relance':
+      return `↻ relance : ${e.motif || 'le modèle a répondu par du texte, pas par un outil'}.`;
+    case 'fin': {
+      const d = [`${e.tours || 0} appel(s) au modèle`];
+      if (e.appelsOutils !== undefined) d.push(`${e.appelsOutils} appel(s) d'outil${e.refusOutils ? ` (${e.refusOutils} refusé(s))` : ''}`);
+      if (e.relances) d.push(`${e.relances} relance(s)`);
+      if (e.issue === 'terminee' || e.issue === 'sansConclusion') {
+        const r = [];
+        if (e.inserees !== undefined && e.inserees !== null)     r.push(`${e.inserees} ajoutée(s)`);
+        if (e.modifiees !== undefined && e.modifiees !== null)   r.push(`${e.modifiees} modifiée(s)`);
+        if (e.supprimees !== undefined && e.supprimees !== null) r.push(`${e.supprimees} supprimée(s)`);
+        if (e.cellules !== undefined && e.cellules !== null)     r.push(`${e.cellules} cellule(s)`);
+        if (r.length) d.push(`retenu : ${r.join(', ')}`);
+        if (e.declarees) d.push(`déclaré par le modèle : ${e.declarees.inserees} ajout(s), ${e.declarees.modifiees} modification(s)${e.sansEffet ? ` dont ${e.sansEffet} sans effet` : ''}, ${e.declarees.supprimees} suppression(s)`);
+      }
+      if (Array.isArray(e.avertissements) && e.avertissements.length) d.push(`avertissements : ${e.avertissements.join(', ')}`);
+      return `${nom} — ${ISSUES_JOURNAL[e.issue] || e.issue} en ${s(e.dureeMs)} ; ${d.join(' ; ')}.`
+        + (e.motif && !['terminee', 'plan'].includes(e.issue) ? `\n${e.motif}` : '');
+    }
+    default:
+      return null;
+  }
+}
+
+function onEtapeJournal(etape, canal = state.canal) {
+  const texte = etape && texteEtape(etape, canal);
+  if (texte) addMessage('system', texte);
+}
+
+function rejouerJournal(journal) {
+  if (!journal || !Array.isArray(journal.etapes) || !journal.etapes.length) return;
+  addMessage('system', `📜 Dernier traitement (${NOMS_CANAL[journal.canal] || journal.canal})${journal.demande ? ` — « ${journal.demande} »` : ''} :`);
+  journal.etapes.forEach((e) => onEtapeJournal(e, journal.canal));
 }
 
 function majLienConfigIa() {

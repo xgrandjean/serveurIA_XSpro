@@ -233,7 +233,12 @@ qu'aucune clé ne lui soit prêtée (cf. [`CANAL_MCP.md`](./CANAL_MCP.md)).
 | Payload | Canal de la session |
 |---|---|
 | `canal: "mcp"` présent | **forcé** en MCP — pour cette session seulement, sans faire mémoire |
-| absent | le dernier canal **choisi par l'utilisateur** ; jamais de réalignement sur `api` |
+| absent | le dernier canal **choisi par l'utilisateur** (`api`, `assist` ou `mcp`) ; jamais de réalignement sur `api` |
+
+Le canal `assist` est XSProAssist, l'agent hébergé par le Worker (cf.
+[`XSPROASSIST.md`](./XSPROASSIST.md)) : il travaille avec le bloc `ia` prêté par XSpro, et le
+modèle doit savoir appeler des outils. XSpro n'émet aucun marqueur pour ce canal : le choix
+vient du sélecteur de la grille, mémorisé, ou de `canalParDefaut`.
 
 Le forçage est nécessaire : sans lui, la session naîtrait sur le chemin clé API, avec une zone
 de prompt visible, un bloc `ia` vide, et aucune façon d'aboutir. Et il ne fait pas mémoire :

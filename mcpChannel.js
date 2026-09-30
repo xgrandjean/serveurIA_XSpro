@@ -23,6 +23,12 @@
  * CE QUE CE CANAL NE FAIT PAS : livrer vers XSpro. Aucun verbe ne touche
  * deliverResult/notifyXSpro. Claude remplit, l'utilisateur relit dans la grille
  * et renvoie lui-même — la validation finale reste humaine.
+ *
+ * DEUX APPELANTS, UNE SEULE TABLE DE VERBES. La façade MCP (par HTTP) et
+ * XSProAssist (xsproassist.js, dans le process) passent par les mêmes fonctions,
+ * avec leurs mêmes garde-fous ; chacun se nomme (`origine` : 'mcp' ou 'assist'),
+ * et un verbe d'écriture n'est ouvert qu'à celui dont la session porte le canal.
+ * Le troisième canal n'a donc rien ajouté ici que ce paramètre.
  */
 
 'use strict';
@@ -271,7 +277,7 @@ function installMcpChannel(app, deps) {
 
   const RAISON_STATUT = {
     [SM.STATUS.PLANNING]:   "l'IA par clé API travaille en ce moment sur cette session — attendre la fin",
-    [SM.STATUS.ACTING]:     "l'IA par clé API travaille en ce moment sur cette session — attendre la fin",
+    [SM.STATUS.ACTING]:     "l'IA par clé API ou XSProAssist travaille en ce moment sur cette session — attendre la fin",
     [SM.STATUS.DELIVERING]: 'le résultat est en cours de livraison vers XSpro',
     [SM.STATUS.DONE]:       'cette session est déjà livrée : ses lignes sont parties chez XSpro, une écriture ne repartirait pas',
     [SM.STATUS.CANCELLED]:  'cette session a été annulée',
@@ -306,16 +312,33 @@ function installMcpChannel(app, deps) {
 
   // ── Résolution et garde-fous de session ─────────────────────────────────────
   /**
+   * @param {Object} session
+   * @param {'mcp'|'assist'} origine — qui demande à écrire : la façade MCP, ou XSProAssist
    * @returns {string|null} le motif du refus, ou null si l'écriture est permise
    */
-  function motifRefusEcriture(session) {
-    if (session.canal !== 'mcp') {
+  function motifRefusEcriture(session, origine = 'mcp') {
+    const canal = session.canal || 'api';
+    if (canal !== origine) {
+      if (origine === 'assist') {
+        // Inatteignable depuis la grille (server.js ne lance XSProAssist qu'en canal
+        // `assist`), mais le verbe se protège lui-même.
+        return `Cette session n'est pas en remplissage par XSProAssist (canal « ${canal} ») : ses écritures lui sont fermées.`;
+      }
+      if (canal === 'assist') {
+        return 'Cette session est en remplissage par XSProAssist, l\'assistant hébergé par le Worker : '
+          + 'c\'est lui qui la remplit. Pour que Claude puisse écrire, basculer le sélecteur '
+          + '« Remplissage » sur « Claude (MCP) » dans l\'en-tête de la grille.';
+      }
       return 'Cette session est en mode « clé API » : c\'est l\'IA par clé API qui la remplit. '
         + 'Pour que Claude puisse écrire, basculer le sélecteur « Remplissage » sur « Claude (MCP) » '
         + 'dans l\'en-tête de la grille — ou régler "canalParDefaut": "mcp" dans worker-config.json '
         + 'pour que les nouvelles sessions s\'ouvrent directement ainsi.';
     }
-    if (!STATUTS_ECRIVABLES.has(session.status)) {
+    // XSProAssist écrit PENDANT que la session est en `acting` : c'est lui qui travaille, et ce
+    // statut est précisément ce qui ferme la grille et le canal MCP le temps qu'il finisse.
+    const inscriptible = STATUTS_ECRIVABLES.has(session.status)
+      || (origine === 'assist' && session.status === SM.STATUS.ACTING);
+    if (!inscriptible) {
       return `Écriture impossible (statut « ${session.status} ») : ${RAISON_STATUT[session.status] || 'statut non inscriptible'}.`;
     }
     return null;
@@ -324,7 +347,7 @@ function installMcpChannel(app, deps) {
   /**
    * @returns {{ session }} ou {{ erreur, statut }}
    */
-  function resoudre(args, ecriture) {
+  function resoudre(args, ecriture, origine = 'mcp') {
     const id = args.sessionId;
     if (!id) return { erreur: 'sessionId requis. Appeler worker_sessions pour la liste.', codeHttp: 400 };
 
@@ -337,7 +360,7 @@ function installMcpChannel(app, deps) {
       };
     }
     if (ecriture) {
-      const refus = motifRefusEcriture(session);
+      const refus = motifRefusEcriture(session, origine);
       if (refus) return { erreur: refus, codeHttp: 409 };
     }
     return { session };
@@ -735,8 +758,8 @@ function installMcpChannel(app, deps) {
   // ── Verbe : ecrire ──────────────────────────────────────────────────────────
   // Le point d'ancrage : pour chaque cellule, exactement ce que fait onCellUpdate
   // sur le chemin clé API (cf. server.js, case 'prompt:send').
-  function verbeEcrire(args) {
-    const r = resoudre(args, true);
+  function verbeEcrire(args, origine = 'mcp') {
+    const r = resoudre(args, true, origine);
     if (r.erreur) return r;
     const { session } = r;
     const { modeId: modeEcriture, autorisees } = colonnesEcriture(session);
@@ -785,8 +808,8 @@ function installMcpChannel(app, deps) {
   // ── Verbe : inserer ─────────────────────────────────────────────────────────
   // Réutilise le chemin du bouton manuel « + Ligne » : la ligne arrive marquée
   // __pendingInsert, donc validable ou rejetable dans la grille.
-  function verbeInserer(args) {
-    const r = resoudre(args, true);
+  function verbeInserer(args, origine = 'mcp') {
+    const r = resoudre(args, true, origine);
     if (r.erreur) return r;
     const { session } = r;
     if (!session.reviewMode) return { erreur: REFUS_HORS_REVUE, codeHttp: 409 };
@@ -832,8 +855,8 @@ function installMcpChannel(app, deps) {
   // ── Verbe : supprimer ───────────────────────────────────────────────────────
   // Chemin du bouton manuel « ✂️ » : la ligne reste visible, marquée en attente
   // de suppression, jusqu'à ce que l'utilisateur tranche.
-  function verbeSupprimer(args) {
-    const r = resoudre(args, true);
+  function verbeSupprimer(args, origine = 'mcp') {
+    const r = resoudre(args, true, origine);
     if (r.erreur) return r;
     const { session } = r;
     if (!session.reviewMode) return { erreur: REFUS_HORS_REVUE, codeHttp: 409 };
@@ -912,8 +935,8 @@ function installMcpChannel(app, deps) {
   // L'équivalent de onDone : statut PAUSED (= en attente de relecture humaine) et
   // re-rendu complet de la grille. `session.rows = updatedRows` de onDone est sans
   // objet ici, les écritures ont muté le tableau en place.
-  function verbeTerminer(args) {
-    const r = resoudre(args, true);
+  function verbeTerminer(args, origine = 'mcp') {
+    const r = resoudre(args, true, origine);
     if (r.erreur) return r;
     const { session } = r;
 
@@ -939,7 +962,8 @@ function installMcpChannel(app, deps) {
   }
 
   // ── Table des verbes ────────────────────────────────────────────────────────
-  // La façade MCP ne peut appeler que ce qui est déclaré ici.
+  // La façade MCP ne peut appeler que ce qui est déclaré ici — et XSProAssist non
+  // plus (cf. xsproassist.js) : la table est rendue à server.js, qui la lui donne.
   const VERBES = {
     sessions:  verbeSessions,
     contexte:  verbeContexte,
@@ -979,6 +1003,8 @@ function installMcpChannel(app, deps) {
   });
 
   console.log('[MCP] Canal de pilotage monté → POST /mcp/commande');
+
+  return { verbes: VERBES };
 }
 
 module.exports = { installMcpChannel };

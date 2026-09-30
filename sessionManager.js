@@ -521,6 +521,8 @@ function resetRows(session) {
   session.dernierEnvoi = null;   // un reset efface aussi la trace du dernier envoi
   session.currentPlan = null;
   session.dernierRapport = null;  // le rapport du dernier lot MCP ne décrit plus rien
+  session.journalTraitement = null;  // ni le journal du dernier traitement (clé API ou XSProAssist)
+  session.historiqueAssist  = [];    // ni les demandes passées que XSProAssist rejoue
   setStatus(session, STATUS.CONNECTED);
   console.log(`[SessionManager] Rows réinitialisés : ${session.sessionId}`);
 }
