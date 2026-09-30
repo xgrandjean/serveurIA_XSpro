@@ -341,8 +341,15 @@ async function allerRetour(dejaJoignable) {
         const ctx = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId }));
         verifier('worker_contexte donne des colonnes', !!(ctx && ctx.colonnes && ctx.colonnes.length),
             ctx && JSON.stringify(ctx.colonnes));
+        // En décomposition, la seule colonne à choix (niveauListe) est masquée au modèle depuis
+        // la colonne calculée « numero » : c'est en chiffrage (tauxHoraire) qu'on le vérifie.
+        const ctxChiffrage = donnees(await f.outil('worker_contexte', { sessionId: payload.sessionId, mode: 'chiffrage', briefing: false }));
         verifier('les colonnes à choix portent leurs valeurs admises',
-            !!(ctx && ctx.colonnes.some((c) => Array.isArray(c.choix) && c.choix.length)),
+            !!(ctxChiffrage && ctxChiffrage.colonnes.some((c) => Array.isArray(c.choix) && c.choix.length)),
+            ctxChiffrage && ctxChiffrage.colonnes.map((c) => c.cle).join(','));
+        verifier('la colonne calculée « numero » est servie, calculée et en lecture seule, et niveauListe ne l\'est plus',
+            !!(ctx && ctx.colonnes.some((c) => c.cle === 'numero' && c.calculee === true && c.lectureSeule === true)
+               && !ctx.colonnes.some((c) => c.cle === 'niveauListe') && ctx.lignes[0].numero === '1'),
             ctx && ctx.colonnes.map((c) => c.cle).join(','));
         verifier('les lignes portent un _id', !!(ctx && ctx.lignes.every((l) => l._id !== undefined)),
             ctx && JSON.stringify(ctx.lignes[0]));
@@ -765,8 +772,10 @@ async function verifierBriefings(f) {
     const dossier = path.join(RACINE, 'standalone');
     const fichiers = fs.readdirSync(dossier).filter((n) => /^standalone-payload-/.test(n));
 
-    let deLaVue = 0;
-    let duRepli = 0;
+    // Comptés par vue et mode DISTINCTS : une charge d'essai de plus sur la même vue (une
+    // variante par fournisseur, par exemple) ne doit pas faire varier le compte.
+    const deLaVue = new Set();
+    const duRepli = new Set();
     const fautifs = [];
     const tailles = [];
 
@@ -786,7 +795,7 @@ async function verifierBriefings(f) {
             const b  = (c && c.briefing) || '';
             const ou = `${payload.contextName}/${mode || '—'}`;
 
-            if (c && c.briefingSource === 'vue') deLaVue++; else duRepli++;
+            if (c && c.briefingSource === 'vue') deLaVue.add(ou); else duRepli.add(ou);
             tailles.push(b.length);
 
             if (b.includes(MARQUEUR_FORMAT))           fautifs.push(`${ou} : porte encore le FORMAT DE RÉPONSE`);
@@ -798,8 +807,8 @@ async function verifierBriefings(f) {
     }
 
     verifier('aucun briefing ne porte le contrat de réponse de la clé API', fautifs.length === 0, fautifs.join(' | '));
-    verifier('les deux vues reprises servent leurs consignes courtes', deLaVue === 4, `vue=${deLaVue}, repli=${duRepli}`);
-    verifier('les vues non reprises passent par le repli', duRepli > 0, `repli=${duRepli}`);
+    verifier('les deux vues reprises servent leurs consignes courtes', deLaVue.size === 4, `vue=${[...deLaVue].join(' ')}, repli=${duRepli.size}`);
+    verifier('les vues non reprises passent par le repli', duRepli.size > 0, `repli=${duRepli.size}`);
     // Seuil relevé de 8 000 à 12 000 le 2026-09-21, quand les lignes-modèle ont cessé
     // d'être plafonnées à trois (cf. rendreBlocMcp). Ce n'est pas un budget de jetons,
     // c'est un garde-fou contre l'emballement : il doit se déclencher si un briefing

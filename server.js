@@ -36,6 +36,7 @@ const { resolveEffectiveWorkerConfig }          = require('./viewResolver');
 const { installMcpChannel }                     = require('./mcpChannel');
 const { OUTILS: OUTILS_MCP }                    = require('./mcpStdio');
 const XSProAssist                               = require('./xsproassist');
+const Calculees                                 = require('./colonnesCalculees');
 const ClaudeConfig                              = require('./claudeConfig');
 
 // Les trois canaux de remplissage d'une session : l'IA par clé API (un coup), XSProAssist
@@ -546,7 +547,8 @@ wss.on('connection', (ws, req) => {
        // direct (journal:etape), et rejouées ici.
        journal:      session.journalTraitement || null,
        workerConfig: session.effectiveWorkerConfig,
-       rows:         session.rows,
+       // Avec leurs colonnes calculées (cf. colonnesCalculees.js), comme chaque envoi de lignes.
+       rows:         Calculees.enrichir(session, session.rows),
        infosParent:  session.data.infosParent || {},
        providerId,
        // Modele LLM reellement utilise pour l'appel (cf. callLLM : `model: ia.model`).
@@ -668,6 +670,9 @@ async function handleUIMessage(session, msg) {
         pendingCount: session.reviewMode ? SM.countPendingRows(session) : undefined,
         message: validateMessage,
       });
+      // Une colonne calculée dépend de celle-ci (le niveau d'une ligne change la numérotation
+      // des suivantes) : toutes les lignes repartent, recalculées.
+      if (Calculees.dependDe(session, cle)) sendReviewSync(session);
       break;
     }
 
@@ -832,7 +837,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
+            wsSend(session, { type: 'act:done', rows: Calculees.enrichir(session, updatedRows), pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
           },
         }, files, activeMode);
       } catch (e) {
@@ -876,7 +881,7 @@ async function handleUIMessage(session, msg) {
           onDone: (updatedRows, meta) => {
             session.rows = updatedRows;
             SM.setStatus(session, SM.STATUS.PAUSED);
-            wsSend(session, { type: 'act:done', rows: updatedRows, pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
+            wsSend(session, { type: 'act:done', rows: Calculees.enrichir(session, updatedRows), pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
           },
         }, [], session.activeMode);
       } catch (e) {
@@ -966,7 +971,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: session.rows, infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: Calculees.enrichir(session, session.rows), infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null });
       break;
     }
 
@@ -987,6 +992,8 @@ async function handleUIMessage(session, msg) {
         // place, incoherence qui n'existait pas. L'utilisateur s'en sortait en resaisissant
         // la meme valeur — un cell:edit revalide cette ligne-la et purge son prefixe.
         revalidateAllRows(session);
+        // Les colonnes calculées des lignes ajoutées ou retirées, et de celles qui suivent.
+        if (Calculees.cles(session).length) sendReviewSync(session);
       }
       break;
     }
@@ -1004,7 +1011,7 @@ async function handleUIMessage(session, msg) {
       const ids = Array.isArray(msg.ids) ? msg.ids : [];
       const moved = SM.moveRows(session, ids, msg.apres);
       if (moved) {
-        wsSend(session, { type: 'rows:moved', rows: session.rows, pendingCount: SM.countPendingRows(session) });
+        wsSend(session, { type: 'rows:moved', rows: Calculees.enrichir(session, session.rows), pendingCount: SM.countPendingRows(session) });
         revalidateAllRows(session);
       }
       break;
@@ -1049,7 +1056,7 @@ function wsSend(session, data) {
 function sendReviewSync(session) {
   wsSend(session, {
     type:         'review:sync',
-    rows:         session.rows,
+    rows:         Calculees.enrichir(session, session.rows),
     pendingCount: SM.countPendingRows(session),
   });
 }

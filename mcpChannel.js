@@ -33,8 +33,9 @@
 
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+const fs        = require('fs');
+const path      = require('path');
+const Calculees = require('./colonnesCalculees');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── PHASE BÊTA — rapport d'anomalies ─────────────────────────────────────────
@@ -192,7 +193,9 @@ function rendreBlocMcp(bloc, session, colonnes) {
   //
   // Le titre insiste sur leur nature : servies en entier, ces lignes ressemblent à
   // un vrai questionnaire, et rien ne les distinguerait du contenu de la grille.
-  const modele = session.data?.modele;
+  // Avec leurs colonnes calculées (cf. colonnesCalculees.js), comme les lignes de la grille :
+  // sur detailsDevis, l'exemple montre « numero » là où XSpro envoie niveauListe.
+  const modele = Calculees.enrichir(session, Array.isArray(session.data?.modele) ? session.data.modele : []);
   if (Array.isArray(modele) && modele.length) {
     const lignes = modele.map((m) => {
       const o = {};
@@ -425,6 +428,9 @@ function installMcpChannel(app, deps) {
       const d = { cle: col.cle, libelle: col.libelle || col.champ, type: col.type || 'string' };
       if (champsArray.has(col.cle)) d.tableau = true;
       if (col.readOnly)             d.lectureSeule = true;
+      // Calculée par le Worker d'après les autres lignes ; ce qu'un modèle y écrit est traduit
+      // par la vue en ses vraies colonnes (cf. colonnesCalculees.js).
+      if (col.calculee)             d.calculee = true;
 
       const sc = selectChoix[col.cle];
       if (sc?.choix?.length) {
@@ -544,7 +550,8 @@ function installMcpChannel(app, deps) {
     // dans le contexte d'un modèle.
     const offset = Math.max(0, Number(args.offset) || 0);
     const limite = Math.min(500, Math.max(1, Number(args.limite) || 100));
-    const lignes = session.rows.slice(offset, offset + limite).map(row => decrireLigne(row, colonnes));
+    // Les colonnes calculées se déduisent de TOUTES les lignes : enrichir d'abord, paginer ensuite.
+    const lignes = Calculees.enrichir(session, session.rows).slice(offset, offset + limite).map(row => decrireLigne(row, colonnes));
 
     const sortie = {
       sessionId:        session.sessionId,
@@ -689,14 +696,21 @@ function installMcpChannel(app, deps) {
    * du mode de travail actif — une clé connue de la vue mais hors mode est
    * rapportée comme telle, pas comme une colonne inconnue.
    */
-  function preparerValeurs(session, valeurs, id, ignorees, colonnesPermisees, modeId) {
+  function preparerValeurs(session, valeurs, id, ignorees, colonnesPermisees, modeId, ligne = null) {
     const toutes      = new Map((session.effectiveWorkerConfig?.colonnes || []).map(c => [c.cle, c]));
     const parCle      = new Map((colonnesPermisees || session.effectiveWorkerConfig?.colonnes || []).map(c => [c.cle, c]));
     const selectChoix = session.selectChoix || {};
     const pretes      = [];
 
-    for (const [cle, brut] of Object.entries(valeurs || {})) {
-      const col = parCle.get(cle);
+    // Une colonne calculée (« numero ») : la vue en déduit ses vraies colonnes (niveauListe),
+    // qui peuvent être hors du mode POUR LE MODÈLE — elles passent, c'est la vue qui les a
+    // produites, pas lui. L'illisible est écarté et rapporté (cf. colonnesCalculees.js).
+    const interp = Calculees.interpreterEcriture(session, valeurs || {}, ligne);
+    for (const r of interp.refus) ignorees.push({ _id: id, cle: r.cle, raison: r.raison });
+    const derives = new Set(interp.derives);
+
+    for (const [cle, brut] of Object.entries(interp.champs)) {
+      const col = parCle.get(cle) || (derives.has(cle) ? toutes.get(cle) : null);
       if (!col) {
         ignorees.push({ _id: id, cle, raison: toutes.has(cle)
           ? `colonne hors du mode de travail actif « ${modeId} » — elle n'y est pas remplissable`
@@ -779,6 +793,7 @@ function installMcpChannel(app, deps) {
     let cellulesEcrites   = 0;
     const lignesTouchees  = [];
     const ignorees        = [];
+    let recalcul          = false;   // une colonne dont dépend une colonne calculée a été écrite
 
     for (const ligne of lignes) {
       const id = ligne?._id;
@@ -790,17 +805,22 @@ function installMcpChannel(app, deps) {
         continue;
       }
 
-      const pretes = preparerValeurs(session, ligne.valeurs, id, ignorees, autorisees, modeEcriture);
+      const pretes = preparerValeurs(session, ligne.valeurs, id, ignorees, autorisees, modeEcriture, session.rows[rowIndex]);
       for (const [cle, valeur] of pretes) {
         SM.setCellValue(session, rowIndex, cle, valeur);
         wsSend(session, { type: 'cell:update', rowIndex, cle, value: valeur });
         cellulesEcrites++;
+        if (Calculees.dependDe(session, cle)) recalcul = true;
       }
       if (pretes.length) {
         lignesTouchees.push(id);
         envoyerValidation(session, rowIndex);
       }
     }
+
+    // Le niveau d'une ligne change la numérotation des suivantes (cf. colonnesCalculees.js) :
+    // toutes les lignes repartent vers la grille, recalculées — comme après une saisie à la main.
+    if (recalcul) wsSend(session, { type: 'review:sync', rows: Calculees.enrichir(session, session.rows), pendingCount: SM.countPendingRows(session) });
 
     return { cellulesEcrites, lignesTouchees, ignorees, ...etatSession(session) };
   }
@@ -837,7 +857,7 @@ function installMcpChannel(app, deps) {
     const ids      = [];
     const ignorees = [];
     for (const champs of lignes) {
-      const pretes = preparerValeurs(session, champs, null, ignorees, autorisees, modeEcriture);
+      const pretes = preparerValeurs(session, champs, null, ignorees, autorisees, modeEcriture, null);
       SM.proposeInsertRow(session, apres, Object.fromEntries(pretes));
       // proposeInsertRow ne rend pas l'_id attribué, mais il vient de consommer
       // exactement un consumeNextId : c'est donc _nextId - 1. Le rendre est
@@ -848,7 +868,7 @@ function installMcpChannel(app, deps) {
       apres = id;                       // chaînage : préserve l'ordre du lot
     }
 
-    wsSend(session, { type: 'review:sync', rows: session.rows, pendingCount: SM.countPendingRows(session) });
+    wsSend(session, { type: 'review:sync', rows: Calculees.enrichir(session, session.rows), pendingCount: SM.countPendingRows(session) });
     return { ids, ignorees, ...etatSession(session) };
   }
 
@@ -873,7 +893,7 @@ function installMcpChannel(app, deps) {
     }
 
     SM.proposeDeleteRows(session, connus);
-    wsSend(session, { type: 'review:sync', rows: session.rows, pendingCount: SM.countPendingRows(session) });
+    wsSend(session, { type: 'review:sync', rows: Calculees.enrichir(session, session.rows), pendingCount: SM.countPendingRows(session) });
     return { marquees: connus.length, ignorees, ...etatSession(session) };
   }
 
@@ -950,7 +970,7 @@ function installMcpChannel(app, deps) {
     SM.setStatus(session, SM.STATUS.PAUSED);
     wsSend(session, {
       type:          'act:done',
-      rows:          session.rows,
+      rows:          Calculees.enrichir(session, session.rows),
       pendingCount:  SM.countPendingRows(session),
       // Comme le contrat positionnel : le client recalcule le résumé depuis les
       // marqueurs réellement présents (_resumeDepuisMarqueurs, public/grid.js).

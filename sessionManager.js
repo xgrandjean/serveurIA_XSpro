@@ -301,7 +301,14 @@ function deleteSession(sessionId) {
  * @returns {Array}
  */
 function snapshotRows(session) {
-  return session.rows.map(({ __pendingFields, __pendingInsert, __pendingDelete, ...rest }) => ({ ...rest }));
+  // Les colonnes calculées (cf. colonnesCalculees.js) non plus : XSpro ne les connaît pas, et une
+  // ligne revenue de la grille (rows:sync) peut en porter la valeur affichée.
+  const calculees = new Set(session.clesCalculees || []);
+  return session.rows.map(({ __pendingFields, __pendingInsert, __pendingDelete, ...rest }) => {
+    const o = { ...rest };
+    for (const c of calculees) delete o[c];
+    return o;
+  });
 }
 
 // ── Revue des propositions (IA + manuelles, mode revueParPending) ─────────────

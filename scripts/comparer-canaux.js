@@ -68,19 +68,20 @@ const DEMANDES = [
 ];
 
 // ── Le modèle simulé : un « Albert idéal », qui suit les consignes à la lettre ──
-// Une réponse par demande, dans le vocabulaire de la grille (les libellés de niveauListe sont
-// ceux du FORMAT DE RÉPONSE et de worker_contexte). La clé API reçoit ce que son FORMAT DE
-// RÉPONSE demande — un tableau d'actions, ou l'objet { rapport, actions } — ; XSProAssist reçoit
-// une écriture par outil puis worker_terminer. Rien n'est « compris » : c'est un dictionnaire.
-const CHAPITRE = '▶ ◇ ○';
-const SOUS_CHAPITRE = '○ ◆ ○';
-const DETAIL = '○ ○ ●';
+// Une réponse par demande, dans le vocabulaire que le modèle reçoit : la hiérarchie s'écrit par
+// « numero » (la profondeur seule compte, cf. views/detailsDevis.js colonnesCalculees), jamais
+// par niveauListe, que le modèle ne voit plus. La clé API reçoit ce que son FORMAT DE RÉPONSE
+// demande — un tableau d'actions, ou l'objet { rapport, actions } — ; XSProAssist reçoit une
+// écriture par outil puis worker_terminer. Rien n'est « compris » : c'est un dictionnaire.
+const CHAPITRE = '3';
+const SOUS_CHAPITRE = '3.1';
+const DETAIL = '3.1.1';
 const SIMULATION = {
     1: {
         inserts: [
-            { _apres: 7, niveauListe: SOUS_CHAPITRE, designation: 'Éclairage' },
-            { _apres: 7, niveauListe: DETAIL, designation: 'Fourniture et pose de 3 luminaires LED', unite: 'U', quantiteTotale: 3 },
-            { _apres: 7, niveauListe: DETAIL, designation: 'Câblage en 3G1,5', unite: 'm', quantiteTotale: 25 },
+            { _apres: 7, numero: SOUS_CHAPITRE, designation: 'Éclairage' },
+            { _apres: 7, numero: DETAIL, designation: 'Fourniture et pose de 3 luminaires LED', unite: 'U', quantiteTotale: 3 },
+            { _apres: 7, numero: DETAIL, designation: 'Câblage en 3G1,5', unite: 'm', quantiteTotale: 25 },
         ],
         rapport: 'Sous-chapitre « Éclairage » et ses deux lignes de détail ajoutés à la suite du SECOND CHAPITRE.',
     },
@@ -90,14 +91,14 @@ const SIMULATION = {
     },
     3: {
         inserts: [
-            { _apres: 'fin', niveauListe: CHAPITRE, designation: 'LOT ÉLECTRICITÉ' },
-            { _apres: 'fin', niveauListe: SOUS_CHAPITRE, designation: 'Chambre' },
-            { _apres: 'fin', niveauListe: DETAIL, designation: 'Prise de courant 16 A', unite: 'U', quantiteTotale: 3 },
-            { _apres: 'fin', niveauListe: DETAIL, designation: 'Point d\'allumage va-et-vient', unite: 'U', quantiteTotale: 2 },
-            { _apres: 'fin', niveauListe: DETAIL, designation: 'Luminaire plafond', unite: 'U', quantiteTotale: 1 },
-            { _apres: 'fin', niveauListe: SOUS_CHAPITRE, designation: 'Salle de bain' },
-            { _apres: 'fin', niveauListe: DETAIL, designation: 'Prise rasoir', unite: 'U', quantiteTotale: 1 },
-            { _apres: 'fin', niveauListe: DETAIL, designation: 'Point lumineux étanche', unite: 'U', quantiteTotale: 1 },
+            { _apres: 'fin', numero: CHAPITRE, designation: 'LOT ÉLECTRICITÉ' },
+            { _apres: 'fin', numero: SOUS_CHAPITRE, designation: 'Chambre' },
+            { _apres: 'fin', numero: DETAIL, designation: 'Prise de courant 16 A', unite: 'U', quantiteTotale: 3 },
+            { _apres: 'fin', numero: DETAIL, designation: 'Point d\'allumage va-et-vient', unite: 'U', quantiteTotale: 2 },
+            { _apres: 'fin', numero: DETAIL, designation: 'Luminaire plafond', unite: 'U', quantiteTotale: 1 },
+            { _apres: 'fin', numero: SOUS_CHAPITRE, designation: 'Salle de bain' },
+            { _apres: 'fin', numero: DETAIL, designation: 'Prise rasoir', unite: 'U', quantiteTotale: 1 },
+            { _apres: 'fin', numero: DETAIL, designation: 'Point lumineux étanche', unite: 'U', quantiteTotale: 1 },
         ],
         rapport: 'Chapitre LOT ÉLECTRICITÉ créé en fin de devis : Chambre (3 ouvrages) et Salle de bain (2 ouvrages), quantités reprises du descriptif.',
     },
@@ -238,7 +239,8 @@ function connecter(sessionId) {
 
 // ── Ce qui est retenu dans la grille, lisible ─────────────────────────────────
 function retenu(rowsApres) {
-    const ajoutees = rowsApres.filter((r) => r.__pendingInsert).map((r) => `[${JSON.stringify(r.niveauListe)}] ${r.designation || ''}${r.unite ? ` [${r.unite}]` : ''}${r.quantiteTotale !== undefined && r.quantiteTotale !== '' ? ` ×${r.quantiteTotale}` : ''}`);
+    // Le numéro calculé (ce que voit l'utilisateur) et le niveau stocké (ce que reçoit XSpro).
+    const ajoutees = rowsApres.filter((r) => r.__pendingInsert).map((r) => `${r.numero || '—'} [${JSON.stringify(r.niveauListe)}] ${r.designation || ''}${r.unite ? ` [${r.unite}]` : ''}${r.quantiteTotale !== undefined && r.quantiteTotale !== '' ? ` ×${r.quantiteTotale}` : ''}`);
     const modifiees = [];
     for (const r of rowsApres) {
         if (!r.__pendingFields) continue;

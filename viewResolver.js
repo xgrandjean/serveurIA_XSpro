@@ -20,6 +20,8 @@
  *   export          : object | null
  *   editionParActions : boolean | null  — active le contrat update/delete/insert par _id
  *   formatReponse   : string | null    — texte FORMAT DE RÉPONSE par défaut, hérité par les modes
+ *   colonnesCalculees : object | null  — colonnes déduites des autres lignes, en lecture seule,
+ *                                        recalculées à chaque envoi (cf. colonnesCalculees.js)
  *   null = garder la valeur fournie par XSpro dans workerConfig.
  *
  * Contrat MODES (optionnel) :
@@ -375,6 +377,30 @@ function resolveEffectiveWorkerConfig(session) {
     // le texte résolu tout en stockant/envoyant les indices. Purement déclaratif ici.
     champsIndexRef:  mf.champsIndexRef ?? workerConfig.champsIndexRef ?? {},
   };
+
+  // ── Colonnes calculées (cf. colonnesCalculees.js) ──────────────────────────
+  // Posées dans les colonnes effectives comme des colonnes de la vue, en lecture seule et
+  // marquées `calculee` : la grille les affiche (non éditables), le CSV de la clé API et
+  // worker_contexte les servent, et les modes les masquent ou non comme les autres. Les
+  // définitions (calculer, interpreter) restent sur la session, jamais envoyées au client.
+  // Une colonne du même nom envoyée par XSpro l'emporte : on ne la double pas.
+  const calculees = (viewHook && viewHook.MANIFEST && viewHook.MANIFEST.colonnesCalculees) || null;
+  session.colonnesCalculees = calculees && Object.keys(calculees).length ? calculees : null;
+  session.clesCalculees     = session.colonnesCalculees ? Object.keys(session.colonnesCalculees) : [];
+  if (session.colonnesCalculees) {
+    const colonnes = [...session.effectiveWorkerConfig.colonnes];
+    for (const [cle, def] of Object.entries(session.colonnesCalculees)) {
+      if (colonnes.some((c) => c.cle === cle)) continue;
+      const col = { champ: cle, cle, libelle: def.libelle || cle, type: def.type || 'string', readOnly: true, calculee: true,
+                    ...(def.width ? { width: def.width } : {}) };
+      const pos = def.position || {};
+      let idx = 0;
+      if (pos.avant)      { const i = colonnes.findIndex((c) => c.cle === pos.avant); idx = i === -1 ? 0 : i; }
+      else if (pos.apres) { const i = colonnes.findIndex((c) => c.cle === pos.apres); idx = i === -1 ? colonnes.length : i + 1; }
+      colonnes.splice(idx, 0, col);
+    }
+    session.effectiveWorkerConfig.colonnes = colonnes;
+  }
 
   // Hook vue, modes et selectChoix exposés sur la session
    session.viewHook    = viewHook;

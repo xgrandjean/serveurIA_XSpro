@@ -80,9 +80,33 @@ Claude avec la clé de la session. Un sélecteur « Remplissage » dans l'en-tê
 laquelle est active. Aucune ne renvoie à XSpro sans l'utilisateur. Voir
 [`CANAL_MCP.md`](./CANAL_MCP.md) et [`XSPROASSIST.md`](./XSPROASSIST.md).
 
+## Colonnes calculées
+
+Une vue peut déclarer, dans `MANIFEST.colonnesCalculees` (contrat en tête de
+`colonnesCalculees.js`), des colonnes déduites des autres lignes — une numérotation, un cumul —
+en lecture seule pour l'utilisateur, recalculées à chaque envoi de lignes : vers la grille
+(`init`, `act:done`, `review:sync`, `rows:moved`, et après une saisie sur une colonne dont elles
+dépendent), vers le modèle par clé API (le CSV et les lignes-modèle du prompt), vers Claude et
+XSProAssist (`worker_contexte`, lignes-modèle du briefing). Rien n'est stocké ni envoyé à XSpro.
+Un modèle peut aussi les écrire : la vue traduit alors (`interpreter`) ce qu'il écrit en ses
+vraies colonnes, qui passent même si le mode les masque au modèle.
+
 ## Vue : detailsDevis
 
 Gestion des devis avec hiérarchie niveauListe (0, 1, 2, 3).
+
+### La colonne calculée `numero`
+
+La numérotation du devis telle que XSpro l'affiche (`majChapitresDetailsDevis`) — `1`, `1.1`,
+`1.1.1`, vide pour une ligne de titre ; format romain et séparateur de `parametresDevis` quand
+XSpro les envoie. C'est ce que **le modèle lit et écrit à la place de `niveauListe`**, que
+chaque mode lui masque : la notation `▶ ◇ ○ / ○ ◆ ○ / ○ ○ ●` ne lui dit rien, la numérotation
+hiérarchique, si — et les consignes n'ont plus à l'expliquer. À l'écriture, seule la
+**profondeur** compte (`3` chapitre, `3.1` sous-chapitre, `3.1.1` ligne de détail, vide titre) :
+la vue en déduit `niveauListe`, et le numéro exact est recalculé d'après la position. Un
+`numero` illisible est écarté et rapporté (`ignorees` côté MCP). Les lignes-modèle que XSpro
+envoie avec la session (`data.modele`) reçoivent le même `numero` avant d'être montrées.
+Vérifié par `npm run test:calculees`.
 
 Styles de ligne configurables via `rowStyles` dans le MANIFEST :
 - Niveau 0 et 1 (chapitres) : fond bleu clair, texte gras

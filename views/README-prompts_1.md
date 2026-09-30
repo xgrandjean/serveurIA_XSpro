@@ -26,7 +26,7 @@ même nom de base : `formulaireListeQuestions.js` ↔ `formulaireListeQuestions.
 |---|---|
 | `editionParActions`, `champsMultiligne`, `champsArray`, `champsIndexRef` | `systemPrompt` (base + par mode) |
 | `rowStyles`, `surchargesColonnes`, `colonnesUiHidden/LlmHidden` | `regles` (typesEtRegles, formatChamps, valeursPossibles, qualite) |
-| `reglesPostProcess`, `exportFormat` | `promptsSuggeres`, `formatReponse` (base + par mode) |
+| `reglesPostProcess`, `exportFormat`, `colonnesCalculees` (cf. `colonnesCalculees.js`) | `promptsSuggeres`, `formatReponse` (base + par mode) |
 | `postProcessDefaults`, `postProcessMerge` | `historique` (limite de conservation) |
 | `validateCellEdit`, `getInvalidFields`, `getMissingFields` | `slots` (policy de cycle de vie, base + par mode) |
 | `computeIndexRefSideEffects`, `computeChampsRestreints` | `mcp` (consignes du canal MCP, base + par mode) |

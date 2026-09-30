@@ -85,6 +85,49 @@
 
 'use strict';
 
+// ── La numérotation du devis, comme XSpro l'affiche ─────────────────────────────
+// Miroir de majChapitresDetailsDevis (XSpro, detailsDevisMajTable.js) : trois compteurs ; un
+// chapitre (niveauListe 1) remet à zéro les deux suivants, un sous-chapitre (2) le troisième, une
+// ligne de détail (3) incrémente le sien ; tout autre niveau (0, la ligne de titre) reste sans
+// numéro. Le format vient de parametresDevis quand XSpro l'envoie (selectFormatChapitres
+// 'Roman', selectSeparateur '.', 'space', 'none'…) ; à défaut, arabe et point : 1, 1.1, 1.1.1.
+function romanize(num, mode) {
+  if (mode !== 'Roman') return String(num);
+  const lookup = { M: 1000, CM: 900, D: 500, CD: 400, C: 100, XC: 90, L: 50, XL: 40, X: 10, IX: 9, V: 5, IV: 4, I: 1 };
+  let roman = '';
+  for (const i of Object.keys(lookup)) { while (num >= lookup[i]) { roman += i; num -= lookup[i]; } }
+  return roman;
+}
+
+function numeroterDevis(rows, ctx) {
+  const p = (ctx && ctx.infosVue && ctx.infosVue.parametresDevis) || {};
+  const mode = p.selectFormatChapitres === 'Roman' ? 'Roman' : 'arabe';
+  const separateur = p.selectSeparateur === undefined || p.selectSeparateur === null ? '.'
+    : (p.selectSeparateur === 'space' ? ' ' : (p.selectSeparateur === 'none' ? '' : String(p.selectSeparateur)));
+  const c = [0, 0, 0];
+  return rows.map((row) => {
+    switch (parseInt(row.niveauListe, 10)) {
+      case 1: c[0]++; c[1] = 0; c[2] = 0; return romanize(c[0], mode) + (separateur ? '' : '00');
+      case 2: c[1]++; c[2] = 0;           return `${romanize(c[0], mode)}${separateur}${c[1]}` + (separateur ? '' : '0');
+      case 3: c[2]++;                     return `${romanize(c[0], mode)}${separateur}${c[1]}${separateur}${c[2]}`;
+      default:                            return '';
+    }
+  });
+}
+
+// Ce que la vue déduit d'un numéro écrit par un modèle : sa PROFONDEUR, donc niveauListe.
+// « 3 » ou « 3. » → chapitre (1) ; « 3.1 » → sous-chapitre (2) ; « 3.1.1 » → ligne de détail (3) ;
+// vide → ligne de titre (0). Chiffres romains, espaces et point final acceptés ; au-delà de trois
+// segments, c'est une ligne de détail. Tout autre texte est illisible (null) : écarté et rapporté.
+function niveauDepuisNumero(valeur) {
+  if (valeur === null || valeur === undefined) return { niveauListe: 0 };
+  const texte = String(valeur).trim().replace(/[.\s]+$/, '');
+  if (texte === '') return { niveauListe: 0 };
+  const segments = texte.split(/[.\s\-\/]+/).filter(Boolean);
+  if (!segments.length || !segments.every((s) => /^(\d+|[IVXLCDM]+)$/i.test(s))) return null;
+  return { niveauListe: Math.min(3, segments.length) };
+}
+
 // ── MANIFEST ──────────────────────────────────────────────────────────────────
 const MANIFEST = {
 
@@ -132,6 +175,28 @@ const MANIFEST = {
      * Même mécanisme que dans formulaireListeQuestions.js.
      */
     champsMultiligne: ['designation', 'commentaire', 'reference'],
+
+   /**
+    * Colonnes calculées (cf. colonnesCalculees.js) : « numero », la numérotation du devis telle
+    * que XSpro l'affiche — 1, 1.1, 1.1.1, vide pour une ligne de titre — recalculée à chaque
+    * envoi, en lecture seule pour l'utilisateur. C'est ce que le modèle lit ET écrit à la place de
+    * niveauListe (masquée au modèle par chaque mode) : la notation ▶ ◇ ○ / ○ ◆ ○ / ○ ○ ● ne lui
+    * dit rien, la numérotation hiérarchique, si. Seule la PROFONDEUR de ce qu'il écrit compte ;
+    * la vue en déduit niveauListe, et le numéro exact est recalculé d'après la position. Les
+    * lignes-modèle envoyées par XSpro (data.modele) reçoivent le même numero avant d'être montrées.
+    */
+   colonnesCalculees: {
+     numero: {
+       libelle: 'numéro de la ligne dans le devis, calculé d\'après sa position et sa profondeur : 1 = chapitre, 1.1 = sous-chapitre, 1.1.1 = ligne de détail, vide = ligne de titre. Pour créer ou reclasser une ligne, n\'écris que la profondeur voulue (« 3 », « 3.1 », « 3.1.1 ») : la numérotation exacte est recalculée d\'après la position.',
+       type:        'string',
+       width:       70,
+       position:    { avant: 'niveauListe' },
+       dependDe:    ['niveauListe'],
+       calculer:    (rows, ctx) => numeroterDevis(rows, ctx),
+       interpreter: (valeur) => niveauDepuisNumero(valeur),
+       messageRefus: 'numero illisible — attendu « 3 » (chapitre), « 3.1 » (sous-chapitre), « 3.1.1 » (ligne de détail) ou vide (ligne de titre) ; seule la profondeur compte',
+     },
+   },
 
    /**
     * Styles de ligne déclaratifs selon le niveau de liste.
@@ -233,6 +298,7 @@ const MODES = {
       standaloneUniquement: true,
       // Structure uniformisée : toutes les colonnes listées (null = pas de surcharge)
       surchargesColonnes: {
+        numero:             { readOnly: true, width: 70 },
         niveauListe:        {width: 70},
         designation:        {width: 320},
         unite:              null,
@@ -251,7 +317,8 @@ const MODES = {
       },
       colonnesUiHidden: ['remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal', 'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire'],
-      colonnesLlmHidden: ['remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
+      // niveauListe : masquée au modèle, qui lit et écrit « numero » (cf. MANIFEST.colonnesCalculees).
+      colonnesLlmHidden: ['niveauListe', 'remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal', 'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
         'infoPrixTotalFO', 'infoHeuresTotalMO', 'infoPrixTotalMO', 'infoPrixTotalMOetFO'],
       systemPrompt: null,
@@ -299,6 +366,7 @@ const MODES = {
       // unite, quantiteTotale, heuresUnitaire — tout le reste est masqué
       // pour l'utilisateur ET pour le LLM.
       surchargesColonnes: {
+        numero:             { readOnly: true, width: 70 },
         niveauListe:        null,
         designation:        null,
         unite:              null,
@@ -324,7 +392,7 @@ const MODES = {
       // chiffrage viendra ensuite — mais l'utilisateur doit pouvoir saisir un temps de pose
       // à la main dès cette étape. L'exposer au LLM contredisait la vocation du mode : la
       // colonne était visible alors que le prompt en interdisait le remplissage.
-      colonnesLlmHidden: ['prixAchatUnitaire', 'tauxHoraire', 'heuresUnitaire', 'sousTraitance', 'commentaire',
+      colonnesLlmHidden: ['niveauListe', 'prixAchatUnitaire', 'tauxHoraire', 'heuresUnitaire', 'sousTraitance', 'commentaire',
         'remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
@@ -347,6 +415,7 @@ const MODES = {
       // unite, quantiteTotale, prixAchatUnitaire, heuresUnitaire, tauxHoraire — tout le reste
       // est masqué pour l'utilisateur ET pour le LLM.
       surchargesColonnes: {
+        numero:             { readOnly: true, width: 70 },
         niveauListe:        null,
         designation:        null,
         unite:              null,
@@ -367,7 +436,7 @@ const MODES = {
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
         'infoPrixTotalFO', 'infoHeuresTotalMO', 'infoPrixTotalMO', 'infoPrixTotalMOetFO'],
-      colonnesLlmHidden: ['sousTraitance', 'commentaire',
+      colonnesLlmHidden: ['niveauListe', 'sousTraitance', 'commentaire',
         'remiseAchat', 'remiseClient', 'prixVenteForce', 'margeForcee',
         'prixFournitureAvecRemise', 'prixVenteBordereauTotal',
         'infoPrixUnitaireMOetFO', 'infoPrixVenteUnitaire',
@@ -613,4 +682,6 @@ module.exports = {
   SELECT_CHOIX: buildSelectChoix,
   postProcessDefaults,
   postProcessMerge,
+  numeroterDevis,
+  niveauDepuisNumero,
 };

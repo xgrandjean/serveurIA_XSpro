@@ -16,6 +16,7 @@
 
 const SM                               = require('./sessionManager');
 const Journal                          = require('./journalTraitement');
+const Calculees                        = require('./colonnesCalculees');
 const { resolveProvider, getHandler }  = require('./providers');
 const { FILE_TYPES, resolveFileType }  = require('./fileTypes');
 const { runHandler }                   = require('./fileHandlers');
@@ -204,6 +205,13 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   const colonnes = overriddenConfig.colonnes || [];
   const colsLLM  = colonnes.filter(c => !c.placeholder && !hiddenKeys.has(c.cle));
 
+  // ── 3b. Colonnes calculées (cf. colonnesCalculees.js) ──────────────────────
+  // Les lignes-modèle — workerConfig.modele, ou data.modele que XSpro envoie avec chaque
+  // session — reçoivent leurs colonnes calculées : le modèle doit voir dans l'exemple ce qu'il
+  // verra dans les données (« numero » et non niveauListe, sur detailsDevis).
+  const modeleSource = overriddenConfig.modele?.length ? overriddenConfig.modele : (data?.modele || []);
+  if (modeleSource.length) overriddenConfig.modele = Calculees.enrichir(session, modeleSource);
+
   // ── 4. System prompt (+ additions du hook vue) ─────────────────────────────
   const systemPrompt = buildSystemPrompt(overriddenConfig, data, colsLLM, viewHook, mode);
 
@@ -226,9 +234,9 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
   // été retirée de session.rows (elle reste affichée, barrée, tant que l'utilisateur n'a
   // pas validé la suppression) — mais du point de vue du LLM elle est déjà partie, sans
   // quoi il pourrait la re-proposer ou raisonner sur une ligne "fantôme".
-  const rowsForLLM = session.reviewMode
+  const rowsForLLM = Calculees.enrichir(session, session.reviewMode
     ? rowsWithDefaults.filter(r => !r.__pendingDelete)
-    : rowsWithDefaults;
+    : rowsWithDefaults);
 
   // ── 6. Injection du plan validé dans le message ACT ────────────────────────
   // Le plan est stocké dans session.currentPlan (set par le mode PLAN).
@@ -327,7 +335,7 @@ async function run(session, userPrompt, mode, callbacks, files = []) {
       const applied = applyRowActions(resp, session.rows, colonnes, selectChoix, session);
       return { rows: applied.rows, resume: applied.resume, rapport: applied.rapport, declarees: applied.declarees, sansEffet: applied.sansEffet };
     }
-    return { rows: parseAndMergeRows(resp, session.rows, colonnes, selectChoix), resume: null, rapport: null, declarees: null, sansEffet: null };
+    return { rows: parseAndMergeRows(resp, session.rows, colonnes, selectChoix, session), resume: null, rapport: null, declarees: null, sansEffet: null };
   }
 
   let finalResponse = rawResponse;
@@ -955,13 +963,20 @@ function parseJsonArrayResponse(rawResponse) {
 }
 
 // ── Parse et merge (contrat historique : tableau complet positionnel) ────────
-function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}) {
+function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}, session = null) {
   const parsed = parseJsonArrayResponse(rawResponse);
 
   const placeholderKeys = new Set(colonnes.filter(c => c.placeholder).map(c => c.cle));
 
+  // Une colonne calculée écrite par le modèle est traduite par la vue (cf. colonnesCalculees.js).
+  const interpreter = (champs, ligne) => {
+    const r = Calculees.interpreterEcriture(session, champs, ligne);
+    r.refus.forEach((x) => console.warn(`[LLM] ${x.cle} = ${JSON.stringify(x.valeur)} écarté : ${x.raison}`));
+    return r.champs;
+  };
+
   const merged = originalRows.map((orig, i) => {
-    const llmRow = parsed[i] || {};
+    const llmRow = interpreter(parsed[i] || {}, orig);
     const result = { ...orig };
     for (const [key, val] of Object.entries(llmRow)) {
       if (placeholderKeys.has(key)) continue;
@@ -977,7 +992,7 @@ function parseAndMergeRows(rawResponse, originalRows, colonnes, selectChoix = {}
   if (parsed.length > originalRows.length) {
     for (let i = originalRows.length; i < parsed.length; i++) {
       if (parsed[i]?.designation) {
-        merged.push(sanitizeNewRow(parsed[i], colonnes, placeholderKeys, selectChoix));
+        merged.push(sanitizeNewRow(interpreter(parsed[i], null), colonnes, placeholderKeys, selectChoix));
       }
     }
   }
@@ -1069,9 +1084,15 @@ function applyRowActions(rawResponse, originalRows, colonnes, selectChoix, sessi
 
   for (const action of actions) {
     if (!action || typeof action !== 'object') continue;
-    const { _action, _id, _apres, ...fields } = action;
+    const { _action, _id, _apres, ...brut } = action;
 
     const idAction = cleId(_id);
+
+    // Une colonne calculée écrite par le modèle (« numero ») est traduite par la vue en ses
+    // vraies colonnes (niveauListe) — cf. colonnesCalculees.js. L'illisible est écarté et dit.
+    const interp = Calculees.interpreterEcriture(session, brut, _action === 'update' && idAction !== null ? byId.get(idAction) || null : null);
+    interp.refus.forEach((x) => console.warn(`[LLM] Action "${_action}" : ${x.cle} = ${JSON.stringify(x.valeur)} écarté — ${x.raison}`));
+    const fields = interp.champs;
 
     if (_action === 'delete') {
       if (idAction === null || !byId.has(idAction)) {
@@ -1326,6 +1347,7 @@ function normalizeSelectChoixRow(row, selectChoix) {
 function sanitizeNewRow(llmRow, colonnes, placeholderKeys, selectChoix = {}) {
   const row = {};
   for (const col of colonnes) {
+    if (col.calculee) continue;               // recalculée à chaque envoi, jamais stockée
     row[col.cle] = placeholderKeys.has(col.cle)
       ? ''
       : (llmRow[col.cle] !== undefined ? coerceAvecChoix(llmRow[col.cle], col, selectChoix) : '');
@@ -1408,6 +1430,10 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
   const colonnes = overriddenConfig.colonnes || [];
   const colsLLM  = colonnes.filter(c => !c.placeholder && !hiddenKeys.has(c.cle));
 
+  // 3b. Lignes-modèle enrichies de leurs colonnes calculées (cf. run)
+  const modeleSource = overriddenConfig.modele?.length ? overriddenConfig.modele : (data?.modele || []);
+  if (modeleSource.length) overriddenConfig.modele = Calculees.enrichir(session, modeleSource);
+
   // 4. System prompt (bloc A)
   const systemPrompt = buildSystemPrompt(overriddenConfig, data, colsLLM, viewHook, mode);
 
@@ -1416,9 +1442,9 @@ async function buildPromptPreview(session, userPrompt, mode, files = []) {
     session.rows, colonnes, effectiveWorkerConfig.regles, viewHook
   );
   // cf. run() — une ligne __pendingDelete (mode revue) est invisible pour le LLM
-  const rowsForLLM = session.reviewMode
+  const rowsForLLM = Calculees.enrichir(session, session.reviewMode
     ? rowsWithDefaults.filter(r => !r.__pendingDelete)
-    : rowsWithDefaults;
+    : rowsWithDefaults);
 
   // 6. Message utilisateur
   const editionParActions = overriddenConfig.editionParActions === true;
