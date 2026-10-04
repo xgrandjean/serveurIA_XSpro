@@ -330,10 +330,10 @@ function installMcpChannel(app, deps) {
       if (canal === 'assist') {
         return 'Cette session est en remplissage par XSProAssist, l\'assistant hébergé par le Worker : '
           + 'c\'est lui qui la remplit. Pour que Claude puisse écrire, basculer le sélecteur '
-          + '« Remplissage » sur « Claude (MCP) » dans l\'en-tête de la grille.';
+          + '« Canal » sur « Claude (MCP) » dans l\'en-tête de la grille.';
       }
       return 'Cette session est en mode « clé API » : c\'est l\'IA par clé API qui la remplit. '
-        + 'Pour que Claude puisse écrire, basculer le sélecteur « Remplissage » sur « Claude (MCP) » '
+        + 'Pour que Claude puisse écrire, basculer le sélecteur « Canal » sur « Claude (MCP) » '
         + 'dans l\'en-tête de la grille — ou régler "canalParDefaut": "mcp" dans worker-config.json '
         + 'pour que les nouvelles sessions s\'ouvrent directement ainsi.';
     }
@@ -468,6 +468,18 @@ function installMcpChannel(app, deps) {
     return out;
   }
 
+  // Repère lisible de l'objet travaillé, tiré de infosParent dont la forme dépend de la
+  // vue : parcours et chapitre pour les questions, client et affaire ailleurs. Même
+  // logique que reperesParent côté grille (public/grid.js).
+  function decrireObjet(p) {
+    if (!p || typeof p !== 'object') return null;
+    const joindre = (...parts) => parts.filter(x => x !== undefined && x !== null && String(x).trim() !== '').join(' — ');
+    const texte = (p.chapitre || p.parcours)
+      ? joindre(joindre(p.parcours?.numero, p.parcours?.designation), joindre(p.chapitre?.numero, p.chapitre?.titre))
+      : joindre(p.client, p.affaire);
+    return texte || null;
+  }
+
   // ── Verbe : sessions ────────────────────────────────────────────────────────
   // Point d'entrée : ce que le Worker a en cours, et ce que XSpro a demandé.
   function verbeSessions() {
@@ -479,6 +491,9 @@ function installMcpChannel(app, deps) {
       return {
         sessionId:        resume.sessionId,
         contextName:      resume.contextName,
+        // Sur quoi porte la grille (chapitre, affaire…), pour qu'on ne se trompe pas de
+        // session quand plusieurs vues se suivent — le même repère que le bandeau.
+        objet:            decrireObjet(session.data?.infosParent),
         statut:           session.status,
         canal:            session.canal || 'api',
         modeActif:        session.activeMode || modeParDefaut(session.modes || {}),

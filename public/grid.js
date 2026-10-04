@@ -272,6 +272,28 @@ function resoudreIndexPourAffichage(valeur, refArray) {
   return valeur;
 }
 
+// ── Repère de l'objet travaillé ─────────────────────────────────────────────────
+// Tiré de infosParent, dont la forme dépend de la vue : { client, affaire } pour les
+// formulaires d'une affaire, { parcours, chapitre } pour les questions d'un chapitre.
+// Renvoie les deux libellés du bandeau et un titre court pour l'onglet.
+function reperesParent(p) {
+  const joindre = (...parts) => parts.filter(x => x !== undefined && x !== null && String(x).trim() !== '').join(' — ');
+  if (p.chapitre || p.parcours) {
+    const chapitre = joindre(p.chapitre?.numero, p.chapitre?.titre);
+    const parcours = joindre(p.parcours?.numero, p.parcours?.designation);
+    return {
+      gauche: parcours ? `📚 ${parcours}` : '',
+      droite: chapitre ? `📖 ${chapitre}` : '',
+      titre:  chapitre || parcours,
+    };
+  }
+  return {
+    gauche: p.client  ? `👤 ${p.client}`  : '',
+    droite: p.affaire ? `📁 ${p.affaire}` : '',
+    titre:  p.affaire ? String(p.affaire) : (p.client ? String(p.client) : ''),
+  };
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 function onInit(msg) {
   state.workerConfig = msg.workerConfig;
@@ -307,13 +329,19 @@ function onInit(msg) {
     lienConfigIa.href = '/ia-config.html?retour=' + encodeURIComponent(window.location.href);
   }
 
-  document.title                 = `AI Worker — ${msg.contextName}`;
   el('context-name').textContent = msg.contextName;
 
-  const p = msg.infosParent || {};
-  if (p.client)  el('info-client').textContent  = `👤 ${p.client}`;
-  if (p.affaire) el('info-affaire').textContent = `📁 ${p.affaire}`;
-  if (p.client && p.affaire) show('info-sep');
+  // Repère de ce sur quoi on travaille, dans le bandeau ET dans le titre de l'onglet :
+  // client et affaire pour les vues d'une affaire, parcours et chapitre pour les questions
+  // d'un chapitre. Sans lui, on perdait de vue en cours de route quel chapitre la grille
+  // était en train de modifier.
+  const repere = reperesParent(msg.infosParent || {});
+  el('info-client').textContent  = repere.gauche;
+  el('info-affaire').textContent = repere.droite;
+  el('info-client').title        = repere.gauche;
+  el('info-affaire').title       = repere.droite;
+  el('info-sep').classList.toggle('hidden', !(repere.gauche && repere.droite));
+  document.title = repere.titre ? `${repere.titre} · AI Worker` : `AI Worker — ${msg.contextName}`;
 
   // Modele LLM annonce par le serveur — sert a nommer l'auteur du traitement dans le
   // bandeau et le fil de conversation, comme le fait XSpro dans son spinner.

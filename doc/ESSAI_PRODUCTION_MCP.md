@@ -68,7 +68,7 @@ pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — un
 3. **Le bouton IA doit apparaître** sur le devis — et pas sur les listes ni les annuaires.
    S'il manque, s'arrêter là : c'est le premier point à comprendre.
 4. Cliquer. **Le formulaire doit s'ouvrir directement**, verrouillé sur « Assistant externe ».
-5. Envoyer. **Une grille s'ouvre dans le navigateur.** Le sélecteur « Remplissage » en haut à
+5. Envoyer. **Une grille s'ouvre dans le navigateur.** Le sélecteur « Canal » en haut à
    droite doit afficher « Claude (MCP) », et l'option « Clé API » doit être grisée. Choisir le
    **mode de travail** (Décomposition, Chiffrage…) dans le sélecteur du haut de la grille :
    c'est lui que Claude appliquera — et qu'il annoncera dans `modeApplique`.

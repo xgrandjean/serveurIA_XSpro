@@ -76,7 +76,7 @@ de la checklist complète avant de livrer un nouvel installateur XSpro : voir
 Quatre façons de remplir la grille cohabitent : l'IA par clé API, la saisie à la main,
 Claude via le canal MCP (`mcpChannel.js` + `tools/mcp-worker/`), et **XSProAssist**
 (`xsproassist.js`) — un agent hébergé par le Worker, qui remplit par les mêmes outils que
-Claude avec la clé de la session. Un sélecteur « Remplissage » dans l'en-tête choisit
+Claude avec la clé de la session. Un sélecteur « Canal » dans l'en-tête choisit
 laquelle est active. Aucune ne renvoie à XSpro sans l'utilisateur. Voir
 [`CANAL_MCP.md`](./CANAL_MCP.md) et [`XSPROASSIST.md`](./XSPROASSIST.md).
 

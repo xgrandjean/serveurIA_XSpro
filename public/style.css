@@ -54,7 +54,15 @@ body { display: flex; flex-direction: column; height: 100vh; }
 }
 
 #header-left  { display: flex; align-items: center; gap: 10px; width: var(--left-width); flex-shrink: 0; }
-#header-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; opacity: .8; }
+#header-center { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
+/* Repère de l'objet travaillé (cf. grid.js reperesParent) : le second libellé — affaire ou
+   chapitre — est celui qu'on doit lire d'un coup d'œil, le premier le situe. Un libellé
+   trop long se coupe plutôt que de pousser les commandes de droite. */
+#info-client  { opacity: .8; flex: 0 1 auto; }
+#info-affaire { font-size: 13px; font-weight: 700; flex: 0 0 auto; max-width: 100%; }
+#info-client, #info-affaire { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Fenêtre étroite : le premier libellé (parcours, client) cède toute la place au second. */
+@media (max-width: 1100px) { #info-client, #info-sep { display: none; } }
 #header-right  { display: flex; align-items: center; gap: 8px; }
 
 #app-title { font-size: 14px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; }

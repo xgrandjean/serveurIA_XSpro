@@ -15,7 +15,7 @@
     "                        cle API, comportement historique), 'assist' (XSProAssist,",
     "                        l'agent heberge par le Worker, meme cle) ou 'mcp' (Claude",
     "                        via le canal de pilotage). L'utilisateur bascule ensuite",
-    "                        session par session avec le selecteur « Remplissage » de",
+    "                        session par session avec le selecteur « Canal » de",
     "                        la grille ; ce reglage ne fixe que le point de depart.",
     "                        Mettre 'mcp' si on travaille surtout avec Claude : il peut",
     "                        alors preparer une session sans que la grille ait ete",

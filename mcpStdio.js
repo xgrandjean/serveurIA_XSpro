@@ -178,7 +178,7 @@ const OUTILS = [
           + 'pour chacune, les modes de travail disponibles, et si elle est inscriptible. '
           + 'À appeler en premier : les autres outils ont besoin d\'un sessionId. Une session '
           + 'dont « canal » vaut "api" est remplie par l\'IA à clé API et refusera toute '
-          + 'écriture tant que l\'utilisateur n\'a pas basculé le sélecteur « Remplissage » '
+          + 'écriture tant que l\'utilisateur n\'a pas basculé le sélecteur « Canal » '
           + 'sur « Claude (MCP) » dans la grille.',
         inputSchema: RIEN,
         verbe: 'sessions',

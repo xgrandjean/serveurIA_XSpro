@@ -33,7 +33,7 @@ avec le geste qui le lève — jamais de repli silencieux sur la clé API.
 
 La saisie à la main reste possible dans les trois cas : ce n'est pas un canal, c'est la grille.
 
-Le sélecteur « Remplissage » de la grille choisit le canal ; le choix explicite de l'utilisateur
+Le sélecteur « Canal » de la grille choisit le canal ; le choix explicite de l'utilisateur
 fait mémoire (`.worker-canal.json`) comme pour les deux autres, et `canalParDefaut` de
 `worker-config.json` accepte `"assist"`. Sans clé prêtée (`ia: null`), les options « Clé API »
 et « XSProAssist » sont grisées : seul le canal MCP peut remplir.

@@ -247,7 +247,7 @@ travailler ensuite.
 
 Le Worker tolère un `ia` absent ou vide partout ailleurs : `resolveProvider` se replie sans
 rien signaler quand il n'y a rien à résoudre, et l'UI grise l'option « Clé API » du sélecteur
-« Remplissage » en disant pourquoi.
+« Canal » en disant pourquoi.
 
 ### Clés spécifiques de `workerConfig`
 

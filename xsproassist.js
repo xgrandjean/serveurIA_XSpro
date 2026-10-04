@@ -377,7 +377,7 @@ function creerAssistant({ SM, verbes, outils, wsSend, appelerModele = appelerMod
         j.modele(modele);
         const detail = (r && (r.error || r.status)) || 'sans réponse';
         const motif = r && r.status === 400
-          ? `le modèle ${modele || ''} a refusé la requête avec outils (${detail}). S'il ne sait pas appeler d'outils, ${NOM} ne peut pas travailler avec lui : basculer « Remplissage » sur « Clé API », ou changer de modèle.`
+          ? `le modèle ${modele || ''} a refusé la requête avec outils (${detail}). S'il ne sait pas appeler d'outils, ${NOM} ne peut pas travailler avec lui : basculer « Canal » sur « Clé API », ou changer de modèle.`
           : `modèle injoignable : ${detail}`;
         return conclure('injoignable', motif, { conclu: false, status: r && r.status, cause: (r && r.cause) || (r && r.status === 400 ? 'bad_request' : 'http_error') });
       }

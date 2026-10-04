@@ -327,7 +327,7 @@ async function allerRetour(dejaJoignable) {
                 sessionId: payload.sessionId, lignes: [{ _id: 1, valeurs: { designation: 'ne doit pas passer' } }],
             });
             verifier('en canal « clé API », l\'écriture est refusée',
-                refus.result.isError === true && /Remplissage/.test(texte(refus)), texte(refus).slice(0, 160));
+                refus.result.isError === true && /« Canal »/.test(texte(refus)), texte(refus).slice(0, 160));
         }
 
         // 3. Bascule du canal — par le même message que le sélecteur de la grille.

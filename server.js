@@ -118,7 +118,7 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
 const PORT = WORKER_CONFIG.port;
 
 // ── Mémoire du canal de remplissage ───────────────────────────────────────────
-// Le dernier canal CHOISI PAR L'UTILISATEUR (sélecteur « Remplissage » de la
+// Le dernier canal CHOISI PAR L'UTILISATEUR (sélecteur « Canal » de la
 // grille), conservé d'une session à l'autre et d'un lancement à l'autre — l'exe
 // est relancé à chaque ouverture de XSpro, une mémoire en RAM ne durerait qu'une
 // séance.
@@ -740,7 +740,7 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
-    // L'utilisateur bascule le canal de remplissage (sélecteur « Remplissage »).
+    // L'utilisateur bascule le canal de remplissage (sélecteur « Canal »).
     // Un seul canal actif à la fois : le client masque les sections de l'autre, et
     // le serveur refuse l'entrée de celui qui n'est pas choisi — ici pour le chemin
     // clé API (cf. 'prompt:send' ci-dessous), dans mcpChannel.js pour le chemin MCP.
@@ -809,7 +809,7 @@ async function handleUIMessage(session, msg) {
       // sources à la fois — l'utilisateur ne saurait plus d'où vient une valeur.
       const canal = session.canal || 'api';
       if (canal === 'mcp') {
-        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Remplissage » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
         break;
       }
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
@@ -893,7 +893,7 @@ async function handleUIMessage(session, msg) {
       // n'a pas de plan : il agit, ou dit pourquoi il ne peut pas.
       if ((session.canal || 'api') !== 'api') {
         const qui = session.canal === 'assist' ? 'XSProAssist' : 'Claude (MCP)';
-        wsSend(session, { type: 'error', message: `⚠ Cette session est en remplissage par ${qui}. Basculer le sélecteur « Remplissage » sur « Clé API » pour exécuter ce plan.` });
+        wsSend(session, { type: 'error', message: `⚠ Cette session est en remplissage par ${qui}. Basculer le sélecteur « Canal » sur « Clé API » pour exécuter ce plan.` });
         break;
       }
       SM.setStatus(session, SM.STATUS.ACTING);

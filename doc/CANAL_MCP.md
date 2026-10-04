@@ -12,7 +12,7 @@ renvoie lui-même à XSpro. **Aucun outil ne déclenche la livraison.**
 
 ## Un seul canal à la fois
 
-Un sélecteur « Remplissage » dans l'en-tête de la grille choisit qui pré-remplit :
+Un sélecteur « Canal » dans l'en-tête de la grille choisit qui pré-remplit :
 
 | Canal | Visible dans l'UI | Masqué |
 |---|---|---|
@@ -54,7 +54,7 @@ Worker sur le chemin clé API si son utilisateur travaille avec Claude.
 **La mémoire** vit dans `.worker-canal.json`, à côté de `.worker.lock`, dans le dossier de
 données — purement local au Worker, il ne relie rien à XSpro. Elle est lue **une fois au
 démarrage** (la variable en mémoire fait foi ensuite) et écrite **uniquement** sur un
-basculement explicite du sélecteur « Remplissage ». Fichier absent ou illisible →
+basculement explicite du sélecteur « Canal ». Fichier absent ou illisible →
 `worker-config.json` → `"canalParDefaut"`, qui ne fixe donc plus que le tout premier départ.
 
 Régler `"canalParDefaut": "mcp"` reste utile sur un poste neuf : il permet à Claude de préparer
