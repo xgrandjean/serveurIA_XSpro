@@ -357,7 +357,7 @@ function installMcpChannel(app, deps) {
     const session = SM.getSession(id);
     if (!session) {
       return {
-        erreur: `Session inconnue : « ${id} ». Elle a pu expirer (2 h sans activité) ou être annulée. `
+        erreur: `Session inconnue : « ${id} ». Elle a pu expirer (2 h sans activité), être annulée, ou être close après « Valider et exporter ». `
           + 'Appeler worker_sessions pour la liste des sessions ouvertes.',
         codeHttp: 404,
       };

@@ -965,6 +965,11 @@ async function handleUIMessage(session, msg) {
       const delivered = await deliverResult(session, finalRows);
       SM.setStatus(session, SM.STATUS.DONE);
       wsSend(session, { type: 'session:done', exportFallback: !delivered });
+      // Une session livrée est close, comme une session annulée : la garder jusqu'au TTL
+      // (2 h) la laissait dans worker_sessions à côté de la suivante ouverte sur la même vue,
+      // et un LLM pouvait y lire ou y écrire des lignes déjà parties chez XSpro. L'Excel de
+      // secours n'en dépend plus : il est servi par /exports, hors session.
+      SM.deleteSession(session.sessionId);
       break;
     }
 
