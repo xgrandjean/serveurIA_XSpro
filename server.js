@@ -485,20 +485,25 @@ async function deliverResult(session, finalRows) {
 
 // ── Notification annulation vers XSpro ───────────────────────────────────────
 /**
- * Cas 2 — cancelled : informe XSpro que l'utilisateur a annulé.
+ * Cas 2 — cancelled : informe XSpro que l'utilisateur a annulé (bouton Annuler, ou
+ * grille fermée sans validation).
  */
-async function notifyCancelled(session) {
+async function notifyCancelled(session, message = "Session annulée par l'utilisateur") {
   await notifyXSpro(session.callbackUrl, {
     sessionId:   session.sessionId,
     contextName: session.contextName,
     status:      'cancelled',
     rows:        [],
-    message:     "Session annulée par l'utilisateur",
+    message,
   });
 }
 
 // ── Serveur HTTP ──────────────────────────────────────────────────────────────
 const httpServer = http.createServer(app);
+
+// Délai de grâce avant de clore la session d'une grille fermée : un rechargement de
+// page ferme la socket puis en rouvre une dans la seconde.
+const DELAI_FERMETURE_GRILLE_MS = 15 * 1000;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 // L'UI se connecte via ws://localhost:{PORT}/ws?sessionId=xxx
@@ -514,6 +519,13 @@ wss.on('connection', (ws, req) => {
     ws.send(JSON.stringify({ type: 'error', message: `Session inconnue : ${sessionId}` }));
     ws.close();
     return;
+  }
+
+  // Une grille qui revient (rechargement de page) avant la fin du délai de grâce
+  // garde sa session (cf. ws.on('close') plus bas).
+  if (session.timerFermeture) {
+    clearTimeout(session.timerFermeture);
+    session.timerFermeture = null;
   }
 
   // Attache la socket à la session via SM
@@ -585,8 +597,25 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    // Une socket déjà remplacée par une plus récente (rechargement, second onglet) ne
+    // détache rien : c'est l'autre qui tient la session.
+    if (session.ws !== ws) return;
     SM.detachWs(session);
     console.log(`[WS] UI déconnectée → session ${sessionId}`);
+
+    // Fermer la grille clôt la session, comme Valider ou Annuler : sinon elle restait
+    // jusqu'au TTL (2 h) dans worker_sessions, à côté de la suivante ouverte sur la même
+    // vue. Le délai de grâce laisse revenir une grille simplement rechargée (F5).
+    if ([SM.STATUS.DONE, SM.STATUS.CANCELLED].includes(session.status)) return;
+    session.timerFermeture = setTimeout(async () => {
+      session.timerFermeture = null;
+      if (session.ws || SM.getSession(sessionId) !== session) return;
+      if ([SM.STATUS.DONE, SM.STATUS.CANCELLED].includes(session.status)) return;
+      console.log(`[WS] Grille fermée sans validation → session ${sessionId} close`);
+      SM.setStatus(session, SM.STATUS.CANCELLED);
+      await notifyCancelled(session, 'Grille fermée sans validation');
+      SM.deleteSession(sessionId);
+    }, DELAI_FERMETURE_GRILLE_MS);
   });
 
   ws.on('error', (err) => {
