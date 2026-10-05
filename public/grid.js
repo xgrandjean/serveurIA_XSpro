@@ -2362,9 +2362,9 @@ function bindUI() {
     bouton.textContent = copie ? '✓ Copié' : '⚠ Sélectionné';
     setTimeout(() => { bouton.textContent = libelle; }, 1600);
 
-    majEtatMcp(copie
-      ? 'Consigne copiée — à coller dans une nouvelle conversation de l\'agent externe.'
-      : 'Le navigateur a refusé la copie — la consigne est sélectionnée, fais Ctrl+C.');
+    afficherCopieConsigne(copie
+      ? 'ok'
+      : 'selection');
   });
 
   // Branchement de Claude : le Worker inscrit sa propre façade, la grille ne
@@ -3234,7 +3234,7 @@ function appliquerCanal(canal) {
   }
 
   // Zone de saisie du prompt = clé API et XSProAssist ; panneau MCP = Claude.
-  if (enMcp) { hide('input-area'); show('panel-mcp'); demanderEtatClaude(); }
+  if (enMcp) { hide('input-area'); show('panel-mcp'); demanderEtatClaude(); copierConsigneAuto(); }
   else       { show('input-area'); hide('panel-mcp'); }
 
   // XSProAssist agit, il ne planifie pas : le choix Plan/Act n'a pas de sens pour
@@ -3385,13 +3385,18 @@ function majBranchementClaude(msg) {
   bouton.textContent = msg.obsolete ? '🔌 Rebrancher Claude Code' : '🔌 Connecter Claude Code';
   if (debrancher) { debrancher.disabled = false; debrancher.textContent = 'Débrancher'; }
 
-  const suiteApp = syntheseApplicationClaude(msg.application);
+  const suiteApp = syntheseApplicationClaude(msg.application, !!msg.message);
   montrerAutreAgent(msg.facade);
 
   if (msg.branche) {
     zone.className = 'mcp-branchement-ok';
-    texte.textContent = (msg.message
-      || 'Branchement automatique : Claude Code ✓ (il a les outils du Worker)') + suiteApp;
+    // Au repos, une ligne courte : ce qui est prêt. Le détail (redémarrer l'application de
+    // bureau) n'a de sens que juste après un branchement, quand un message l'accompagne.
+    texte.textContent = msg.message
+      ? msg.message + suiteApp
+      : (applicationClaudeBranchee(msg.application)
+        ? '✓ Claude Code et l\'application Claude sont prêts.'
+        : '✓ Claude Code est prêt.' + suiteApp);
     bouton.classList.add('hidden');
     // Le retour en arrière n'est offert que là où il a un sens.
     debrancher?.classList.remove('hidden');
@@ -3415,14 +3420,22 @@ function majBranchementClaude(msg) {
 // (claude_desktop_config.json) : le panneau le dit, sinon un utilisateur de
 // cette application croirait Claude branché alors que ce client précis ne verra
 // rien. Une ligne au plus, rien si l'application n'est pas installée.
-function syntheseApplicationClaude(apps) {
+function syntheseApplicationClaude(apps, justeBranche = false) {
   if (!Array.isArray(apps) || !apps.length) return '';
   const presente = apps.filter((a) => a.present);
   if (!presente.length) return '';
   if (presente.every((a) => a.branche)) {
-    return " · application Claude de bureau ✓ (la fermer puis la rouvrir après un branchement).";
+    return justeBranche
+      ? " · application Claude de bureau ✓ : la fermer puis la rouvrir pour qu'elle voie le Worker."
+      : ' · application Claude de bureau ✓.';
   }
   return " · application Claude de bureau présente mais pas branchée — « Débrancher » puis « Connecter » pour l'inscrire.";
+}
+
+// L'application de bureau est-elle installée ET branchée ? (pour la ligne courte « tout est prêt »)
+function applicationClaudeBranchee(apps) {
+  const presente = Array.isArray(apps) ? apps.filter((a) => a.present) : [];
+  return presente.length > 0 && presente.every((a) => a.branche);
 }
 
 // Briefing volumineux (cf. SEUIL_BRIEFING, mcpChannel.js) : l'agent reçoit tout,
@@ -3502,6 +3515,52 @@ async function copierNumeroSession() {
   } catch (_) {
     return false;
   }
+}
+
+// Copie d'office de la consigne quand le panneau MCP s'affiche (demande de l'utilisateur,
+// 2026-10-05 : « un seul copié, sans avoir à chercher lequel »). Une fois par session : le
+// presse-papiers est à l'utilisateur, on ne le réécrit pas à chaque bascule de canal.
+//
+// Seulement par l'API moderne, et seulement si la page a le focus : Chrome et Edge
+// l'acceptent alors sans clic sur localhost ; Firefox exige un geste. Pas de repli par
+// sélection ici — sans geste il échoue de toute façon, et il volerait la sélection. Si la
+// page n'avait pas le focus (grille ouverte en arrière-plan), on réessaie au premier retour.
+let _consigneCopieeAuto = false;
+let _copieAuRetourDuFocus = false;
+
+async function copierConsigneAuto() {
+  if (_consigneCopieeAuto || !state.sessionId) return;
+  if (!document.hasFocus()) {
+    afficherCopieConsigne('afaire');
+    if (!_copieAuRetourDuFocus) {
+      _copieAuRetourDuFocus = true;
+      window.addEventListener('focus', () => {
+        _copieAuRetourDuFocus = false;
+        if (state.canal === 'mcp') copierConsigneAuto();
+      }, { once: true });
+    }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(consigneSession());
+    _consigneCopieeAuto = true;
+    afficherCopieConsigne('ok');
+  } catch (_) {
+    afficherCopieConsigne('afaire');
+  }
+}
+
+// Le bandeau de l'étape 2 : ce qui est dans le presse-papiers, ou ce qu'il reste à faire.
+function afficherCopieConsigne(etat) {
+  const zone = el('mcp-copie-auto');
+  if (!zone) return;
+  zone.classList.remove('hidden');
+  zone.classList.toggle('mcp-copie-a-faire', etat !== 'ok');
+  zone.textContent = etat === 'ok'
+    ? '✓ La consigne est copiée : collez-la (Ctrl+V) dans une nouvelle conversation de votre agent, il saura quelle grille remplir.'
+    : etat === 'selection'
+      ? 'Le navigateur a refusé la copie : la consigne est sélectionnée, faites Ctrl+C puis collez-la dans l\'agent.'
+      : 'Cliquez sur « Copier la consigne pour l\'agent », puis collez-la (Ctrl+V) dans une nouvelle conversation de votre agent.';
 }
 
 // État vivant du canal MCP — la contrepartie du fil de conversation pour le

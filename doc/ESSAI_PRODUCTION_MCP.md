@@ -74,8 +74,9 @@ pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — un
    c'est lui que Claude appliquera — et qu'il annoncera dans `modeApplique`.
 6. Revenir dans Claude Code, **coller le texte ci-dessous et joindre le CCTP**. Le fichier se
    donne à Claude directement : en mode MCP la grille n'a pas de zone de pièce jointe.
-   Le bouton **📋 Copier la consigne** de la grille fournit l'amorce avec le numéro de
-   session — la coller telle quelle, puis compléter avec le CCTP.
+   La grille copie d'office l'amorce avec le numéro de session à l'ouverture du panneau
+   (bandeau vert de l'étape 2) ; sinon, le bouton **📋 Copier la consigne pour l'agent** la
+   fournit. La coller telle quelle, puis compléter avec le CCTP.
 7. Regarder la grille se remplir pendant que Claude travaille.
 8. **Relire.** Les lignes proposées sont en couleur : vert pour un ajout, ambre pour une
    modification, rouge pour une suppression. Accepter ou refuser, ligne par ligne ou en bloc.

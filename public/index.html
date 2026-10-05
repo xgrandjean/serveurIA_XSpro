@@ -128,9 +128,16 @@
       <div id="panel-mcp" class="hidden">
         <div id="mcp-titre">🔌 Remplissage par un agent externe</div>
 
-        <!-- Branchement — avant tout le reste : un numéro de session ne sert à
-             rien tant que l'agent n'a pas les outils du Worker, et rien, ni ici
-             ni chez l'agent, ne le dirait. -->
+        <!-- Trois étapes écrites en clair (demande de l'utilisateur, 2026-10-05) : deux
+             boutons « Copier » côte à côte et des explications en infobulle laissaient
+             deviner lequel servir, et quand. La configuration d'un autre agent sert UNE
+             fois et va dans ses réglages ; la consigne sert à chaque grille et va dans
+             la conversation — d'où deux étapes, et non un copié commun. -->
+
+        <!-- Étape 1 — avant tout le reste : un numéro de session ne sert à rien tant
+             que l'agent n'a pas les outils du Worker, et rien, ni ici ni chez l'agent,
+             ne le dirait. -->
+        <div class="mcp-etape-titre"><span class="mcp-num">1</span> Brancher l'agent <small>(une fois pour toutes)</small></div>
         <div id="mcp-branchement" class="mcp-branchement-inconnu">
           <span id="mcp-branchement-etat">Vérification du branchement…</span>
           <button id="btn-connect-claude" class="btn-tool hidden">🔌 Connecter Claude Code</button>
@@ -146,24 +153,27 @@
         </div>
         <!-- Le bouton ci-dessus ne sait brancher que Claude Code et l'application Claude
              de bureau. Tout autre agent MCP s'inscrit à la main : le Worker donne la
-             commande de sa façade, la grille la met en forme. -->
-        <div id="mcp-autre-agent" class="hidden">
-          <span>Autre agent MCP (Cursor, VS Code, Codex…) : l'inscrire à la main, comme serveur <code>worker</code>.</span>
-          <button id="btn-copy-config-mcp" class="btn-tool"
-                  title="Copier l'entrée à ajouter dans la configuration MCP de l'agent (format « mcpServers » : Cursor, Windsurf, Gemini CLI, application Claude… — VS Code la range sous « servers », Codex utilise un fichier TOML)">📋 Copier la configuration</button>
-        </div>
+             commande de sa façade, la grille la met en forme. Replié : c'est rare. -->
+        <details id="mcp-autre-agent" class="hidden">
+          <summary>Utiliser un autre agent (Cursor, VS Code, Codex…)</summary>
+          <p>
+            Une seule fois : copiez cette configuration, collez-la dans les réglages MCP de
+            l'agent (rubrique « mcpServers » ; VS Code l'appelle « servers »), puis redémarrez l'agent.
+          </p>
+          <button id="btn-copy-config-mcp" class="btn-tool">📋 Copier la configuration de l'agent</button>
+        </details>
 
-        <p id="mcp-aide">
-          Colle la consigne ci-dessous dans une <b>nouvelle conversation</b> de l'agent externe
-          (Claude Code, ou tout autre client MCP qui a le Worker parmi ses serveurs).
-          Les valeurs arrivent ici au fur et à mesure, en attente de ta
-          relecture — rien n'est renvoyé à l'application sans toi.
-        </p>
+        <div class="mcp-etape-titre"><span class="mcp-num">2</span> Donner la consigne à l'agent <small>(à chaque grille)</small></div>
+        <div id="mcp-copie-auto" class="hidden"></div>
         <div id="mcp-session-row">
+          <button id="btn-copy-session" class="btn-tool btn-principal">📋 Copier la consigne pour l'agent</button>
           <code id="mcp-session-id">—</code>
-          <button id="btn-copy-session" class="btn-tool"
-                  title="Copier la consigne prête à coller (le numéro seul ne suffit pas : l'agent répondrait « ceci n'est qu'un identifiant »)">📋 Copier la consigne</button>
         </div>
+        <div class="mcp-etape-titre"><span class="mcp-num">3</span> Relire et valider</div>
+        <p class="mcp-explication">
+          Les lignes proposées arrivent en attente dans la grille. Gardez-les ou rejetez-les, puis
+          « Valider et exporter » : rien ne part vers l'application sans vous.
+        </p>
         <div id="mcp-etat">Aucune écriture reçue pour l'instant.</div>
       </div>
     </aside>
