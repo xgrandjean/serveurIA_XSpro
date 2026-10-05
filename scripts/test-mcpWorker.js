@@ -170,9 +170,9 @@ function attendre(ms) { return new Promise((r) => setTimeout(r, ms)); }
     // grille doivent dire qu'ils n'envoient rien à XSpro, sans quoi un modèle
     // prudent hésitera — ou pire, un modèle pressé croira avoir livré.
     const ecriture = outils.filter((o) => /ecrire|inserer|supprimer|terminer/.test(o.name));
-    verifier('les outils qui touchent la grille annoncent que rien ne part vers XSpro',
-        ecriture.length === 4 && ecriture.every((o) => /XSpro/.test(o.description)),
-        ecriture.filter((o) => !/XSpro/.test(o.description)).map((o) => o.name).join(','));
+    verifier('les outils qui touchent la grille annoncent que rien ne part vers l\'application',
+        ecriture.length === 4 && ecriture.every((o) => /l'application/.test(o.description)),
+        ecriture.filter((o) => !/l'application/.test(o.description)).map((o) => o.name).join(','));
     const ecrireCellules = outils.find((o) => o.name === 'worker_ecrire_cellules');
     verifier('« écrire » annonce que c\'est une proposition soumise à l\'utilisateur',
         !!(ecrireCellules && /PROPOSITION/.test(ecrireCellules.description)),
@@ -672,11 +672,11 @@ async function verifierXSProAssist(f) {
         const vues = donnees(await f.outil('worker_sessions', {}));
         const moi  = vues && vues.sessions.find((s) => s.sessionId === s1.sessionId);
         verifier('worker_sessions rapporte le canal « assist », non inscriptible pour Claude',
-            !!(moi && moi.canal === 'assist' && moi.ecrivable === false && /XSProAssist/.test(moi.raison || '')),
+            !!(moi && moi.canal === 'assist' && moi.ecrivable === false && /assistant intégré/.test(moi.raison || '')),
             moi && JSON.stringify({ canal: moi.canal, ecrivable: moi.ecrivable, raison: moi.raison }).slice(0, 200));
         const refus = await f.outil('worker_ecrire_cellules', { sessionId: s1.sessionId, lignes: [{ _id: 1, valeurs: { designation: 'non' } }] });
         verifier('worker_ecrire_cellules est refusé, et le message nomme le geste',
-            refus.result.isError === true && /XSProAssist/.test(texte(refus)) && /Agent externe \(MCP\)/.test(texte(refus)), texte(refus).slice(0, 160));
+            refus.result.isError === true && /assistant intégré/.test(texte(refus)) && /Agent externe \(MCP\)/.test(texte(refus)), texte(refus).slice(0, 160));
 
         // 3. La demande, par le même message que la zone de prompt de la grille.
         const attenteFin = ws.attendre('act:done', 20000);
@@ -735,7 +735,7 @@ async function verifierXSProAssist(f) {
         wsR.envoyer({ type: 'prompt:send', prompt: 'Revois le premier chapitre.', mode: 'act', files: [], activeMode: null });
         const erreur = await attenteErreur;
         verifier('un modèle qui refuse les outils est annoncé, avec le geste (Clé API), sans repli silencieux',
-            !!(erreur && /XSProAssist/.test(erreur.message) && /Clé API/.test(erreur.message) && erreur.httpStatus === 400),
+            !!(erreur && /Assistant intégré/.test(erreur.message) && /Clé API/.test(erreur.message) && erreur.httpStatus === 400),
             erreur && JSON.stringify(erreur).slice(0, 240));
         verifier('rien n\'a été écrit dans cette session', wsR.recus['cell:update'] === undefined && wsR.recus['act:done'] === undefined, JSON.stringify(wsR.recus));
         const finR = wsR.messages.filter((m) => m.type === 'journal:etape').map((m) => m.etape).find((e) => e.evenement === 'fin');

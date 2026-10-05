@@ -128,8 +128,8 @@ function assistant(modele, extra = {}) {
             === OUTILS.find((o) => o.name === 'worker_ecrire_cellules').description);
 
     const consigne = XSProAssist.consigneSysteme('detailsDevis', 'MISSION X\n== COMMENT RÉPONDRE ==\n...');
-    verifier('la consigne système nomme XSProAssist, la vue, et porte le briefing',
-        /XSProAssist/.test(consigne) && /« detailsDevis »/.test(consigne) && /MISSION X/.test(consigne) && /worker_terminer/.test(consigne));
+    verifier('la consigne système nomme l\'assistant intégré, la vue, et porte le briefing',
+        /assistant intégré/.test(consigne) && /« detailsDevis »/.test(consigne) && /MISSION X/.test(consigne) && /worker_terminer/.test(consigne));
     verifier('la consigne dit que les écritures sont des propositions et que rien ne part sans l\'utilisateur',
         /PROPOSITIONS/.test(consigne) && /Rien ne part sans lui/.test(consigne));
     const demande = XSProAssist.texteDemande({ briefing: 'SECRET', briefingSource: 'vue', colonnes: [{ cle: 'a' }], lignes: [] }, 'fais X');
@@ -264,7 +264,7 @@ function assistant(modele, extra = {}) {
         verifier('issue « sans conclusion », mais conclu pour lui (les propositions sont posées)',
             bilan.issue === 'sansConclusion' && bilan.conclu === true && bilan.mesures.tours === 4, JSON.stringify(bilan));
         verifier('la session est en attente de relecture, avec un rapport qui prévient',
-            session.status === SM.STATUS.PAUSED && /^⚠ XSProAssist n'a pas conclu/.test(messagesDe(session, 'act:done')[0].rapport),
+            session.status === SM.STATUS.PAUSED && /^⚠ L'assistant intégré n'a pas conclu/.test(messagesDe(session, 'act:done')[0].rapport),
             messagesDe(session, 'act:done')[0] && messagesDe(session, 'act:done')[0].rapport);
         verifier('la dernière parole du modèle est dans le motif', /Voilà/.test(bilan.motif), bilan.motif);
 
@@ -302,13 +302,13 @@ function assistant(modele, extra = {}) {
         const lignes = [{ _id: 1, valeurs: { designation: 'x' } }];
         const refusMcp = verbes.ecrire({ sessionId: enAssist.sessionId, lignes });                 // origine 'mcp' par défaut
         verifier('en canal XSProAssist, la façade MCP ne peut pas écrire, et le message nomme le geste',
-            refusMcp.erreur && /XSProAssist/.test(refusMcp.erreur) && /Claude \(MCP\)/.test(refusMcp.erreur), JSON.stringify(refusMcp));
+            refusMcp.erreur && /assistant intégré/.test(refusMcp.erreur) && /Agent externe \(MCP\)/.test(refusMcp.erreur), JSON.stringify(refusMcp));
         const okAssist = verbes.ecrire({ sessionId: enAssist.sessionId, lignes }, 'assist');
         verifier('XSProAssist écrit pendant que la session est en « acting »', okAssist.cellulesEcrites === 1, JSON.stringify(okAssist));
 
         const enMcp = nouvelleSession({ canal: 'mcp', statut: SM.STATUS.CONNECTED });
         const refusAssist = verbes.ecrire({ sessionId: enMcp.sessionId, lignes }, 'assist');
-        verifier('en canal MCP, XSProAssist ne peut pas écrire', refusAssist.erreur && /XSProAssist/.test(refusAssist.erreur), JSON.stringify(refusAssist));
+        verifier('en canal MCP, XSProAssist ne peut pas écrire', refusAssist.erreur && /assistant intégré/.test(refusAssist.erreur), JSON.stringify(refusAssist));
         const okMcp = verbes.ecrire({ sessionId: enMcp.sessionId, lignes });
         verifier('… et la façade MCP, si', okMcp.cellulesEcrites === 1, JSON.stringify(okMcp));
 
@@ -319,7 +319,7 @@ function assistant(modele, extra = {}) {
         const enMcpActing = nouvelleSession({ canal: 'mcp', statut: SM.STATUS.ACTING });
         const refusStatut = verbes.ecrire({ sessionId: enMcpActing.sessionId, lignes });
         verifier('« acting » ferme toujours le canal MCP (l\'IA par clé API ou XSProAssist travaille)',
-            refusStatut.erreur && /acting/.test(refusStatut.erreur) && /XSProAssist/.test(refusStatut.erreur), JSON.stringify(refusStatut));
+            refusStatut.erreur && /acting/.test(refusStatut.erreur) && /assistant intégré/.test(refusStatut.erreur), JSON.stringify(refusStatut));
 
         // Le traitement lui-même, sur une session qui n'est pas en canal assist : le verbe refuse.
         const horsCanal = nouvelleSession({ canal: 'mcp', statut: SM.STATUS.ACTING });

@@ -491,7 +491,7 @@ async function notifyXSpro(callbackUrl, payload) {
     // console.warn(`[Worker] XSpro a répondu ${response.status}`);
     return false;
   } catch (e) {
-    console.warn(`[Worker] XSpro injoignable : ${e.message}`);
+    console.warn(`[Worker] application de bureau injoignable : ${e.message}`);
     return false;
   }
 }
@@ -855,7 +855,7 @@ async function handleUIMessage(session, msg) {
       // sources à la fois — l'utilisateur ne saurait plus d'où vient une valeur.
       const canal = session.canal || 'api';
       if (canal === 'mcp') {
-        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par un agent externe (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par un agent externe (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « Assistant intégré » pour envoyer une demande.' });
         break;
       }
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
@@ -878,14 +878,14 @@ async function handleUIMessage(session, msg) {
           bilan = await xsproassist.traiter(session, { demande: prompt, files, activeMode });
         } catch (e) {
           bilan = { issue: 'erreur', motif: e.message || 'erreur inconnue', conclu: false };
-          console.error(`[WS] Erreur session ${session.sessionId} (XSProAssist) :`, e.message);
+          console.error(`[WS] Erreur session ${session.sessionId} (assistant intégré) :`, e.message);
         }
         if (bilan.rapport) SM.pushHistory(session, 'assistant', bilan.rapport);
         if (!bilan.conclu) {
           SM.setStatus(session, SM.STATUS.ERROR);
           wsSend(session, {
             type:       'error',
-            message:    `XSProAssist — ${bilan.motif || bilan.issue}`,
+            message:    `Assistant intégré — ${bilan.motif || bilan.issue}`,
             cause:      bilan.cause || bilan.issue,
             suggestion: null,
             httpStatus: bilan.status || null,
@@ -938,7 +938,7 @@ async function handleUIMessage(session, msg) {
       // ne doit pas pouvoir être exécuté par la clé API après coup. XSProAssist
       // n'a pas de plan : il agit, ou dit pourquoi il ne peut pas.
       if ((session.canal || 'api') !== 'api') {
-        const qui = session.canal === 'assist' ? 'XSProAssist' : 'un agent externe (MCP)';
+        const qui = session.canal === 'assist' ? 'l\'assistant intégré' : 'un agent externe (MCP)';
         wsSend(session, { type: 'error', message: `⚠ Cette session est en remplissage par ${qui}. Basculer le sélecteur « Canal » sur « Clé API » pour exécuter ce plan.` });
         break;
       }
@@ -1399,7 +1399,7 @@ async function demarrer() {
 
     console.log(`============================================`);
     console.log(`AI Worker  -  http://localhost:${PORT}`);
-    console.log(`Mode : ${IS_STANDALONE ? 'STANDALONE' : 'SERVEUR (ecoute XSpro)'}`);
+    console.log(`Mode : ${IS_STANDALONE ? 'STANDALONE' : 'SERVEUR (écoute l\'application)'}`);
     if (IS_STANDALONE) {
       console.log(`Payload : ${path.basename(STANDALONE_FILE)}`);
     }

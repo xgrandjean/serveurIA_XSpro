@@ -231,19 +231,19 @@ function resolveColonnes(mfColonnes, workerConfig, data) {
       const result = mfColonnes(workerConfig, data);
       if (result === null || result === undefined) return workerConfig.colonnes || [];
       if (!Array.isArray(result)) {
-        console.warn('[ViewResolver] MANIFEST.colonnes() n\'a pas retourné un array — fallback XSpro');
+        console.warn('[ViewResolver] MANIFEST.colonnes() n\'a pas retourné un array — fallback sur les colonnes de l\'application');
         return workerConfig.colonnes || [];
       }
       return result;
     } catch (e) {
-      console.warn(`[ViewResolver] Erreur dans MANIFEST.colonnes() : ${e.message} — fallback XSpro`);
+      console.warn(`[ViewResolver] Erreur dans MANIFEST.colonnes() : ${e.message} — fallback sur les colonnes de l'application`);
       return workerConfig.colonnes || [];
     }
   }
 
   if (Array.isArray(mfColonnes)) return mfColonnes;
 
-  console.warn('[ViewResolver] MANIFEST.colonnes : type inattendu — fallback XSpro');
+  console.warn('[ViewResolver] MANIFEST.colonnes : type inattendu — fallback sur les colonnes de l\'application');
   return workerConfig.colonnes || [];
 }
 

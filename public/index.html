@@ -26,11 +26,11 @@
       <!-- Canal de remplissage : qui pré-remplit la grille. Un seul à la fois, les
            sections de l'autre sont masquées (cf. grid.js appliquerCanal). La saisie
            à la main reste possible dans les deux cas : c'est la grille elle-même. -->
-      <label id="canal-label" title="Qui pré-remplit la grille : l'IA par clé API en un coup, XSProAssist (un agent hébergé par le Worker, avec la même clé), ou un agent externe (Claude Code ou tout autre client MCP) via le canal MCP. Un seul à la fois.">
+      <label id="canal-label" title="Qui pré-remplit la grille : l'IA par clé API en un coup, l'assistant intégré (un agent hébergé par le Worker, avec la même clé), ou un agent externe (Claude Code ou tout autre client MCP) via le canal MCP. Un seul à la fois.">
         Canal
         <select id="canal-selector">
           <option value="api">🤖 Clé API</option>
-          <option value="assist">🧭 XSProAssist</option>
+          <option value="assist">🧭 Assistant intégré</option>
           <option value="mcp">🔌 Agent externe (MCP)</option>
         </select>
       </label>
@@ -154,7 +154,7 @@
           Colle la consigne ci-dessous dans une <b>nouvelle conversation</b> de l'agent externe
           (Claude Code, ou tout autre client MCP qui a le Worker parmi ses serveurs).
           Les valeurs arrivent ici au fur et à mesure, en attente de ta
-          relecture — rien n'est renvoyé à XSpro sans toi.
+          relecture — rien n'est renvoyé à l'application sans toi.
         </p>
         <div id="mcp-session-row">
           <code id="mcp-session-id">—</code>

@@ -2283,7 +2283,7 @@ function onSessionDone(exportFallback = false) {
     }, 3000);
   } else {
     setStatusMessage('Résultat envoyé.');
-    addMessage('system', '✓ Résultat envoyé à XSpro. Tu peux fermer cette fenêtre.');
+    addMessage('system', '✓ Résultat envoyé à l\'application. Tu peux fermer cette fenêtre.');
   }
   setAiRunning(false);
   disableAllControls();
@@ -2732,7 +2732,7 @@ function sendPrompt() {
   renderChips();
   setAiRunning(true);
   addMessage('system', state.canal === 'assist'
-    ? `🧭 XSProAssist travaille${state.modeleIA ? ` (${state.modeleIA})` : ''}… — ses étapes s'affichent ici au fur et à mesure.`
+    ? `🧭 L'assistant intégré travaille${state.modeleIA ? ` (${state.modeleIA})` : ''}… — ses étapes s'affichent ici au fur et à mesure.`
     : state.reviewMode
       ? libelleTraitement()
       : libelleTraitement(`Traitement en mode ${state.mode === 'plan' ? 'Plan' : 'Act'}`));
@@ -3224,11 +3224,11 @@ function appliquerCanal(canal) {
       const opt = sel.querySelector(`option[value="${valeur}"]`);
       if (!opt) continue;
       opt.disabled = !state.apiDisponible;
-      opt.title    = state.apiDisponible ? '' : 'XSpro n\'a prêté aucune clé API pour cette session.';
+      opt.title    = state.apiDisponible ? '' : 'L\'application n\'a prêté aucune clé API pour cette session.';
     }
     sel.title = state.apiDisponible
-      ? 'Qui pré-remplit la grille : l\'IA par clé API en un coup, XSProAssist (un agent hébergé par le Worker, avec la même clé), ou un agent externe (Claude Code ou tout autre client MCP) via le canal MCP. Un seul à la fois.'
-      : 'XSpro n\'a prêté aucune clé API pour cette session : seul le canal MCP peut la remplir.';
+      ? 'Qui pré-remplit la grille : l\'IA par clé API en un coup, l\'assistant intégré (un agent hébergé par le Worker, avec la même clé), ou un agent externe (Claude Code ou tout autre client MCP) via le canal MCP. Un seul à la fois.'
+      : 'L\'application n\'a prêté aucune clé API pour cette session : seul le canal MCP peut la remplir.';
   }
 
   // Zone de saisie du prompt = clé API et XSProAssist ; panneau MCP = Claude.
@@ -3255,8 +3255,8 @@ function onCanalChange(canal) {
   if (state.canal === avant) return;
 
   const textes = {
-    mcp:    '🔌 Remplissage par un agent externe (MCP). La zone de prompt est masquée : ni l\'IA par clé API ni XSProAssist ne seront appelés pour cette session.',
-    assist: '🧭 Remplissage par XSProAssist : l\'assistant hébergé par le Worker lit ta demande, remplit la grille par les mêmes outils qu\'un agent externe, et rend un rapport. Ses propositions restent à valider ici. Le canal MCP est fermé pour cette session.',
+    mcp:    '🔌 Remplissage par un agent externe (MCP). La zone de prompt est masquée : ni l\'IA par clé API ni l\'assistant intégré ne seront appelés pour cette session.',
+    assist: '🧭 Remplissage par l\'assistant intégré : hébergé par le Worker, il lit ta demande, remplit la grille par les mêmes outils qu\'un agent externe, et rend un rapport. Ses propositions restent à valider ici. Le canal MCP est fermé pour cette session.',
     api:    '🤖 Remplissage par l\'IA à clé API. Le canal MCP est fermé pour cette session.',
   };
   addMessage('system', textes[state.canal]);
@@ -3270,7 +3270,7 @@ function onCanalChange(canal) {
 // du compteur du panneau MCP — et ce qui permet de comparer les deux canaux. À
 // l'ouverture, le journal du dernier traitement est rejoué (init.journal) :
 // l'utilisateur peut découvrir des lignes en attente posées grille fermée.
-const NOMS_CANAL = { api: '🤖 IA clé API', assist: '🧭 XSProAssist', mcp: '🔌 Agent externe (MCP)' };
+const NOMS_CANAL = { api: '🤖 IA clé API', assist: '🧭 Assistant intégré', mcp: '🔌 Agent externe (MCP)' };
 const ISSUES_JOURNAL = { terminee: 'terminé', plan: 'plan rendu', sansConclusion: 'sans conclusion', injoignable: 'modèle injoignable', erreur: 'erreur' };
 
 function kcar(n) { return n >= 10000 ? `${Math.round(n / 1000)} k car.` : `${n} car.`; }
@@ -3364,7 +3364,7 @@ function demanderEtatClaude() {
     if (!zone || zone.className !== 'mcp-branchement-inconnu') return;   // une réponse est arrivée
     el('mcp-branchement-etat').textContent =
       "Impossible de vérifier le branchement : ce Worker est plus ancien que cette page. "
-      + 'Fermer la grille et relancer XSpro, qui installera la version à jour.';
+      + 'Fermer la grille et relancer l\'application, qui installera la version à jour.';
   }, 3000);
 }
 

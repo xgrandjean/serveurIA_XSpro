@@ -39,7 +39,7 @@ const DELAI_MS          = 10000;
 const GESTE_DEMARRAGE =
     'Le AI Worker ne tourne pas, ou il écoute sur un autre port.\n'
   + 'Le lancer depuis le dossier du Worker :  npm start\n'
-  + '— ou ouvrir la grille depuis XSpro, qui démarre serveurIA.exe lui-même.';
+  + '— ou ouvrir la grille depuis l\'application de bureau, qui démarre serveurIA.exe lui-même.';
 
 // ── Découverte du port ────────────────────────────────────────────────────────
 // Relu à chaque appel : le Worker peut avoir été relancé sur un autre port entre
@@ -174,7 +174,7 @@ const OUTILS = [
     {
         name: 'worker_sessions',
         description:
-            'Les grilles actuellement ouvertes dans le AI Worker, avec ce que XSpro a demandé '
+            'Les grilles actuellement ouvertes dans le AI Worker, avec ce que l\'application a demandé '
           + 'pour chacune, les modes de travail disponibles, et si elle est inscriptible. '
           + 'À appeler en premier : les autres outils ont besoin d\'un sessionId. Une session '
           + 'dont « canal » vaut "api" est remplie par l\'IA à clé API et refusera toute '
@@ -220,7 +220,7 @@ const OUTILS = [
           + 'tableau:true attend un tableau. Les colonnes inconnues et les _id introuvables '
           + 'sont ignorés et listés dans la réponse — la relire. Rien n\'est vérifié sur le '
           + 'fond : c\'est une PROPOSITION, que l\'utilisateur valide ou rejette ligne par '
-          + 'ligne dans la grille. Rien n\'est envoyé à XSpro.',
+          + 'ligne dans la grille. Rien n\'est envoyé à l\'application.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -249,7 +249,7 @@ const OUTILS = [
           + 'arrivent en attente, et l\'utilisateur les garde ou les rejette. Renvoie les _id '
           + 'attribués — s\'en servir pour compléter ensuite ces lignes avec '
           + 'worker_ecrire_cellules. Les lignes du lot se suivent dans l\'ordre donné. '
-          + 'Rien n\'est envoyé à XSpro : c\'est l\'utilisateur qui livrera, après relecture.',
+          + 'Rien n\'est envoyé à l\'application : c\'est l\'utilisateur qui livrera, après relecture.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -272,7 +272,7 @@ const OUTILS = [
         description:
             'Marque des lignes comme à supprimer, au même titre que le bouton « ✂️ » : elles '
           + 'restent visibles, barrées, jusqu\'à ce que l\'utilisateur tranche. Rien n\'est '
-          + 'perdu tant qu\'il n\'a pas validé, et rien n\'est envoyé à XSpro.',
+          + 'perdu tant qu\'il n\'a pas validé, et rien n\'est envoyé à l\'application.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -293,7 +293,7 @@ const OUTILS = [
             'Clôt le travail sur une session : la grille se redessine entièrement et passe en '
           + 'attente de relecture par l\'utilisateur. À appeler une fois le remplissage fini. '
           + 'Le « rapport » s\'affiche dans la grille comme un message : y dire ce qui a été '
-          + 'fait, et ce dont on n\'est pas sûr. Ceci n\'envoie RIEN à XSpro — c\'est '
+          + 'fait, et ce dont on n\'est pas sûr. Ceci n\'envoie RIEN à l\'application — c\'est '
           + 'l\'utilisateur qui, après relecture, appuie lui-même sur « Valider et exporter ».',
         inputSchema: {
             type: 'object',

@@ -66,7 +66,7 @@ const PHRASE_ANOMALIE = 'Rapport d\'activité mis à jour — voir le fichier lo
 const GRAVITES = ['mineure', 'genante', 'bloquante'];
 
 const CONSIGNE_ANOMALIES = `== SIGNALER CE QUI CLOCHE (phase bêta) ==
-Le Worker est en rodage, et tu es le seul à voir en vrai ce que XSpro lui envoie.
+Le Worker est en rodage, et tu es le seul à voir en vrai ce que l'application lui envoie.
 Si ce qu'on te donne ne tient pas debout — des données qui contredisent la réalité de l'affaire, un libellé de colonne qui ne décrit pas ce qu'elle contient, une règle impossible à respecter, une valeur attendue qui ne figure dans aucune liste de choix, une colonne dont tu aurais besoin et que le mode masque — appelle worker_signaler_anomalie et décris le fait tel que tu l'as constaté.
 Ne t'interromps pas pour autant : signale, puis fais de ton mieux avec ce que tu as.
 Ce journal est destiné au développeur du Worker, pas à l'utilisateur. Ne lui explique pas l'anomalie, elle ne le concerne pas — il transmettra le fichier. Si et seulement si tu as signalé au moins une anomalie, ajoute à ton rapport de fin cette phrase, et rien d'autre à ce sujet :
@@ -122,7 +122,7 @@ Tu n'écris pas de JSON : tu remplis la grille avec les outils.
 - Retirer des lignes → worker_supprimer_lignes.
 - Quand tu as fini → worker_terminer, dont l'argument « rapport » est l'endroit où t'adresser à l'utilisateur.
 Une colonne à choix accepte aussi bien sa « valeur » que son « label ».
-Tes écritures sont des propositions : l'utilisateur les valide une à une dans la grille, et c'est lui seul qui renvoie le résultat à XSpro.`;
+Tes écritures sont des propositions : l'utilisateur les valide une à une dans la grille, et c'est lui seul qui renvoie le résultat à l'application.`;
 
 // Ajouté au repli SEULEMENT : les prompts de la clé API renvoient à un bloc de
 // données nommé « DONNÉES ACTUELLES », qui n'existe que sur ce chemin-là. Une vue
@@ -280,9 +280,9 @@ function installMcpChannel(app, deps) {
 
   const RAISON_STATUT = {
     [SM.STATUS.PLANNING]:   "l'IA par clé API travaille en ce moment sur cette session — attendre la fin",
-    [SM.STATUS.ACTING]:     "l'IA par clé API ou XSProAssist travaille en ce moment sur cette session — attendre la fin",
-    [SM.STATUS.DELIVERING]: 'le résultat est en cours de livraison vers XSpro',
-    [SM.STATUS.DONE]:       'cette session est déjà livrée : ses lignes sont parties chez XSpro, une écriture ne repartirait pas',
+    [SM.STATUS.ACTING]:     "l'IA par clé API ou l'assistant intégré travaille en ce moment sur cette session — attendre la fin",
+    [SM.STATUS.DELIVERING]: 'le résultat est en cours de livraison vers l\'application',
+    [SM.STATUS.DONE]:       'cette session est déjà livrée : ses lignes sont parties vers l\'application, une écriture ne repartirait pas',
     [SM.STATUS.CANCELLED]:  'cette session a été annulée',
   };
 
@@ -325,10 +325,10 @@ function installMcpChannel(app, deps) {
       if (origine === 'assist') {
         // Inatteignable depuis la grille (server.js ne lance XSProAssist qu'en canal
         // `assist`), mais le verbe se protège lui-même.
-        return `Cette session n'est pas en remplissage par XSProAssist (canal « ${canal} ») : ses écritures lui sont fermées.`;
+        return `Cette session n'est pas en remplissage par l'assistant intégré (canal « ${canal} ») : ses écritures lui sont fermées.`;
       }
       if (canal === 'assist') {
-        return 'Cette session est en remplissage par XSProAssist, l\'assistant hébergé par le Worker : '
+        return 'Cette session est en remplissage par l\'assistant intégré, hébergé par le Worker : '
           + 'c\'est lui qui la remplit. Pour qu\'un agent externe puisse écrire, basculer le sélecteur '
           + '« Canal » sur « Agent externe (MCP) » dans l\'en-tête de la grille.';
       }
@@ -635,7 +635,7 @@ function installMcpChannel(app, deps) {
   const REFUS_HORS_REVUE =
     'Cette vue n\'est pas en mode revue : une ligne insérée ou supprimée y serait '
     + 'définitive, sans passer par la validation de l\'utilisateur — et une suppression '
-    + 'proposée partirait quand même chez XSpro. Utiliser worker_ecrire_cellules sur les '
+    + 'proposée partirait quand même vers l\'application. Utiliser worker_ecrire_cellules sur les '
     + 'lignes existantes, et laisser l\'utilisateur ajouter ou retirer les lignes lui-même.';
 
   /**

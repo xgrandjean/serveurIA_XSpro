@@ -30,7 +30,7 @@
 const Journal = require('./journalTraitement');
 
 const CANAL = 'assist';
-const NOM   = 'XSProAssist';
+const NOM   = 'l\'assistant intégré';
 
 // Un remplissage demande plus d'allers-retours qu'une déclaration de la salle d'attente (8 tours
 // dans XSpro) : relire une page de lignes, écrire un lot, corriger ce qui a été écarté, conclure.
@@ -122,13 +122,13 @@ function outilsPourModele(OUTILS, { anomalies = true } = {}) {
  */
 function consigneSysteme(contextName, briefing) {
   return [
-    `Tu es ${NOM}, l'assistant de XSpro qui pré-remplit la grille « ${contextName} » du AI Worker.`,
+    `Tu es ${NOM} du AI Worker : tu pré-remplis la grille « ${contextName} ».`,
     'L\'utilisateur a écrit une demande dans la grille ; tu la réalises UNIQUEMENT par appels d\'outils,',
     'et tu termines TOUJOURS par worker_terminer, dont le « rapport » est ton seul message à',
     'l\'utilisateur : ce que tu as fait, les choix faits, ce qu\'il doit vérifier.',
     '',
     'Tes écritures sont des PROPOSITIONS : l\'utilisateur les valide ou les rejette une à une dans la',
-    'grille, et lui seul renvoie le résultat à XSpro. Rien ne part sans lui.',
+    'grille, et lui seul renvoie le résultat à l\'application. Rien ne part sans lui.',
     '',
     'Le contexte t\'est donné avec la demande : les colonnes du mode de travail (type, valeurs',
     'admises), les lignes avec leur _id, les informations de l\'affaire. worker_contexte relit les',
@@ -437,7 +437,7 @@ function creerAssistant({ SM, verbes, outils, wsSend, appelerModele = appelerMod
     // porte ses propositions : on clôt à sa place, en le disant, pour que l'utilisateur les
     // relise avec un rapport honnête. Sinon, rien n'a changé et c'est un échec à annoncer.
     const dernier = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
-    const motif = `${NOM} n'a pas conclu${dernier ? ` : ${String(dernier.content).slice(0, 200)}` : ''}`;
+    const motif = `L'assistant intégré n'a pas conclu${dernier ? ` : ${String(dernier.content).slice(0, 200)}` : ''}`;
     if (ecritures) {
       rapport = `⚠ ${motif}\nLes propositions déjà posées dans la grille restent à relire.`;
       const fin = await verbes.terminer({ sessionId: session.sessionId, rapport }, CANAL);
