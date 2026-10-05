@@ -578,6 +578,24 @@ async function verifierNegociationCanal(f) {
     const force = await creer('force', true);
     verifier('le marqueur de XSpro force le canal MCP',
         !!(force && force.canal === 'mcp'), force && force.canal);
+
+    // Un bloc ia coché mais SANS CLÉ (ce que XSpro envoyait après une régénération des
+    // fichiers modèles) vaut absence de clé : même forçage. Avec une clé, la mémoire
+    // du choix utilisateur (« api », posée juste au-dessus) reprend la main.
+    async function creerAvecIa(suffixe, ia) {
+        const p = { ...payload, sessionId: `canal_${suffixe}_${Date.now()}`, ia };
+        delete p.canal;
+        const corps = JSON.stringify(p);
+        await requete({ method: 'POST', path: '/process', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(corps) } }, corps);
+        const s = donnees(await f.outil('worker_sessions', {}));
+        return (s.sessions || []).find((x) => x.sessionId === p.sessionId);
+    }
+    const sansCle = await creerAvecIa('sanscle', { endpoint: 'https://exemple.invalid/v1/chat/completions', apiKey: '', model: 'm' });
+    verifier('un bloc ia sans clé force le canal MCP, comme le marqueur',
+        !!(sansCle && sansCle.canal === 'mcp'), sansCle && sansCle.canal);
+    const iaAvecCle = await creerAvecIa('aveccle', { endpoint: 'https://exemple.invalid/v1/chat/completions', apiKey: 'cle-factice', model: 'm' });
+    verifier('un bloc ia avec clé suit le choix de l\'utilisateur',
+        !!(iaAvecCle && iaAvecCle.canal === memoire()), iaAvecCle && iaAvecCle.canal);
     verifier('la session forcée est inscriptible sans aucune bascule manuelle',
         !!(force && force.ecrivable === true), force && force.raison);
     verifier('un forçage ne touche PAS la mémoire du choix utilisateur',

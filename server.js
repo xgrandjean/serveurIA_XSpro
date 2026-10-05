@@ -43,6 +43,17 @@ const ClaudeConfig                              = require('./claudeConfig');
 // (l'agent hébergé ici, même clé, cf. xsproassist.js), Claude par le canal MCP.
 const CANAUX = ['api', 'assist', 'mcp'];
 
+// Le bloc ia reçu permet-il vraiment d'appeler une IA par clé ? Il faut une adresse, et une
+// clé — sauf pour un serveur de ce poste (localhost), qui n'en demande pas. XSpro a pu
+// envoyer un bloc coché mais sans clé (apiKey: "") : le prendre pour un canal disponible
+// faisait naître la session sur un canal qui échouerait à chaque demande, au lieu de
+// l'agent externe. Même règle que canalIaUtilisable côté XSpro (src/ipc/ipcAI.js).
+function iaUtilisable(ia) {
+  if (!ia || !String(ia.endpoint || '').trim()) return false;
+  if (String(ia.apiKey || '').trim()) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(String(ia.endpoint).trim());
+}
+
 // ── Résolution des chemins ────────────────────────────────────────────────────
 // ASSETS_ROOT : base des fichiers statiques en lecture seule (public/, views/,
 // worker-config.json, standalone/). DATA_ROOT : base des fichiers écrits à
@@ -435,6 +446,8 @@ app.post('/process', async (req, res) => {
   //     avec une zone de prompt visible, un bloc ia vide, et aucune façon
   //     d'aboutir. Le forçage vaut pour CETTE session seulement, il n'alimente pas
   //     la mémoire ;
+  //   - un bloc ia inutilisable (sans clé, cf. iaUtilisable) vaut absence de clé :
+  //     même forçage, pour la même raison ;
   //   - sinon — on garde le dernier canal choisi par l'utilisateur. On ne s'aligne
   //     PAS sur 'api' : que XSpro dispose d'une clé ne dit rien de la façon dont
   //     l'utilisateur veut travailler.
@@ -443,7 +456,7 @@ app.post('/process', async (req, res) => {
   // (mcp.actif: false) : la session ne serait de toute façon remplissable par
   // personne, et le canal répond alors par un diagnostic juste — « désactivé dans
   // worker-config.json, le réactiver » — au lieu d'une erreur de LLM sans rapport.
-  session.canal = payload.canal === 'mcp' ? 'mcp' : dernierCanalChoisi;
+  session.canal = (payload.canal === 'mcp' || !iaUtilisable(session.ia)) ? 'mcp' : dernierCanalChoisi;
 
   // Résolution du MANIFEST hook vue → session.effectiveWorkerConfig
   // Fait une seule fois ici, consommé par WS init et llmClient.js
@@ -595,7 +608,7 @@ wss.on('connection', (ws, req) => {
        // XSpro n'envoie aucun bloc `ia` quand il n'a pas de clé à prêter : le
        // canal « clé API » est alors une voie sans issue pour cette session, et le
        // client grise l'option plutôt que de laisser l'utilisateur s'y engager.
-       apiDisponible: !!session.ia?.endpoint,
+       apiDisponible: iaUtilisable(session.ia),
        // Rapport du dernier lot MCP, s'il y en a eu un : il a pu être écrit alors
        // que personne n'avait la grille ouverte, auquel cas wsSend n'avait pas de
        // destinataire (cf. mcpChannel.js, verbe terminer).
@@ -1054,7 +1067,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: Calculees.enrichir(session, session.rows), infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null, alerteBriefing: session.alerteBriefing || null });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: iaUtilisable(session.ia), modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: Calculees.enrichir(session, session.rows), infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null, alerteBriefing: session.alerteBriefing || null });
       break;
     }
 
@@ -1274,7 +1287,7 @@ function startStandaloneMode() {
   // Canal de remplissage — même règle que POST /process : un payload capturé alors
   // que XSpro n'avait aucune clé à prêter (ia: null, canal: 'mcp') part sur le canal
   // MCP ; sinon on reprend le dernier canal choisi.
-  session.canal = payload.canal === 'mcp' ? 'mcp' : dernierCanalChoisi;
+  session.canal = (payload.canal === 'mcp' || !iaUtilisable(session.ia)) ? 'mcp' : dernierCanalChoisi;
 
   // Résolution du MANIFEST hook vue (même logique qu'en mode serveur)
   resolveEffectiveWorkerConfig(session);
