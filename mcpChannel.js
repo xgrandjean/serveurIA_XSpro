@@ -329,11 +329,11 @@ function installMcpChannel(app, deps) {
       }
       if (canal === 'assist') {
         return 'Cette session est en remplissage par XSProAssist, l\'assistant hébergé par le Worker : '
-          + 'c\'est lui qui la remplit. Pour que Claude puisse écrire, basculer le sélecteur '
-          + '« Canal » sur « Claude (MCP) » dans l\'en-tête de la grille.';
+          + 'c\'est lui qui la remplit. Pour qu\'un agent externe puisse écrire, basculer le sélecteur '
+          + '« Canal » sur « Agent externe (MCP) » dans l\'en-tête de la grille.';
       }
       return 'Cette session est en mode « clé API » : c\'est l\'IA par clé API qui la remplit. '
-        + 'Pour que Claude puisse écrire, basculer le sélecteur « Canal » sur « Claude (MCP) » '
+        + 'Pour qu\'un agent externe puisse écrire, basculer le sélecteur « Canal » sur « Agent externe (MCP) » '
         + 'dans l\'en-tête de la grille — ou régler "canalParDefaut": "mcp" dans worker-config.json '
         + 'pour que les nouvelles sessions s\'ouvrent directement ainsi.';
     }

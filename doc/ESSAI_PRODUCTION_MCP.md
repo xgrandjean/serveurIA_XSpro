@@ -69,7 +69,7 @@ pas un dépôt, il ouvre Claude. C'est aussi ce qui rend l'essai honnête — un
    S'il manque, s'arrêter là : c'est le premier point à comprendre.
 4. Cliquer. **Le formulaire doit s'ouvrir directement**, verrouillé sur « Assistant externe ».
 5. Envoyer. **Une grille s'ouvre dans le navigateur.** Le sélecteur « Canal » en haut à
-   droite doit afficher « Claude (MCP) », et l'option « Clé API » doit être grisée. Choisir le
+   droite doit afficher « Agent externe (MCP) », et l'option « Clé API » doit être grisée. Choisir le
    **mode de travail** (Décomposition, Chiffrage…) dans le sélecteur du haut de la grille :
    c'est lui que Claude appliquera — et qu'il annoncera dans `modeApplique`.
 6. Revenir dans Claude Code, **coller le texte ci-dessous et joindre le CCTP**. Le fichier se
@@ -103,7 +103,7 @@ sans t'arreter pour autant.
 ## Ce qui compterait comme un échec
 
 - Le bouton IA absent du devis, ou présent sur une vue qui ne devrait pas l'avoir.
-- La grille qui s'ouvre en mode « Clé API » au lieu de « Claude (MCP) ».
+- La grille qui s'ouvre en mode « Clé API » au lieu de « Agent externe (MCP) ».
 - Claude qui n'arrive pas à comprendre le travail demandé sans explication supplémentaire :
   cela voudrait dire que les consignes de la vue sont encore trop courtes.
 - Des niveaux hiérarchiques faux, des prix posés en mode Décomposition, des références

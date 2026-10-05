@@ -855,7 +855,7 @@ async function handleUIMessage(session, msg) {
       // sources à la fois — l'utilisateur ne saurait plus d'où vient une valeur.
       const canal = session.canal || 'api';
       if (canal === 'mcp') {
-        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par Claude (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
+        wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par un agent externe (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « XSProAssist » pour envoyer une demande.' });
         break;
       }
       const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
@@ -938,7 +938,7 @@ async function handleUIMessage(session, msg) {
       // ne doit pas pouvoir être exécuté par la clé API après coup. XSProAssist
       // n'a pas de plan : il agit, ou dit pourquoi il ne peut pas.
       if ((session.canal || 'api') !== 'api') {
-        const qui = session.canal === 'assist' ? 'XSProAssist' : 'Claude (MCP)';
+        const qui = session.canal === 'assist' ? 'XSProAssist' : 'un agent externe (MCP)';
         wsSend(session, { type: 'error', message: `⚠ Cette session est en remplissage par ${qui}. Basculer le sélecteur « Canal » sur « Clé API » pour exécuter ce plan.` });
         break;
       }

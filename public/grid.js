@@ -1852,7 +1852,7 @@ state.gridApi.flashCells({ rowNodes: [node], columns: [cle], flashDuration: 150,
   // est le seul signe visible que Claude travaille.
   if (state.canal === 'mcp') {
     state.mcpCellules++;
-    majEtatMcp(`${state.mcpCellules} cellule(s) reçue(s) de Claude.`);
+    majEtatMcp(`${state.mcpCellules} cellule(s) reçue(s) de l'agent externe.`);
   }
 }
 
@@ -2361,7 +2361,7 @@ function bindUI() {
     setTimeout(() => { bouton.textContent = libelle; }, 1600);
 
     majEtatMcp(copie
-      ? 'Consigne copiée — à coller dans une fenêtre Claude neuve.'
+      ? 'Consigne copiée — à coller dans une nouvelle conversation de l\'agent externe.'
       : 'Le navigateur a refusé la copie — la consigne est sélectionnée, fais Ctrl+C.');
   });
 
@@ -3222,7 +3222,7 @@ function appliquerCanal(canal) {
       opt.title    = state.apiDisponible ? '' : 'XSpro n\'a prêté aucune clé API pour cette session.';
     }
     sel.title = state.apiDisponible
-      ? 'Qui pré-remplit la grille : l\'IA par clé API en un coup, XSProAssist (un agent hébergé par le Worker, avec la même clé), ou Claude via le canal MCP. Un seul à la fois.'
+      ? 'Qui pré-remplit la grille : l\'IA par clé API en un coup, XSProAssist (un agent hébergé par le Worker, avec la même clé), ou un agent externe (Claude Code ou tout autre client MCP) via le canal MCP. Un seul à la fois.'
       : 'XSpro n\'a prêté aucune clé API pour cette session : seul le canal MCP peut la remplir.';
   }
 
@@ -3250,8 +3250,8 @@ function onCanalChange(canal) {
   if (state.canal === avant) return;
 
   const textes = {
-    mcp:    '🔌 Remplissage par Claude (MCP). La zone de prompt est masquée : ni l\'IA par clé API ni XSProAssist ne seront appelés pour cette session.',
-    assist: '🧭 Remplissage par XSProAssist : l\'assistant hébergé par le Worker lit ta demande, remplit la grille par les mêmes outils que Claude, et rend un rapport. Ses propositions restent à valider ici. Le canal MCP est fermé pour cette session.',
+    mcp:    '🔌 Remplissage par un agent externe (MCP). La zone de prompt est masquée : ni l\'IA par clé API ni XSProAssist ne seront appelés pour cette session.',
+    assist: '🧭 Remplissage par XSProAssist : l\'assistant hébergé par le Worker lit ta demande, remplit la grille par les mêmes outils qu\'un agent externe, et rend un rapport. Ses propositions restent à valider ici. Le canal MCP est fermé pour cette session.',
     api:    '🤖 Remplissage par l\'IA à clé API. Le canal MCP est fermé pour cette session.',
   };
   addMessage('system', textes[state.canal]);
@@ -3265,7 +3265,7 @@ function onCanalChange(canal) {
 // du compteur du panneau MCP — et ce qui permet de comparer les deux canaux. À
 // l'ouverture, le journal du dernier traitement est rejoué (init.journal) :
 // l'utilisateur peut découvrir des lignes en attente posées grille fermée.
-const NOMS_CANAL = { api: '🤖 IA clé API', assist: '🧭 XSProAssist', mcp: '🔌 Claude (MCP)' };
+const NOMS_CANAL = { api: '🤖 IA clé API', assist: '🧭 XSProAssist', mcp: '🔌 Agent externe (MCP)' };
 const ISSUES_JOURNAL = { terminee: 'terminé', plan: 'plan rendu', sansConclusion: 'sans conclusion', injoignable: 'modèle injoignable', erreur: 'erreur' };
 
 function kcar(n) { return n >= 10000 ? `${Math.round(n / 1000)} k car.` : `${n} car.`; }
@@ -3375,7 +3375,7 @@ function majBranchementClaude(msg) {
   if (!zone || !texte || !bouton) return;
 
   bouton.disabled    = false;
-  bouton.textContent = msg.obsolete ? '🔌 Rebrancher Claude' : '🔌 Connecter Claude';
+  bouton.textContent = msg.obsolete ? '🔌 Rebrancher Claude Code' : '🔌 Connecter Claude Code';
   if (debrancher) { debrancher.disabled = false; debrancher.textContent = 'Débrancher'; }
 
   const suiteApp = syntheseApplicationClaude(msg.application);
@@ -3383,7 +3383,7 @@ function majBranchementClaude(msg) {
   if (msg.branche) {
     zone.className = 'mcp-branchement-ok';
     texte.textContent = (msg.message
-      || 'Claude est branché sur ce poste : il a les outils du Worker.') + suiteApp;
+      || 'Claude Code est branché sur ce poste : il a les outils du Worker.') + suiteApp;
     bouton.classList.add('hidden');
     // Le retour en arrière n'est offert que là où il a un sens.
     debrancher?.classList.remove('hidden');
@@ -3395,8 +3395,8 @@ function majBranchementClaude(msg) {
   bouton.classList.remove('hidden');
   debrancher?.classList.add('hidden');
   texte.textContent = (msg.message || (msg.obsolete
-    ? 'Claude est inscrit, mais sur un autre exécutable que celui-ci : le rebrancher.'
-    : "Claude n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session.")) + suiteApp;
+    ? 'Claude Code est inscrit, mais sur un autre exécutable que celui-ci : le rebrancher.'
+    : "Claude Code n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session. Un autre client MCP s'inscrit à la main, avec la même commande (serveurIA.exe --mcp).")) + suiteApp;
 
   // La commande n'apparaît qu'en cas d'échec. En temps normal le bouton suffit,
   // et un bloc de texte technique de plus ne ferait qu'inquiéter.

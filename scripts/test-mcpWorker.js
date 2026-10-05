@@ -315,7 +315,7 @@ async function allerRetour(dejaJoignable) {
         await f.appeler('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
 
         // 2. La session démarre sur le canal par défaut : l'écriture est refusée
-        //    tant que l'utilisateur n'a pas choisi « Claude (MCP) ».
+        //    tant que l'utilisateur n'a pas choisi « Agent externe (MCP) ».
         const avant = donnees(await f.outil('worker_sessions', {}));
         const moi   = avant && avant.sessions.find((s) => s.sessionId === payload.sessionId);
         verifier('worker_sessions voit la session', !!moi, JSON.stringify(avant).slice(0, 200));
@@ -676,7 +676,7 @@ async function verifierXSProAssist(f) {
             moi && JSON.stringify({ canal: moi.canal, ecrivable: moi.ecrivable, raison: moi.raison }).slice(0, 200));
         const refus = await f.outil('worker_ecrire_cellules', { sessionId: s1.sessionId, lignes: [{ _id: 1, valeurs: { designation: 'non' } }] });
         verifier('worker_ecrire_cellules est refusé, et le message nomme le geste',
-            refus.result.isError === true && /XSProAssist/.test(texte(refus)) && /Claude \(MCP\)/.test(texte(refus)), texte(refus).slice(0, 160));
+            refus.result.isError === true && /XSProAssist/.test(texte(refus)) && /Agent externe \(MCP\)/.test(texte(refus)), texte(refus).slice(0, 160));
 
         // 3. La demande, par le même message que la zone de prompt de la grille.
         const attenteFin = ws.attendre('act:done', 20000);
