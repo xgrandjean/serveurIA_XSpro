@@ -29,7 +29,14 @@
     "                        contenu, regle metier intenable). Destine au developpeur,",
     "                        pas a l'utilisateur : rien n'est ecrit dans la grille, et",
     "                        Claude se contente d'une phrase signalant que le journal a",
-    "                        ete alimente. Mettre false pour couper."
+    "                        ete alimente. Mettre false pour couper.",
+    "",
+    "capture.standalone    : true = chaque payload recu de XSpro est enregistre dans",
+    "                        standalone-captures/standalone-payload-<vue>.json (a cote",
+    "                        des donnees du Worker : %APPDATA%/XSpro/serveurIA-data",
+    "                        sous XSpro), cle API retiree, pret pour le mode standalone.",
+    "                        Donnees REELLES : anonymiser avant de copier dans",
+    "                        standalone/. Relancer le Worker apres changement."
   ],
 
   "port": 8888,
@@ -42,6 +49,7 @@
   "canalParDefaut": "api",
   "mcp": { "actif": true },
   "beta": { "rapportAnomalies": true },
+  "capture": { "standalone": false },
 
   "contexts": {
     "listeBlanche": ["detailsDevis","formulaireGetDetailsTravaux","formulaireGetDetailsFichesTechniques","formulaireListeQuestions","formulaireGetDetailsFacturationClient","formulaireGetDetailsAF"],

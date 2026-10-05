@@ -52,6 +52,24 @@ Détails complets (spawn, variables d'environnement, cycle de vie, `pkg`) :
 de la checklist complète avant de livrer un nouvel installateur XSpro : voir
 [`XSpro/docs/mise-en-production.md`](../../XSpro/docs/mise-en-production.md).
 
+## Rafraîchir les payloads standalone
+
+Les fichiers `standalone/standalone-payload-*.json` doivent reproduire ce que XSpro
+envoie réellement, sinon le mode test ne teste plus la réalité. Plutôt que de les
+réécrire à la main :
+
+1. Mettre `"capture": { "standalone": true }` dans `worker-config.json` (sous XSpro :
+   la copie de `%APPDATA%/XSpro/serveurIA-data/`), puis relancer le Worker.
+2. Ouvrir chaque vue depuis XSpro (« 🤖 Génération complète (Worker) »). Chaque payload
+   reçu est enregistré dans `standalone-captures/standalone-payload-<vue>.json`, à côté
+   des données du Worker, sous la forme du mode standalone : clé API retirée (fournie en
+   autonome par `ia-config.json`), `callbackUrl` à `null`, `_origin: "standalone"`. Le
+   marqueur `canal: "mcp"` est gardé : le mode standalone le respecte comme `/process`.
+3. **Anonymiser** les données réelles, puis copier les fichiers dans `standalone/`, qui
+   part dans le build Electron. Sous XSpro, récupérer les captures avant toute mise à
+   jour des assets : XSpro recrée alors `serveurIA-data`.
+4. Remettre `capture.standalone` à `false`.
+
 ## Structure des dossiers
 
 ```

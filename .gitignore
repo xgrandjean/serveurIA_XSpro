@@ -45,3 +45,6 @@ logs/
 # Restent sur le disque de chacun ; sorties de l'index le 2026-09-20.
 standalone/ia-config.json
 standalone/standalone-payload*.json
+
+# Captures de payloads reels (capture.standalone de worker-config.json) — donnees reelles
+standalone-captures/

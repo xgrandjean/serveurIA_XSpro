@@ -84,6 +84,7 @@ let WORKER_CONFIG = {
   mcp: { actif: true },
   canalParDefaut: 'api',
   beta: { rapportAnomalies: true },
+  capture: { standalone: false },
 };
 
 if (fs.existsSync(WORKER_CONFIG_FILE)) {
@@ -108,6 +109,8 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
       canalParDefaut: CANAUX.includes(raw.canalParDefaut) ? raw.canalParDefaut : 'api',
       // Instruments de phase bêta — cf. le bandeau en tête de mcpChannel.js.
       beta: { rapportAnomalies: raw.beta?.rapportAnomalies !== false },
+      // Capture des payloads reçus pour le mode standalone — cf. capturerPourStandalone().
+      capture: { standalone: raw.capture?.standalone === true },
     };
     // console.log(`[Worker] Config chargee : port=${WORKER_CONFIG.port}`);
   } catch (e) {
@@ -302,6 +305,46 @@ app.get('/view-config/:contextName', (req, res) => {
   res.status(404).json({ error: 'Vue inconnue' });
 });
 
+// ── Capture des payloads pour le mode standalone ─────────────────────────────
+// Les fichiers standalone/standalone-payload-*.json, écrits à la main, se décalent
+// de ce que XSpro envoie réellement dès que XSpro évolue. Avec capture.standalone
+// à true dans worker-config.json, chaque payload reçu sur /process est enregistré
+// sous la forme qu'attend le mode standalone : clé API retirée (ia-config.json la
+// fournit en autonome), callbackUrl à null, _origin 'standalone'. Le reste est gardé
+// tel quel, marqueur canal: 'mcp' compris.
+// Les données sont RÉELLES : relire et anonymiser avant de copier le fichier dans
+// standalone/, qui part dans le build Electron. Sous XSpro, DATA_ROOT est
+// %APPDATA%\XSpro\serveurIA-data, que XSpro recrée à chaque mise à jour des assets :
+// récupérer les captures avant.
+const CAPTURE_DIR    = path.join(DATA_ROOT, 'standalone-captures');
+// Noms courts déjà employés par les scripts npm (standalone:listeQuestions).
+const NOM_STANDALONE = { formulaireListeQuestions: 'listeQuestions' };
+const CHAMP_SECRET   = /key|token|secret|password|authorization/i;
+
+function capturerPourStandalone(payload) {
+  if (!WORKER_CONFIG.capture.standalone) return;
+  try {
+    const copie = JSON.parse(JSON.stringify(payload));
+    if (copie.ia && typeof copie.ia === 'object') {
+      for (const champ of Object.keys(copie.ia)) if (CHAMP_SECRET.test(champ)) delete copie.ia[champ];
+    }
+    const nom     = String(NOM_STANDALONE[payload.contextName] || payload.contextName).replace(/[^\w.-]/g, '_');
+    const fichier = path.join(CAPTURE_DIR, `standalone-payload-${nom}.json`);
+    const capture = {
+      _comment: `Payload réel reçu de XSpro le ${new Date().toISOString()} (vue ${payload.contextName}), clé API retirée. `
+              + 'Données réelles : anonymiser avant de copier ce fichier dans standalone/.',
+      _origin:  'standalone',
+      ...copie,
+      callbackUrl: null,
+    };
+    fs.mkdirSync(CAPTURE_DIR, { recursive: true });
+    fs.writeFileSync(fichier, JSON.stringify(capture, null, 2) + '\n', 'utf-8');
+    console.log(`[Capture] ${path.basename(fichier)} → ${CAPTURE_DIR}`);
+  } catch (e) {
+    console.warn(`[Capture] Échec : ${e.message}`);
+  }
+}
+
 // ── Endpoint principal : POST /process ───────────────────────────────────────
 // XSpro envoie le payload complet ici.
 // Le Worker répond immédiatement avec { sessionId } et ouvre la fenêtre UI.
@@ -318,6 +361,9 @@ app.post('/process', async (req, res) => {
       rows:    [],
     });
   }
+
+  // Avant tout refus : un payload que ce Worker rejette est aussi à reproduire.
+  capturerPourStandalone(payload);
 
   if (!payload.workerConfig?.colonnes?.length) {
     await notifyXSpro(payload.callbackUrl, {
@@ -1222,9 +1268,10 @@ function startStandaloneMode() {
   // fichier payload (y compris les anciens fichiers sans clé _origin).
   session.origin = 'standalone';
 
-  // Canal de remplissage — pas de marqueur ici, le mode autonome n'a pas de XSpro
-  // en face : on reprend le dernier canal choisi (cf. POST /process).
-  session.canal = dernierCanalChoisi;
+  // Canal de remplissage — même règle que POST /process : un payload capturé alors
+  // que XSpro n'avait aucune clé à prêter (ia: null, canal: 'mcp') part sur le canal
+  // MCP ; sinon on reprend le dernier canal choisi.
+  session.canal = payload.canal === 'mcp' ? 'mcp' : dernierCanalChoisi;
 
   // Résolution du MANIFEST hook vue (même logique qu'en mode serveur)
   resolveEffectiveWorkerConfig(session);
