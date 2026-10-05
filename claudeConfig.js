@@ -72,12 +72,15 @@ function memeCommande(entree, attendu) {
  * Où en est le branchement, sans rien modifier.
  *
  * @returns {{branche:boolean, entreePresente:boolean, configPresente:boolean,
- *            obsolete:boolean, illisible:boolean, chemin:string, commande:string}}
+ *            obsolete:boolean, illisible:boolean, chemin:string, commande:string,
+ *            facade:{command:string, args:string[]}}}
  */
 function etat() {
     const chemin  = cheminConfig();
     const attendu = commandeFacade();
-    const commun  = { chemin: chemin, commande: commandeLisible() };
+    // facade : la même commande, brute, pour inscrire à la main un autre client MCP
+    // (Cursor, VS Code, Codex…) — ce module ne sait brancher que Claude.
+    const commun  = { chemin: chemin, commande: commandeLisible(), facade: attendu };
 
     let config;
     try {

@@ -2386,6 +2386,11 @@ function bindUI() {
     copierAvecToast(el('mcp-commande-texte').textContent, 'La commande');
   });
 
+  el('btn-copy-config-mcp')?.addEventListener('click', () => {
+    if (!state.facadeMcp) return;
+    copierAvecToast(JSON.stringify({ mcpServers: { worker: state.facadeMcp } }, null, 2), 'La configuration');
+  });
+
   // Mode de travail (work mode) — changement
   el('work-mode-selector').addEventListener('change', (e) => {
     onWorkModeChange(e.target.value || null);
@@ -3379,11 +3384,12 @@ function majBranchementClaude(msg) {
   if (debrancher) { debrancher.disabled = false; debrancher.textContent = 'Débrancher'; }
 
   const suiteApp = syntheseApplicationClaude(msg.application);
+  montrerAutreAgent(msg.facade);
 
   if (msg.branche) {
     zone.className = 'mcp-branchement-ok';
     texte.textContent = (msg.message
-      || 'Claude Code est branché sur ce poste : il a les outils du Worker.') + suiteApp;
+      || 'Branchement automatique : Claude Code ✓ (il a les outils du Worker)') + suiteApp;
     bouton.classList.add('hidden');
     // Le retour en arrière n'est offert que là où il a un sens.
     debrancher?.classList.remove('hidden');
@@ -3395,8 +3401,8 @@ function majBranchementClaude(msg) {
   bouton.classList.remove('hidden');
   debrancher?.classList.add('hidden');
   texte.textContent = (msg.message || (msg.obsolete
-    ? 'Claude Code est inscrit, mais sur un autre exécutable que celui-ci : le rebrancher.'
-    : "Claude Code n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session. Un autre client MCP s'inscrit à la main, avec la même commande (serveurIA.exe --mcp).")) + suiteApp;
+    ? 'Branchement automatique : Claude Code est inscrit, mais sur un autre exécutable que celui-ci — le rebrancher.'
+    : "Branchement automatique : Claude Code n'est pas branché sur ce poste — il ne pourra rien faire du numéro de session.")) + suiteApp;
 
   // La commande n'apparaît qu'en cas d'échec. En temps normal le bouton suffit,
   // et un bloc de texte technique de plus ne ferait qu'inquiéter.
@@ -3412,9 +3418,17 @@ function syntheseApplicationClaude(apps) {
   const presente = apps.filter((a) => a.present);
   if (!presente.length) return '';
   if (presente.every((a) => a.branche)) {
-    return " L'application Claude de bureau est branchée : la fermer puis la rouvrir après un branchement.";
+    return " · application Claude de bureau ✓ (la fermer puis la rouvrir après un branchement).";
   }
-  return " L'application Claude de bureau est présente mais pas branchée — « Débrancher » puis « Connecter » pour l'inscrire.";
+  return " · application Claude de bureau présente mais pas branchée — « Débrancher » puis « Connecter » pour l'inscrire.";
+}
+
+// Tout autre agent MCP : la ligne reste visible dès que le Worker a donné sa
+// façade — branché ou non, Claude Code ne dit rien de l'agent qu'on utilise.
+// Un Worker plus ancien ne la donne pas : la ligne reste alors masquée.
+function montrerAutreAgent(facade) {
+  state.facadeMcp = facade && facade.command ? facade : null;
+  el('mcp-autre-agent')?.classList.toggle('hidden', !state.facadeMcp);
 }
 
 function montrerCommandeClaude(commande) {

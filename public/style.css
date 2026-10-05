@@ -373,6 +373,15 @@ a.badge-model:hover {
 .btn-lien:hover { color: var(--red); }
 
 #mcp-commande { display: flex; align-items: center; gap: 6px; }
+#mcp-autre-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--grey-700);
+}
+#mcp-autre-agent span { flex: 1; }
 #mcp-commande-texte {
   flex: 1;
   font-size: 10.5px;

@@ -141,6 +141,14 @@
           <code id="mcp-commande-texte"></code>
           <button id="btn-copy-commande" class="btn-tool" title="Copier la commande">📋</button>
         </div>
+        <!-- Le bouton ci-dessus ne sait brancher que Claude Code et l'application Claude
+             de bureau. Tout autre agent MCP s'inscrit à la main : le Worker donne la
+             commande de sa façade, la grille la met en forme. -->
+        <div id="mcp-autre-agent" class="hidden">
+          <span>Autre agent MCP (Cursor, VS Code, Codex…) : l'inscrire à la main, comme serveur <code>worker</code>.</span>
+          <button id="btn-copy-config-mcp" class="btn-tool"
+                  title="Copier l'entrée à ajouter dans la configuration MCP de l'agent (format « mcpServers » : Cursor, Windsurf, Gemini CLI, application Claude… — VS Code la range sous « servers », Codex utilise un fichier TOML)">📋 Copier la configuration</button>
+        </div>
 
         <p id="mcp-aide">
           Colle la consigne ci-dessous dans une <b>nouvelle conversation</b> de l'agent externe
