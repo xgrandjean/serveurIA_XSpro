@@ -867,9 +867,10 @@ function validateFieldAgainstType(cle, val, typeKey, row) {
 
         if (regle === 'nombre' || regle === 6) { // 6 = indice pour 'nombre'
           // Tous les éléments doivent être numériques
-          const hasNonNumeric = choixCorrectArray.some(item => {
-            return typeof item !== 'number' && (typeof item === 'string' && isNaN(Number(item)));
-          });
+          // Même lecture que le site (QuestionEngine.lireNombre) : virgule ou point décimal,
+          // espaces ignorés. Pas Number(), qui accepterait « 0x10 » ou « Infinity ».
+          const estNombre = (v) => /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(String(v).replace(/\s/g, '').replace(',', '.'));
+          const hasNonNumeric = choixCorrectArray.some(item => typeof item !== 'number' && !estNombre(item));
           if (hasNonNumeric) {
             return { ok: false, message: `Pour « courte » avec règle « nombre », les réponses correctes doivent être numériques.` };
           }
