@@ -1,6 +1,6 @@
 {
   "name": "XSpro-ai-worker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "XSPRO AI Worker — serveur autonome de remplissage IA en mode spreadsheet",
   "main": "main.js",
   "scripts": {
