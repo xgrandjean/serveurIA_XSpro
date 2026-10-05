@@ -604,6 +604,9 @@ wss.on('connection', (ws, req) => {
        // journalTraitement.js), pour la même raison : ses étapes sont poussées en
        // direct (journal:etape), et rejouées ici.
        journal:      session.journalTraitement || null,
+       // Briefing jugé volumineux (cf. SEUIL_BRIEFING, mcpChannel.js) : l'agent a pu
+       // le recevoir avant que la grille soit ouverte. Rejoué ici, comme le rapport.
+       alerteBriefing: session.alerteBriefing || null,
        workerConfig: session.effectiveWorkerConfig,
        // Avec leurs colonnes calculées (cf. colonnesCalculees.js), comme chaque envoi de lignes.
        rows:         Calculees.enrichir(session, session.rows),
@@ -1051,7 +1054,7 @@ async function handleUIMessage(session, msg) {
     // L'utilisateur réinitialise les rows (recommencer)
     case 'session:reset': {
       SM.resetRows(session);
-      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: Calculees.enrichir(session, session.rows), infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null });
+      wsSend(session, { type: 'init', sessionId: session.sessionId, contextName: session.contextName, origin: session.origin, canal: session.canal || 'api', apiDisponible: !!session.ia?.endpoint, modeleIA: session.ia?.model || null, workerConfig: session.effectiveWorkerConfig, rows: Calculees.enrichir(session, session.rows), infosParent: session.data.infosParent, modes: session.modes || {}, selectChoix: session.selectChoix || {}, champsRestreints: session.champsRestreints || {}, champsNonApplicables: session.champsNonApplicables || {}, reviewMode: !!session.reviewMode, pendingCount: 0, journal: null, alerteBriefing: session.alerteBriefing || null });
       break;
     }
 

@@ -137,6 +137,9 @@
           <button id="btn-disconnect-claude" class="btn-lien hidden"
                   title="Retirer l'inscription de Claude Code sur ce poste. Réversible : le bouton Connecter revient aussitôt.">Débrancher</button>
         </div>
+        <!-- Briefing au-delà du seuil (cf. SEUIL_BRIEFING, mcpChannel.js) : rempli par
+             afficherAlerteBriefing, en direct ou à l'init. -->
+        <div id="mcp-alerte" class="mcp-branchement-afaire hidden"></div>
         <div id="mcp-commande" class="hidden">
           <code id="mcp-commande-texte"></code>
           <button id="btn-copy-commande" class="btn-tool" title="Copier la commande">📋</button>

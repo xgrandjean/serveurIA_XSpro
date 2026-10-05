@@ -65,6 +65,15 @@ const PHRASE_ANOMALIE = 'Rapport d\'activité mis à jour — voir le fichier lo
 
 const GRAVITES = ['mineure', 'genante', 'bloquante'];
 
+// Taille au-delà de laquelle un briefing est jugé VOLUMINEUX. Ce n'est pas une limite
+// dure : le briefing part quand même, en entier. Mais un agent à petit contexte risque
+// d'en perdre une partie et d'écrire de travers sans que rien ne le dise. Au-delà, on
+// prévient donc l'utilisateur dans la grille, avec un conseil, l'agent en tête de son
+// briefing, et le développeur dans le journal d'anomalies (une fois par session).
+// Mesure du 2026-10-05 sur un vrai payload : 17 910 au plus. Même seuil que le test
+// (scripts/test-mcpWorker.js), qui le lit ici.
+const SEUIL_BRIEFING = 24000;
+
 const CONSIGNE_ANOMALIES = `== SIGNALER CE QUI CLOCHE (phase bêta) ==
 Le Worker est en rodage, et tu es le seul à voir en vrai ce que l'application lui envoie.
 Si ce qu'on te donne ne tient pas debout — des données qui contredisent la réalité de l'affaire, un libellé de colonne qui ne décrit pas ce qu'elle contient, une règle impossible à respecter, une valeur attendue qui ne figure dans aucune liste de choix, une colonne dont tu aurais besoin et que le mode masque — appelle worker_signaler_anomalie et décris le fait tel que tu l'as constaté.
@@ -195,12 +204,25 @@ function rendreBlocMcp(bloc, session, colonnes) {
   // un vrai questionnaire, et rien ne les distinguerait du contenu de la grille.
   // Avec leurs colonnes calculées (cf. colonnesCalculees.js), comme les lignes de la grille :
   // sur detailsDevis, l'exemple montre « numero » là où XSpro envoie niveauListe.
-  const modele = Calculees.enrichir(session, Array.isArray(session.data?.modele) ? session.data.modele : []);
+  //
+  // workerConfig.modele d'abord : c'est la forme CONVERTIE pour le Worker (sur
+  // listeQuestions, choix en tableau et choixCorrect en indices, comme les colonnes
+  // l'exigent — cf. convertForWorker côté XSpro). data.modele est la forme brute
+  // d'XSpro (choixCorrect en texte) : la servir apprenait au LLM le mauvais format.
+  //
+  // Une ligne compacte par exemple, sans ses champs vides : indentées et complètes,
+  // les onze lignes de listeQuestions pesaient 6 400 caractères, dont une bonne
+  // moitié de "": "". La règle de lecture est dite en tête du bloc.
+  const sourceModele = Array.isArray(session.workerConfig?.modele) && session.workerConfig.modele.length
+    ? session.workerConfig.modele
+    : (Array.isArray(session.data?.modele) ? session.data.modele : []);
+  const modele = Calculees.enrichir(session, sourceModele);
+  const vide = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
   if (Array.isArray(modele) && modele.length) {
     const lignes = modele.map((m) => {
       const o = {};
-      for (const c of colonnes) o[c.cle] = m[c.cle] === undefined ? '' : m[c.cle];
-      return o;
+      for (const c of colonnes) if (!vide(m[c.cle])) o[c.cle] = m[c.cle];
+      return JSON.stringify(o);
     });
     parts.push(
       '== EXEMPLE DE QUESTIONNAIRE COMPLET ==\n'
@@ -208,7 +230,8 @@ function rendreBlocMcp(bloc, session, colonnes) {
       + 'type, et la façon de remplir chaque colonne. Elles ne font PAS partie de la grille\n'
       + "et n'ont aucun rapport avec le sujet en cours — les vraies lignes sont dans\n"
       + "« lignes ». Ne jamais les recopier, ni s'y référer comme à du contenu existant.\n"
-      + JSON.stringify(lignes, null, 2)
+      + 'Une ligne par exemple ; une colonne absente y reste VIDE.\n'
+      + lignes.join('\n')
     );
   }
 
@@ -621,6 +644,8 @@ function installMcpChannel(app, deps) {
       // sources : le jour où l'on coupe le drapeau, la consigne disparaît des
       // douze combinaisons d'un coup.
       if (rapportAnomalies) sortie.briefing += '\n\n' + CONSIGNE_ANOMALIES;
+
+      if (sortie.briefing.length > SEUIL_BRIEFING) signalerBriefingVolumineux(session, modeId, sortie);
     }
 
     return sortie;
@@ -996,6 +1021,45 @@ function installMcpChannel(app, deps) {
     return { etat: session.status, lignes: session.rows.length, ...etatSession(session) };
   }
 
+  /**
+   * Briefing au-delà de SEUIL_BRIEFING : prévenir les trois intéressés (cf. la
+   * constante). La grille reçoit l'alerte en direct, et la session la garde pour
+   * l'init : l'agent travaille souvent avant que quiconque ait ouvert la grille.
+   */
+  function signalerBriefingVolumineux(session, modeId, sortie) {
+    const taille = sortie.briefing.length;
+    sortie.briefing = `⚠️ BRIEFING LONG : ${taille} caractères. Lis-le EN ENTIER avant d'écrire quoi`
+      + " que ce soit. Si tu ne peux pas en tenir toutes les règles, dis-le à l'utilisateur"
+      + ' plutôt que de remplir au hasard, et travaille par petits lots de lignes.\n\n' + sortie.briefing;
+
+    let journalise = !!session.alerteBriefingJournalisee;
+    if (rapportAnomalies && !journalise) {
+      try {
+        const fichier = fichierAnomalies(dataRoot);
+        fs.mkdirSync(path.dirname(fichier), { recursive: true });
+        fs.appendFileSync(fichier, JSON.stringify({
+          horodatage:  new Date().toISOString(),
+          gravite:     'mineure',
+          sessionId:   session.sessionId,
+          contextName: session.contextName,
+          mode:        modeId || null,
+          origine:     'worker',
+          canal:       session.canal || 'api',
+          description: `Briefing de ${taille} caractères, au-delà du seuil de ${SEUIL_BRIEFING} : `
+                     + 'les règles de la vue (views/*.json, bloc mcp) ou les exemples sont à alléger.',
+          elements:    { taille, seuil: SEUIL_BRIEFING },
+        }) + '\n', 'utf-8');
+        session.alerteBriefingJournalisee = journalise = true;
+      } catch (e) {
+        console.warn(`[MCP] Briefing volumineux non journalisé : ${e.message}`);
+      }
+    }
+
+    session.alerteBriefing = { taille, seuil: SEUIL_BRIEFING, mode: modeId || null, journalise };
+    console.warn(`[MCP] Briefing volumineux — ${session.contextName}/${modeId || '—'} : ${taille} caractères (seuil ${SEUIL_BRIEFING})`);
+    wsSend(session, { type: 'briefing:volumineux', ...session.alerteBriefing });
+  }
+
   // ── Table des verbes ────────────────────────────────────────────────────────
   // La façade MCP ne peut appeler que ce qui est déclaré ici — et XSProAssist non
   // plus (cf. xsproassist.js) : la table est rendue à server.js, qui la lui donne.
@@ -1042,4 +1106,4 @@ function installMcpChannel(app, deps) {
   return { verbes: VERBES };
 }
 
-module.exports = { installMcpChannel };
+module.exports = { installMcpChannel, SEUIL_BRIEFING };

@@ -815,8 +815,14 @@ async function verifierBriefings(f) {
     // double, pas à chaque ajout légitime. Mesure du jour sur les charges d'essai :
     // max 8 603, contre 6 894 avant. En production le jeu d'exemples est plus fourni
     // (11 lignes contre 8 sur listeQuestions), ce qui situe le vrai maximum vers 10 000.
-    verifier('aucun briefing ne dépasse 12 000 caractères',
-        tailles.every((t) => t <= 12000), 'max = ' + Math.max(...tailles));
+    // Relevé à 24 000 le 2026-10-05 : la charge listeQuestions est désormais un VRAI
+    // payload XSpro (11 exemples), et les règles de la vue ont grandi avec la revue des
+    // parcours (casse, nombre, cours « A valider », tableaux alignés…). Mesure du jour,
+    // après allègement (exemples compacts sans champs vides, règles des ouvertes
+    // fusionnées) : max 17 910, contre 19 835 avant. Le seuil garde ~35 % de marge.
+    const { SEUIL_BRIEFING } = require('../mcpChannel');
+    verifier(`aucun briefing ne dépasse ${SEUIL_BRIEFING} caractères (seuil d'alerte de la grille)`,
+        tailles.every((t) => t <= SEUIL_BRIEFING), 'max = ' + Math.max(...tailles));
 
     console.log('  (' + tailles.length + ' briefings, de ' + Math.min(...tailles) + ' à ' + Math.max(...tailles) + ' caractères)');
 }

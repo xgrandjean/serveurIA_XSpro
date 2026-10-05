@@ -150,6 +150,7 @@ function handleWSMessage(msg) {
     case 'canal':             onCanalChange(msg.canal);                      break;
     case 'journal:etape':     onEtapeJournal(msg.etape);                     break;
     case 'claude:etat':       majBranchementClaude(msg);                     break;
+    case 'briefing:volumineux': afficherAlerteBriefing(msg);                 break;
     case 'plan':              onPlanReceived(msg.plan);                      break;
     case 'cell:update':       onCellUpdate(msg.rowIndex, msg.cle, msg.value); break;
     case 'cell:revert':       onCellRevert(msg.rowIndex, msg.cle, msg.value, msg.message); break;
@@ -441,6 +442,7 @@ function onInit(msg) {
   // du dernier traitement (clé API ou XSProAssist), de même, avant le rapport.
   if (msg.journal) rejouerJournal(msg.journal);
   if (msg.rapport) addMessage('ai', msg.rapport);
+  if (msg.alerteBriefing) afficherAlerteBriefing(msg.alerteBriefing);
 
   setStatusBadge('connected', 'Prêt');
   setStatusMessage('Prêt');
@@ -3421,6 +3423,21 @@ function syntheseApplicationClaude(apps) {
     return " · application Claude de bureau ✓ (la fermer puis la rouvrir après un branchement).";
   }
   return " · application Claude de bureau présente mais pas branchée — « Débrancher » puis « Connecter » pour l'inscrire.";
+}
+
+// Briefing volumineux (cf. SEUIL_BRIEFING, mcpChannel.js) : l'agent reçoit tout,
+// mais un modèle à petit contexte en perd une partie sans le dire. Le conseil vise
+// ce que l'utilisateur peut faire tout de suite, sans toucher aux consignes.
+function afficherAlerteBriefing(a) {
+  const zone = el('mcp-alerte');
+  if (!zone || !a || !a.taille) return;
+  const n = (x) => Number(x).toLocaleString('fr-FR');
+  zone.textContent = `⚠ Consignes volumineuses : ${n(a.taille)} caractères (seuil ${n(a.seuil)}). `
+    + "Un agent à petit contexte risque d'en perdre une partie et d'écrire de travers. "
+    + 'Conseil : utilisez un modèle puissant à grand contexte (Claude Sonnet ou Opus, GPT-4.1, Gemini 2.5 Pro…), '
+    + 'confiez-lui un lot de lignes à la fois, et relisez ses propositions avant de valider.'
+    + (a.journalise ? " Le développeur en est averti (journal d'anomalies)." : '');
+  zone.classList.remove('hidden');
 }
 
 // Tout autre agent MCP : la ligne reste visible dès que le Worker a donné sa
