@@ -120,6 +120,35 @@ function valuesEqual(a, b) {
   return a === b;
 }
 
+// ── Rang serveur <-> ligne affichée ───────────────────────────────────────────
+// Le serveur désigne une ligne par son RANG dans session.rows, que state.rows reflète
+// dans le même ordre. AG Grid numérote les lignes AFFICHÉES (node.rowIndex,
+// params.rowIndex, getDisplayedRowAtIndex) : dès que le filtre « en attente seulement »
+// masque une ligne, les deux numérotations divergent. Une saisie partait alors vers la
+// ligne qui avait ce rang côté serveur, et une écriture reçue s'affichait sur une autre
+// ligne. Toute traduction passe donc par l'_id (cf. getRowId), jamais par la position.
+// Le cache n'est qu'une devinette, revérifiée à chaque lecture : un ajout, une
+// suppression ou un déplacement qui décale les rangs le rend juste caduc.
+const cacheRangServeur = new Map();
+
+function rangServeurDuNoeud(node) {
+  const id = node?.data?._id;
+  if (id === undefined || id === null) return -1;
+  const cle    = String(id);
+  const devine = cacheRangServeur.get(cle);
+  if (devine !== undefined && String(state.rows[devine]?._id) === cle) return devine;
+  const rang = state.rows.findIndex(r => String(r?._id) === cle);
+  if (rang >= 0) cacheRangServeur.set(cle, rang);
+  return rang;
+}
+
+// Row node de la ligne de rang serveur `rowIndex`, affichée ou masquée par le filtre.
+function noeudDuRangServeur(rowIndex) {
+  const row = state.rows[rowIndex];
+  if (!row || row._id === undefined || !state.gridApi) return null;
+  return state.gridApi.getRowNode(String(row._id)) || null;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 console.log('[Grisage] grid.js chargé — build avec grisage des champs non applicables (2026-07-30)');
 
@@ -505,9 +534,10 @@ function initGrid(colonnes, rows) {
         // sans déplacement de focus (comme Excel)
         if (params.event.key === 'Delete' || params.event.key === 'Backspace') {
           // Effacer la valeur de la cellule
-          const rowIndex = params.node?.rowIndex;
+          // Rang SERVEUR, pas position affichée (cf. rangServeurDuNoeud).
+          const rowIndex = rangServeurDuNoeud(params.node);
           const colId = params.column?.getColId();
-          if (rowIndex !== undefined && colId && state.rows[rowIndex]) {
+          if (rowIndex >= 0 && colId && state.rows[rowIndex]) {
             // Générique : un champ array se vide en [] et non '', sinon AG Grid re-détecte
             // un type incohérent. Toute conséquence sur d'autres champs (ex: un champ qui
             // référence celui-ci via champsIndexRef) est calculée et notifiée par le serveur
@@ -577,6 +607,13 @@ function initGrid(colonnes, rows) {
       if (state.reviewMode) updateReviewToolbar();
     },
 
+    onCellEditingStarted: (params) => {
+      // Valeur de la cellule à l'ouverture de l'éditeur, relue par onCellValueChanged.
+      const cle = params.column.getColId();
+      const v   = params.node?.data?.[cle];
+      state.editionOuverte = { id: params.node?.data?._id, cle, avant: Array.isArray(v) ? [...v] : v };
+    },
+
     onCellValueChanged: (params) => {
       console.log(`[DEBUG-GRID] onCellValueChanged source="${params.source}" cle="${params.column.getColId()}" newValue="${JSON.stringify(params.newValue)}" oldValue="${JSON.stringify(params.oldValue)}"`);
       // Ne pas traiter les changements émis par node.setDataValue() (source 'api'), ni un
@@ -584,9 +621,34 @@ function initGrid(colonnes, rows) {
       // cf. valuesEqual : comparaison élément-par-élément pour les champs array comme
       // choix/choixCorrect, qui sont reconstruits en un nouvel objet à chaque édition et ne
       // sont donc jamais === à l'ancien même à contenu identique).
+      // Éditeur PÉRIMÉ : la cellule a changé pendant qu'il était ouvert (écriture de l'agent
+      // externe, proposition IA, effet de bord serveur). S'il n'a rien saisi, l'éditeur ne
+      // fait que restituer l'ancien texte : le renvoyer annulerait en silence la valeur
+      // reçue, sans que rien ne le signale. Constaté : un énoncé ouvert juste pour en
+      // copier le texte, la proposition arrivée entre-temps disparaissait à la fermeture.
+      // La valeur reçue est alors rétablie et rien ne part. Si l'utilisateur a bien tapé
+      // quelque chose, sa saisie l'emporte — c'est un geste de sa part — mais il en est averti.
+      const cleEditee = params.column.getColId();
+      const ouverte   = state.editionOuverte;
+      const memeCellule = params.source === 'edit' && ouverte
+        && String(ouverte.id) === String(params.data?._id) && ouverte.cle === cleEditee;
+      if (memeCellule) state.editionOuverte = null;
+      const changeeSousEditeur = memeCellule && !valuesEqual(params.oldValue, ouverte.avant);
+      if (changeeSousEditeur && valuesEqual(params.newValue, ouverte.avant)) {
+        params.node.setDataValue(cleEditee, params.oldValue, 'api'); // source explicite : sans elle, AG Grid n'en met aucune et onCellValueChanged renverrait la valeur
+        const rang = rangServeurDuNoeud(params.node);
+        if (state.rows[rang]) state.rows[rang][cleEditee] = params.oldValue;
+        state.gridApi.refreshCells({ rowNodes: [params.node], columns: [cleEditee], force: true });
+        console.log(`[DEBUG-GRID] éditeur périmé sur "${cleEditee}" : valeur reçue conservée, cell:edit non envoyé`);
+        return;
+      }
+      if (changeeSousEditeur) {
+        addMessage('system', '⚠ Cette cellule avait été modifiée pendant ta saisie : ta saisie remplace la valeur reçue.');
+      }
       if (params.source !== 'api' && !valuesEqual(params.newValue, params.oldValue)) {
-        const rowIndex = params.node.rowIndex;
-        const cle      = params.column.getColId();
+        // Rang SERVEUR, pas position affichée (cf. rangServeurDuNoeud).
+        const rowIndex = rangServeurDuNoeud(params.node);
+        const cle      = cleEditee;
         if (state.rows[rowIndex]) {
           // Le dropdown produit l'indice d'affichage : le reconvertir en code texte pour
           // le serveur si ce champ avait été converti à l'entrée (cf. valeurPourServeur).
@@ -622,7 +684,7 @@ state.gridApi.flashCells({ rowNodes: [params.node], columns: [cle], flashDuratio
 
     getRowStyle: (params) => {
       const row = params.data;
-      const rowIndex = params.node.rowIndex;
+      const rowIndex = rangServeurDuNoeud(params.node); // clé de styleOverrides (cf. onRowStyle)
       // Mode revue : teinte de ligne pour une insertion/suppression en attente de
       // validation (manuelle ou IA) — priorité la plus haute (l'info la plus
       // importante). Teintes franches et non pastel : la version précédente
@@ -1014,7 +1076,7 @@ const dataCols = colonnes.map(col => {
           };
         }
         // Surcharge via cell:validate (invalid cell)
-        const override = state.cellStyleOverrides?.[`${params.rowIndex}:${col.cle}`];
+        const override = state.cellStyleOverrides?.[`${rangServeurDuNoeud(params.node)}:${col.cle}`];
         if (override) return override;
         if (col.readOnly && col.placeholder) return { ...b, background: '#FFF3E0', color: '#888', fontStyle: 'italic' }; // figé (readOnly + placeholder)
         if (col.placeholder) return { ...b, background: '#FFF8E8', color: '#666' }; // placeholder éditable
@@ -1303,7 +1365,7 @@ const dataCols = colonnes.map(col => {
       def.editable = () => false;
       // Style neutre pour les colonnes dérivées (fond légèrement coloré pour indiquer le calcul automatique)
       def.cellStyle = (params) => {
-        const override = state.cellStyleOverrides?.[`${params.rowIndex}:${champ}`];
+        const override = state.cellStyleOverrides?.[`${rangServeurDuNoeud(params.node)}:${champ}`];
         if (override) return override;
         const b = { fontSize: '12px', background: '#E8F5E9', color: '#2E7D32', fontStyle: 'italic' };
         return b;
@@ -1538,11 +1600,17 @@ function getMoveSelection() {
   if (!state.gridApi) return null;
   const nodes = state.gridApi.getSelectedNodes();
   if (!nodes.length) return null;
-  const sorted = nodes.slice().sort((a, b) => a.rowIndex - b.rowIndex);
+  // Rangs SERVEUR : firstIndex/lastIndex servent à lire les voisins dans state.rows, qui
+  // ne suit pas la numérotation affichée quand le filtre de revue masque des lignes.
+  const sorted = nodes.slice()
+    .map(n => ({ n, rang: rangServeurDuNoeud(n) }))
+    .filter(x => x.rang >= 0)
+    .sort((a, b) => a.rang - b.rang);
+  if (!sorted.length) return null;
   return {
-    ids:        sorted.map(n => n.data._id),
-    firstIndex: sorted[0].rowIndex,
-    lastIndex:  sorted[sorted.length - 1].rowIndex,
+    ids:        sorted.map(x => x.n.data._id),
+    firstIndex: sorted[0].rang,
+    lastIndex:  sorted[sorted.length - 1].rang,
   };
 }
 
@@ -1623,12 +1691,15 @@ function addRowAfterSelected() {
   let insertIndex;
   if (selected.length > 0) {
     // Avec sélection : insérer APRÈS la dernière sélection
-    insertIndex = Math.max(...selected.map(n => n.rowIndex)) + 1;
+    insertIndex = Math.max(...selected.map(n => rangServeurDuNoeud(n))) + 1;
   } else {
     // Sans sélection : utiliser le focus pour insérer AVANT la ligne courante
     const focusedCell = state.gridApi.getFocusedCell();
-    if (focusedCell && focusedCell.rowIndex >= 0) {
-      insertIndex = focusedCell.rowIndex;
+    const rangFocus = focusedCell && focusedCell.rowIndex >= 0
+      ? rangServeurDuNoeud(state.gridApi.getDisplayedRowAtIndex(focusedCell.rowIndex))
+      : -1;
+    if (rangFocus >= 0) {
+      insertIndex = rangFocus;
     } else {
       insertIndex = state.rows.length;
     }
@@ -1706,8 +1777,8 @@ function deleteSelectedRows() {
   }
 
   // Sauvegarder les lignes supprimées pour l'undo
-  const deletedRows = selected.map(n => ({ ...n.data, rowIndex: n.rowIndex }));
-  const deletedIndexes = selected.map(n => n.rowIndex).sort((a, b) => b - a);
+  const deletedRows = selected.map(n => ({ ...n.data, rowIndex: rangServeurDuNoeud(n) })).filter(r => r.rowIndex >= 0);
+  const deletedIndexes = deletedRows.map(r => r.rowIndex).sort((a, b) => b - a);
 
   const count = selected.length;
 
@@ -1840,7 +1911,7 @@ function onCellUpdate(rowIndex, cle, value) {
   }
 
   if (state.rows[rowIndex]) state.rows[rowIndex][cle] = value;
-  const node = state.gridApi.getDisplayedRowAtIndex(rowIndex);
+  const node = noeudDuRangServeur(rowIndex);
   if (node) {
     node.setDataValue(cle, value);
     state.gridApi.redrawRows({ rowNodes: [node] });
@@ -1862,7 +1933,7 @@ state.gridApi.flashCells({ rowNodes: [node], columns: [cle], flashDuration: 150,
 function onCellRevert(rowIndex, cle, value, message) {
   if (!state.gridApi) return;
   if (state.rows[rowIndex]) state.rows[rowIndex][cle] = value;
-  const node = state.gridApi.getDisplayedRowAtIndex(rowIndex);
+  const node = noeudDuRangServeur(rowIndex);
   if (node) {
     node.setDataValue(cle, value); // source 'api' → pas de nouveau onCellValueChanged
 state.gridApi.flashCells({ rowNodes: [node], columns: [cle], flashDuration: 150, fadeDuration: 400 });
@@ -1878,7 +1949,7 @@ function onRowStyle(rowIndex, style) {
   } else {
     delete state.styleOverrides[rowIndex];
   }
-  const node = state.gridApi.getDisplayedRowAtIndex(rowIndex);
+  const node = noeudDuRangServeur(rowIndex);
   if (node) state.gridApi.redrawRows({ rowNodes: [node] });
 }
 
@@ -1932,7 +2003,7 @@ function onRowValidate(msg) {
   }
   // Redraw seulement si la grille existe déjà (sinon les overrides sont stockés pour onGridReady)
   if (state.gridApi) {
-    const node = state.gridApi.getDisplayedRowAtIndex(rowIndex);
+    const node = noeudDuRangServeur(rowIndex);
     if (node) {
       state.gridApi.redrawRows({ rowNodes: [node] });
       // Filet de sécurité (cf. onActDone/onReviewSync) : redrawRows seul ne réexécute pas
