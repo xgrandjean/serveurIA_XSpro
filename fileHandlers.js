@@ -24,6 +24,18 @@ try {
   pdfParse = null; // pdf-parse non installé — extract_text désactivé
 }
 
+// Caractères gardés d'un fichier injecté en texte (JSON, CSV, texte d'un PDF…). Réglé par
+// worker-config.json → fichiers.maxCaracteres (cf. server.js) ; 60 000 sans réglage. Au-delà,
+// le fichier est coupé et le dit — un parcours complet joint par XSpro est borné en amont.
+let MAX_CARACTERES_TEXTE = 60000;
+
+function reglerMaxCaracteres(n) {
+  if (Number(n) > 0) MAX_CARACTERES_TEXTE = Math.floor(Number(n));
+  return MAX_CARACTERES_TEXTE;
+}
+
+function maxCaracteresTexte() { return MAX_CARACTERES_TEXTE; }
+
 // ── HANDLERS NATIFS ───────────────────────────────────────────────────────────
 
 /**
@@ -130,8 +142,8 @@ async function extractPdfText(file) {
     const parsed    = await pdfParse(buffer, { max: 0 }); // max:0 = toutes les pages
     const text      = parsed.text?.trim() || '';
     const pages     = parsed.numpages || '?';
-    const truncated = text.length > 60000
-      ? text.slice(0, 60000) + '\n… [tronqué — contenu trop long]'
+    const truncated = text.length > MAX_CARACTERES_TEXTE
+      ? text.slice(0, MAX_CARACTERES_TEXTE) + '\n… [tronqué — contenu trop long]'
       : text;
 
     // console.log(`[FileHandlers] PDF extrait : "${name}" — ${pages} page(s), ${text.length} chars`);
@@ -160,8 +172,9 @@ async function buildInlineText(file) {
 
   try {
     const decoded   = Buffer.from(data, 'base64').toString('utf-8');
-    const truncated = decoded.length > 60000
-      ? decoded.slice(0, 60000) + '\n… [tronqué]'
+    const truncated = decoded.length > MAX_CARACTERES_TEXTE
+      ? decoded.slice(0, MAX_CARACTERES_TEXTE)
+        + `\n… [tronqué à ${MAX_CARACTERES_TEXTE} caractères sur ${decoded.length} — fichiers.maxCaracteres, worker-config.json]`
       : decoded;
 
     // Détection du langage pour annotation
@@ -301,6 +314,8 @@ function detectLang(fileName) {
 module.exports = {
   HANDLER_FUNCTIONS,
   runHandler,
+  reglerMaxCaracteres,
+  maxCaracteresTexte,
   // Export direct des handlers pour tests unitaires
   buildNativeDocument,
   buildNativeImage,

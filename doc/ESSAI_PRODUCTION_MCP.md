@@ -38,7 +38,7 @@ Dans la grille, panneau **🔌 Remplissage par Claude** : si la ligne du haut es
 **Puis ouvrir une fenêtre Claude NEUVE** : sa configuration est lue à l'ouverture. Celle qui est
 déjà ouverte ne verra rien, même après un branchement réussi.
 
-Pour vérifier : dans cette fenêtre neuve, demander les sessions du Worker. Les sept outils
+Pour vérifier : dans cette fenêtre neuve, demander les sessions du Worker. Les huit outils
 `worker_*` doivent être là. La façade et le Worker sont deux processus indépendants —
 brancher, rebrancher ou relancer la façade ne touche à aucune session ouverte.
 

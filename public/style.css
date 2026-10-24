@@ -493,6 +493,8 @@ a.badge-model:hover {
   color: #aaa; font-size: 10px; padding: 0; line-height: 1; flex-shrink: 0;
 }
 .chip-remove:hover { color: var(--red); }
+/* Document de contexte joint par XPro : distinct d'une pièce jointe de l'utilisateur. */
+.attachment-chip.chip-contexte { background: #eef4ff; border-color: #b9cdf5; max-width: 220px; }
 
 /* Prompt row — conteneur relatif pour le bouton overlay */
 #prompt-row {

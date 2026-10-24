@@ -44,6 +44,9 @@ const store = new Map(); // sessionId → SessionObject
  */
 function createSession(payload) {
   const { sessionId, contextName, callbackUrl, ia, data, workerConfig } = payload;
+  // Les documents ne voyagent pas dans la copie brute : elle part au navigateur (init), et un
+  // parcours complet l'y aurait fait passer une seconde fois pour rien.
+  const { documents, ...payloadSansDocuments } = payload;
 
   if (!sessionId || !contextName) {
     throw new Error('createSession : sessionId et contextName sont requis');
@@ -71,7 +74,10 @@ function createSession(payload) {
     ia: { ...ia },
 
     // ── Payload brut original reçu de XSpro ──────────────────────────────────
-    xsproPayload: { ...payload },
+    xsproPayload: payloadSansDocuments,
+
+    // ── Documents de contexte joints par XSpro (cf. normaliserDocuments) ─────
+    documents: normaliserDocuments(documents),
 
     // ── Données source (lecture seule après init) ─────────────────────────────
     data: {
@@ -131,6 +137,60 @@ function createSession(payload) {
   store.set(sessionId, session);
   console.log(`[SessionManager] Session créée : ${sessionId} (${contextName})`);
   return session;
+}
+
+// ── Documents de contexte ─────────────────────────────────────────────────────
+// Champ facultatif `documents` du POST /process (cf. doc/XSPRO_INTEGRATION.md) : ce que
+// l'utilisateur joignait à la main par 📎 — le parcours complet d'un chapitre en cours de
+// rédaction, par exemple —, XSpro le joint lui-même. Même forme qu'une pièce jointe de la
+// grille ({ name, mimeType, data en base64, size }), et même chemin vers le LLM (inline_text
+// pour un JSON) ; mais gardé pour toute la session et joint à CHAQUE appel, canal par clé API
+// comme XSProAssist (fichiersDeSession), et lisible par l'agent externe (worker_documents).
+const MAX_DOCUMENTS = 10;
+
+function normaliserDocuments(liste) {
+  if (!Array.isArray(liste)) return [];
+  return liste
+    .filter(d => d && typeof d.name === 'string' && d.name.trim() && typeof d.data === 'string' && d.data)
+    .slice(0, MAX_DOCUMENTS)
+    .map(d => {
+      const texte = Buffer.from(d.data, 'base64').toString('utf-8');
+      return {
+        name:       d.name.trim(),
+        mimeType:   typeof d.mimeType === 'string' && d.mimeType ? d.mimeType : 'application/json',
+        data:       d.data,
+        size:       Number(d.size) || Buffer.byteLength(texte, 'utf-8'),
+        libelle:    typeof d.libelle === 'string' ? d.libelle : '',
+        caracteres: texte.length,
+      };
+    });
+}
+
+/** Les fichiers d'un appel : les documents de la session, puis ceux joints à la main. */
+function fichiersDeSession(session, files = []) {
+  return [...(session?.documents || []), ...(Array.isArray(files) ? files : [])];
+}
+
+/** Ce que l'interface et l'agent voient d'un document : jamais son contenu. */
+function resumeDocuments(session, maxCaracteres = Infinity) {
+  return (session?.documents || []).map(d => ({
+    nom:        d.name,
+    libelle:    d.libelle,
+    taille:     d.size,
+    caracteres: d.caracteres,
+    tronque:    d.caracteres > maxCaracteres,
+  }));
+}
+
+function texteDocument(document) {
+  return Buffer.from(document.data, 'base64').toString('utf-8');
+}
+
+/** L'utilisateur ne veut plus de ce document dans les appels de la session. */
+function retirerDocument(session, nom) {
+  const avant = (session?.documents || []).length;
+  session.documents = (session.documents || []).filter(d => d.name !== nom);
+  return session.documents.length < avant;
 }
 
 // ── Récupération ──────────────────────────────────────────────────────────────
@@ -593,6 +653,11 @@ module.exports = {
   STATUS,
   valuesEqual,   // reutilise par llmClient (chemin IA) pour ignorer les faux changements
   createSession,
+  normaliserDocuments,
+  fichiersDeSession,
+  resumeDocuments,
+  texteDocument,
+  retirerDocument,
   getSession,
   setStatus,
   setCellValue,

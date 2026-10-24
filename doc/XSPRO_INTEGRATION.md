@@ -175,6 +175,32 @@ Content-Type: application/json
 }
 ```
 
+### Documents de contexte — champ facultatif `documents` (2026-10-24)
+
+Ce que l'utilisateur joignait à la main par 📎 pour que l'IA connaisse l'existant (le
+parcours complet exporté en JSON quand il rédige un chapitre), XSpro le joint lui-même :
+
+```json
+"documents": [
+  { "name": "parcours-P100.json", "mimeType": "application/json",
+    "data": "<le contenu, en base64>", "size": 38211, "libelle": "Parcours complet" }
+]
+```
+
+- **Même forme qu'une pièce jointe de la grille**, et même chemin vers le LLM : un JSON passe
+  en texte (`inline_text`), coupé au-delà de `fichiers.maxCaracteres` (60 000 par défaut, voir
+  §6), en le disant. XSpro borne le document en amont, pour qu'il ne soit pas coupé.
+- **Gardé pour toute la session**, et joint à **chaque** appel, devant les pièces jointes de
+  l'utilisateur (`fichiersDeSession`, `sessionManager.js`). Cela vaut pour la clé API, l'aperçu,
+  l'exécution d'un plan et XSProAssist.
+- **Canal MCP :** `worker_contexte` annonce les documents (nom, taille) sans leur contenu, et le
+  briefing dit de les lire. L'outil `worker_documents` les sert par tranches.
+- **Grille :** une pastille bleue par document, près du 📎. Son ✕ le retire de la session
+  (message `documents:retirer`).
+- **Hors de `xsproPayload`**, la copie brute envoyée au navigateur : le document n'y repasse pas.
+- Au plus 10 documents. Ceux sans `name` ou sans `data` sont écartés. Un Worker plus ancien
+  ignore le champ.
+
 ### D'où vient le bloc `ia`, et pourquoi il diffère de la config interne de XSpro
 
 > **Note (19/08/2026)** : point de contrat resté implicite jusqu'ici, à connaître avant de

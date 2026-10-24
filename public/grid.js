@@ -88,6 +88,7 @@
    updatedCells:  0,
    totalCells:    0,
    attachedFiles: [],
+   documentsSession: [],        // documents de contexte joints par XPro (cf. renderChips)
    userScrolled:  false,
    providerId:     'openai',
    acceptString:   '*/*',
@@ -175,6 +176,7 @@ function connectWS() {
 function handleWSMessage(msg) {
   switch (msg.type) {
     case 'init':              onInit(msg);                                    break;
+    case 'documents':         state.documentsSession = msg.documents || []; renderChips(); break;
     case 'status':            onStatusChange(msg.status);                    break;
     case 'canal':             onCanalChange(msg.canal);                      break;
     case 'journal:etape':     onEtapeJournal(msg.etape);                     break;
@@ -328,6 +330,8 @@ function reperesParent(p) {
 function onInit(msg) {
   state.workerConfig = msg.workerConfig;
   state.rows         = msg.rows || [];
+  state.documentsSession = msg.documents || [];
+  renderChips();
 
   // Mode revue par pending (cf. viewResolver.js MANIFEST.revueParPending) : un seul mode
   // d'exécution direct, sélecteur Plan/Act masqué — les propositions IA arrivent en
@@ -3077,8 +3081,20 @@ function readFileAsBase64(file) {
 function renderChips() {
   const c = el('attachments-chips');
   c.innerHTML = '';
-  if (!state.attachedFiles.length) { hide('attachments-bar'); return; }
+  const documents = state.documentsSession || [];
+  if (!state.attachedFiles.length && !documents.length) { hide('attachments-bar'); return; }
   show('attachments-bar');
+  // Documents de contexte joints par XPro (le parcours complet…) : ils partent avec CHAQUE
+  // demande de la session, jusqu'à ce que l'utilisateur les retire (✕).
+  documents.forEach(d => {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip chip-contexte';
+    if (d.tronque) chip.classList.add('chip-unsupported');
+    const titre = `${d.libelle || d.nom} — joint par XPro à chaque demande de cette session`
+      + (d.tronque ? ` ⚠ coupé : ${d.caracteres} caractères, au-delà du plafond du Worker` : '');
+    chip.innerHTML = `<span class="chip-icon">📘</span><span class="chip-name" title="${titre}">${trunc(d.libelle || d.nom, 24)}${d.tronque ? ' ⚠' : ''}</span><span class="chip-size">${Math.max(1, Math.round(d.taille / 1024))} Ko</span><button class="chip-remove" data-nom="${d.nom}" title="Ne plus le joindre">✕</button>`;
+    c.appendChild(chip);
+  });
   state.attachedFiles.forEach((f, i) => {
     const chip = document.createElement('div');
     chip.className = 'attachment-chip';
@@ -3090,6 +3106,7 @@ function renderChips() {
     c.appendChild(chip);
   });
   c.querySelectorAll('.chip-remove').forEach(b => b.addEventListener('click', e => {
+    if (e.target.dataset.nom !== undefined) { sendWS({ type: 'documents:retirer', nom: e.target.dataset.nom }); return; }
     state.attachedFiles.splice(+e.target.dataset.i, 1); renderChips();
   }));
 }

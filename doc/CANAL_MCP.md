@@ -215,12 +215,13 @@ Après le branchement, il faut une fenêtre **neuve** ; celle qui est déjà ouv
 (`Globals.modelServeurIAExe`), jamais celui des assets : ceux-ci sont packés dans `app.asar`,
 d'où aucun exécutable ne se lance.
 
-## Les sept outils
+## Les huit outils
 
 | Outil | Ce qu'il fait |
 |---|---|
 | `worker_sessions` | Les grilles ouvertes, ce que XSpro a demandé, les modes, si c'est inscriptible |
-| `worker_contexte` | Colonnes du mode, lignes avec leur `_id`, et le **briefing** — les règles métier de la vue et ses exemples |
+| `worker_contexte` | Colonnes du mode, lignes avec leur `_id`, et le **briefing** — les règles métier de la vue et ses exemples. Annonce les documents de contexte (nom, taille), sans leur contenu |
+| `worker_documents` | Les documents de contexte joints par XSpro (le parcours complet…), par tranches : sans `nom` la liste, avec `nom` le texte de `debut` à `debut + longueur`, et `suite` tant qu'il en reste (2026-10-24, voir `XSPRO_INTEGRATION.md` §2) |
 | `worker_ecrire_cellules` | Pose des valeurs : plusieurs lignes, plusieurs colonnes, un appel |
 | `worker_inserer_lignes` | Ajoute des lignes (chemin du bouton « + Ligne »), rend les `_id` créés |
 | `worker_supprimer_lignes` | Marque des lignes à supprimer (chemin du bouton « ✂️ ») |

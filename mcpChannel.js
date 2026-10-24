@@ -613,6 +613,12 @@ function installMcpChannel(app, deps) {
 
     if (avertissementEcriture) sortie.avertissementEcriture = avertissementEcriture;
 
+    // Documents de contexte joints par XSpro (le parcours complet…) : annoncés ici, sans leur
+    // contenu — une relecture briefing:false ne doit pas les renvoyer à chaque fois. Ils se
+    // lisent par worker_documents.
+    const documents = SM.resumeDocuments(session, require('./fileHandlers').maxCaracteresTexte());
+    if (documents.length) sortie.documents = documents;
+
     // Briefing : les consignes métier de la vue (cf. en tête de fichier).
     if (args.briefing !== false) {
       const bloc = composerBlocMcp(
@@ -637,6 +643,12 @@ function installMcpChannel(app, deps) {
         + ' Un changement de mode dans la grille ne se reflète ici qu\'après un nouvel'
         + ' appel de worker_contexte — le mode suit le sélecteur.'
         + (avertissementEcriture ? '\n\n⚠️ ÉCRITURE : ' + avertissementEcriture : '')
+        + (documents.length
+            ? '\n\nDOCUMENTS DE CONTEXTE joints par XPro : '
+              + documents.map(d => `« ${d.nom} »${d.libelle ? ` (${d.libelle})` : ''}`).join(', ')
+              + '. Les lire AVANT de rédiger — joints à la demande, ou par worker_documents : '
+              + 'ce qui existe déjà s\'y trouve.'
+            : '')
         + "\n\n" + sortie.briefing;
 
       // Phase bêta — cf. le bandeau en tête de fichier. Ajouté ici, au seul
@@ -649,6 +661,41 @@ function installMcpChannel(app, deps) {
     }
 
     return sortie;
+  }
+
+  // ── Verbe : documents ───────────────────────────────────────────────────────
+  // Les documents de contexte joints par XSpro (cf. sessionManager.js) : sans `nom`, leur
+  // liste ; avec, une tranche du texte. Par tranches, parce qu'un parcours complet peut
+  // dépasser ce qu'une réponse d'outil supporte.
+  async function verbeDocuments(args) {
+    const r = resoudre(args, false);
+    if (r.erreur) return r;
+    const { session } = r;
+
+    const max = require('./fileHandlers').maxCaracteresTexte();
+    if (!args.nom) return { sessionId: session.sessionId, documents: SM.resumeDocuments(session, max) };
+
+    const document = (session.documents || []).find(d => d.name === args.nom);
+    if (!document) {
+      const noms = (session.documents || []).map(d => d.name).join(', ') || 'aucun';
+      return { erreur: `Document inconnu : « ${args.nom} ». Documents de cette session : ${noms}.`, codeHttp: 404 };
+    }
+
+    const texte    = SM.texteDocument(document);
+    const debut    = Math.max(0, Number(args.debut) || 0);
+    const longueur = Math.min(50000, Math.max(1000, Number(args.longueur) || 20000));
+    const contenu  = texte.slice(debut, debut + longueur);
+    const fin      = debut + contenu.length;
+    return {
+      sessionId: session.sessionId,
+      nom:       document.name,
+      debut,
+      fin,
+      total:     texte.length,
+      // Où reprendre, ou null : tout est lu.
+      suite:     fin < texte.length ? fin : null,
+      contenu,
+    };
   }
 
   // ── Helpers d'écriture ──────────────────────────────────────────────────────
@@ -1066,6 +1113,7 @@ function installMcpChannel(app, deps) {
   const VERBES = {
     sessions:  verbeSessions,
     contexte:  verbeContexte,
+    documents: verbeDocuments,
     ecrire:    verbeEcrire,
     inserer:   verbeInserer,
     supprimer: verbeSupprimer,

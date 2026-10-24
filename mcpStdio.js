@@ -210,6 +210,26 @@ const OUTILS = [
         verbe: 'contexte',
     },
     {
+        name: 'worker_documents',
+        description:
+            'Les documents de contexte que XPro a joints à la session — par exemple le parcours '
+          + 'complet (chapitres et questions) quand on rédige un chapitre, pour rester cohérent '
+          + 'avec ce qui existe. worker_contexte les annonce (champ « documents »). Sans « nom » : '
+          + 'leur liste. Avec : le texte, par tranches — relancer avec debut = « suite » tant '
+          + 'qu\'elle n\'est pas null.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sessionId: SESSION_ID,
+                nom:       { type: 'string',  description: 'Nom du document, tel que worker_contexte le donne.' },
+                debut:     { type: 'integer', description: 'Premier caractère à lire (0 par défaut).' },
+                longueur:  { type: 'integer', description: 'Caractères à lire (1 000 à 50 000, 20 000 par défaut).' },
+            },
+            required: ['sessionId'],
+        },
+        verbe: 'documents',
+    },
+    {
         name: 'worker_ecrire_cellules',
         description:
             'Écrit des valeurs dans la grille — plusieurs lignes et plusieurs colonnes en un '

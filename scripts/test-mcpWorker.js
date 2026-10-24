@@ -158,7 +158,8 @@ function attendre(ms) { return new Promise((r) => setTimeout(r, ms)); }
         JSON.stringify(f.etat.reponses.filter((x) => x.id === undefined || x.id === null)));
 
     const outils = (liste.result && liste.result.tools) || [];
-    verifier('tools/list renvoie des outils', outils.length === 7, 'n=' + outils.length);
+    // 8 depuis worker_documents (documents de contexte joints par XSpro, 2026-10-24).
+    verifier('tools/list renvoie des outils', outils.length === 8, 'n=' + outils.length);
     verifier('chaque outil a un nom, une description et un schéma',
         outils.every((o) => o.name && o.description && o.inputSchema),
         outils.filter((o) => !(o.name && o.description && o.inputSchema)).map((o) => o.name).join(','));

@@ -36,7 +36,14 @@
     "                        des donnees du Worker : %APPDATA%/XSpro/serveurIA-data",
     "                        sous XSpro), cle API retiree, pret pour le mode standalone.",
     "                        Donnees REELLES : anonymiser avant de copier dans",
-    "                        standalone/. Relancer le Worker apres changement."
+    "                        standalone/. Relancer le Worker apres changement.",
+    "",
+    "fichiers.maxCaracteres: caracteres gardes d'un fichier injecte en texte dans le",
+    "                        prompt (piece jointe JSON/CSV/texte, texte d'un PDF, et",
+    "                        documents de contexte joints par XSpro, comme le parcours",
+    "                        complet). Au-dela, coupe, et le prompt le dit. 60000 par",
+    "                        defaut. Le relever coute des jetons a chaque appel : un",
+    "                        compte gratuit (Groq : 8 000 jetons/minute) refuse vite."
   ],
 
   "port": 8888,
@@ -50,6 +57,7 @@
   "mcp": { "actif": true },
   "beta": { "rapportAnomalies": true },
   "capture": { "standalone": false },
+  "fichiers": { "maxCaracteres": 60000 },
 
   "contexts": {
     "listeBlanche": ["detailsDevis","formulaireGetDetailsTravaux","formulaireGetDetailsFichesTechniques","formulaireListeQuestions","formulaireGetDetailsFacturationClient","formulaireGetDetailsAF"],

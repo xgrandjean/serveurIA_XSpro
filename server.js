@@ -96,6 +96,7 @@ let WORKER_CONFIG = {
   canalParDefaut: 'api',
   beta: { rapportAnomalies: true },
   capture: { standalone: false },
+  fichiers: { maxCaracteres: 60000 },
 };
 
 if (fs.existsSync(WORKER_CONFIG_FILE)) {
@@ -122,12 +123,17 @@ if (fs.existsSync(WORKER_CONFIG_FILE)) {
       beta: { rapportAnomalies: raw.beta?.rapportAnomalies !== false },
       // Capture des payloads reçus pour le mode standalone — cf. capturerPourStandalone().
       capture: { standalone: raw.capture?.standalone === true },
+      // Caractères gardés d'un fichier injecté en texte (pièce jointe ou document de
+      // contexte joint par XSpro) — cf. fileHandlers.js.
+      fichiers: { maxCaracteres: Number(raw.fichiers?.maxCaracteres) > 0 ? Number(raw.fichiers.maxCaracteres) : 60000 },
     };
     // console.log(`[Worker] Config chargee : port=${WORKER_CONFIG.port}`);
   } catch (e) {
     console.warn(`[Worker] Erreur lecture worker-config.json : ${e.message} — valeurs par défaut`);
   }
 }
+
+require('./fileHandlers').reglerMaxCaracteres(WORKER_CONFIG.fichiers.maxCaracteres);
 
 const PORT = WORKER_CONFIG.port;
 
@@ -632,6 +638,9 @@ wss.on('connection', (ws, req) => {
        acceptString,
        supportedTypes,
        xsproPayload: session.xsproPayload,
+       // Documents de contexte joints par XSpro (le parcours complet…) : nom et taille, pour
+       // la pastille de la grille — leur contenu reste ici (cf. sessionManager.js).
+       documents:    SM.resumeDocuments(session, WORKER_CONFIG.fichiers.maxCaracteres),
        modes:        session.modes       || {},
        selectChoix:  session.selectChoix || {},
        champsRestreints: session.champsRestreints || {},
@@ -773,7 +782,7 @@ async function handleUIMessage(session, msg) {
       session.activeMode = activeMode;
       try {
         const llmClient = require('./llmClient');
-        const preview = await llmClient.buildPromptPreview(session, prompt, mode, files);
+        const preview = await llmClient.buildPromptPreview(session, prompt, mode, SM.fichiersDeSession(session, files));
         wsSend(session, {
           type:    'prompt:preview',
           system:  preview.system,
@@ -864,6 +873,14 @@ async function handleUIMessage(session, msg) {
       break;
     }
 
+    // L'utilisateur retire un document de contexte (✕ de sa pastille) : il ne part plus aux
+    // appels suivants de la session.
+    case 'documents:retirer': {
+      SM.retirerDocument(session, msg.nom);
+      wsSend(session, { type: 'documents', documents: SM.resumeDocuments(session, WORKER_CONFIG.fichiers.maxCaracteres) });
+      break;
+    }
+
     // L'utilisateur lance un prompt (mode Plan ou Act direct) — clé API, ou XSProAssist
     case 'prompt:send': {
       // Défense en profondeur : la zone de prompt est déjà masquée côté client en
@@ -874,7 +891,9 @@ async function handleUIMessage(session, msg) {
         wsSend(session, { type: 'error', message: '⚠ Cette session est en remplissage par un agent externe (MCP). Basculer le sélecteur « Canal » sur « Clé API » ou « Assistant intégré » pour envoyer une demande.' });
         break;
       }
-      const { prompt, mode, files = [], activeMode = null } = msg; // mode: 'plan' | 'act'
+      const { prompt, mode, files: joints = [], activeMode = null } = msg; // mode: 'plan' | 'act'
+      // Les documents de contexte de la session d'abord, puis ce qui est joint à la main.
+      const files = SM.fichiersDeSession(session, joints);
 
       // Mémoriser le mode actif UI pour plan:validate (qui n'a pas de nouveau activeMode)
       session.activeMode = activeMode;
@@ -974,7 +993,7 @@ async function handleUIMessage(session, msg) {
             SM.setStatus(session, SM.STATUS.PAUSED);
             wsSend(session, { type: 'act:done', rows: Calculees.enrichir(session, updatedRows), pendingCount: SM.countPendingRows(session), actionsResume: meta?.actionsResume || null, rapport: meta?.rapport || null });
           },
-        }, [], session.activeMode);
+        }, SM.fichiersDeSession(session, []), session.activeMode);
       } catch (e) {
         SM.setStatus(session, SM.STATUS.ERROR);
         const errorMsg = {
