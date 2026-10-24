@@ -4,7 +4,11 @@
  * serveurIA.exe. Ces fichiers ne sont pas embarqués dans le binaire pkg :
  * ils sont lus directement sur disque via AI_WORKER_ASSETS_DIR (cf. server.js).
  *
- * Usage : node scripts/copy-assets-for-xspro.js
+ * Usage : node scripts/copy-assets-for-xspro.js [dossier]
+ *
+ * Sans argument, le dépôt XSpro voisin. Le workflow « Compiler XPro » de XSpro, qui compile
+ * le serveur pour macOS et Linux sur ses propres machines, donne le dossier de sa copie de
+ * travail.
  */
 'use strict';
 
@@ -12,7 +16,9 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const DEST = path.join(ROOT, '..', 'XSpro', 'assets', 'model', 'serveurIA-data');
+const DEST = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.join(ROOT, '..', 'XSpro', 'assets', 'model', 'serveurIA-data');
 
 // `standalone/` n'est délibérément PAS copié : le mode standalone n'existe que pour la
 // version indépendante du Worker (rejeu d'un payload depuis le disque au lieu de le
