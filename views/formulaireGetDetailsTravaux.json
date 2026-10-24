@@ -14,10 +14,11 @@
       "Ne pas dupliquer un repere déjà existant",
       "Ne pas inventer de quantite précise si elle n'est pas déductible du contexte — laisser vide plutôt que d'inventer un chiffre arbitraire"
     ],
-    "texteLibre": "\n    - intitule doit être une désignation claire et actionnable de la tâche (verbe d'action + objet, ex. \"Pose luminaires\", \"Raccordement armoire divisionnaire\").\n    - quantite est un nombre positif représentant la quantité prévue (unités, mètres, forfait…) — vide si non pertinent pour la tâche, jamais négative.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - Une tâche = une action homogène ; si une demande couvre plusieurs corps de métier ou étapes distinctes, crée une ligne par tâche plutôt qu'une ligne fourre-tout.\n    "
+    "texteLibre": "\n    - intitule doit être une désignation claire et actionnable de la tâche (verbe d'action + objet, ex. \"Pose luminaires\", \"Raccordement armoire divisionnaire\").\n    - quantite est un nombre positif représentant la quantité prévue (unités, mètres, forfait…) — vide si non pertinent pour la tâche, jamais négative.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - Une tâche = une action homogène ; si une demande couvre plusieurs corps de métier ou étapes distinctes, crée une ligne par tâche plutôt qu'une ligne fourre-tout.\n    - Si un document « Contexte de l'affaire (technique) » est joint (worker_documents sur le canal MCP), lis-le avant d'écrire : il dit ce que prévoit le devis de l'affaire (quantités réelles, chapitres) et ce qui existe déjà — les autres fiches de travail et carnets de liaisons, ligne par ligne, avec ce qui est fait, validé ou refusé, et l'avancement des tâches. Propose d'abord ce qui reste à faire ; ne repropose pas une tâche déjà faite ou déjà prévue dans une autre fiche — signale-la plutôt dans le rapport. Pour une quantité, pars de la quantité réelle du devis, diminuée de ce qui est déjà fait. La fiche marquée « courante » est celle de la grille ; son « etatDesLignes » dit lesquelles de ses lignes sont faites.\n    "
   },
   "promptsSuggeres": {
     "creation": [
+      "D'après le contexte de l'affaire, propose une fiche de travail (fiche d'intervention) pour ce qui reste à faire au devis",
       "Complète les tâches manquantes à partir des données déjà présentes dans cette fiche",
       "Vérifie et corrige les repères en doublon sans modifier les autres tâches",
       "Complète les quantités manquantes pour les tâches déjà définies"
@@ -54,6 +55,9 @@
       "regles": null,
       "promptsSuggeres": {
         "creation": [
+          "D'après le contexte de l'affaire, propose une fiche de travail (fiche d'intervention) pour ce qui reste à faire au devis",
+          "Propose les tâches prévues au devis qui ne figurent encore dans aucune fiche de travail, avec leurs quantités",
+          "Complète cette fiche avec les tâches restantes, en déduisant ce qui est déjà fait dans les autres fiches",
           "Décompose ce descriptif de chantier en liste de tâches",
           "Génère une fiche de travaux complète à partir de ce document",
           "Crée un repère unique pour chaque tâche sans doublon"

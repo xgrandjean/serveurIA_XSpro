@@ -15,10 +15,11 @@
       "Ne pas inventer de repereTenant ou repereAboutissant fictif si l'équipement n'est pas identifiable — laisser vide plutôt que d'inventer",
       "Ne pas inventer de typeConnectTenant/typeConnectAboutissant si le type de borne n'est pas précisé"
     ],
-    "texteLibre": "\n    - typeLiaison doit respecter des désignations normalisées réalistes (câbles électriques : U1000R2V, HO7VK… ; tuyauteries : PER, cuivre, PVC…) cohérentes avec la longueur et le contexte.\n    - longueurLiaison est un nombre décimal positif en mètres — vide si inconnue, jamais négative.\n    - tenant/aboutissant sont les libellés lisibles des équipements ; repereTenant/repereAboutissant sont leurs repères courts correspondants — rester cohérent entre les deux (même équipement = même repère partout dans le carnet).\n    - Une liaison relie toujours deux équipements distincts — tenant et aboutissant ne doivent jamais désigner le même équipement.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    "
+    "texteLibre": "\n    - typeLiaison doit respecter des désignations normalisées réalistes (câbles électriques : U1000R2V, HO7VK… ; tuyauteries : PER, cuivre, PVC…) cohérentes avec la longueur et le contexte.\n    - longueurLiaison est un nombre décimal positif en mètres — vide si inconnue, jamais négative.\n    - tenant/aboutissant sont les libellés lisibles des équipements ; repereTenant/repereAboutissant sont leurs repères courts correspondants — rester cohérent entre les deux (même équipement = même repère partout dans le carnet).\n    - Une liaison relie toujours deux équipements distincts — tenant et aboutissant ne doivent jamais désigner le même équipement.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - Si un document « Contexte de l'affaire (technique) » est joint (worker_documents sur le canal MCP), lis-le avant d'écrire : il dit ce que prévoit le devis de l'affaire et ce qui existe déjà — les autres carnets de liaisons et fiches de travail, ligne par ligne, avec ce qui est fait, validé ou refusé. Ne repropose jamais une liaison qui existe déjà dans un autre carnet (même repère, ou mêmes tenant et aboutissant) : signale-la plutôt dans le rapport. La fiche marquée « courante » est celle de la grille ; son « etatDesLignes » dit lesquelles de ses lignes sont faites, ce que la grille ne montre pas.\n    "
   },
   "promptsSuggeres": {
     "creation": [
+      "D'après le contexte de l'affaire, propose les liaisons prévues au devis qui n'apparaissent encore dans aucun carnet",
       "Complète les liaisons manquantes à partir des données déjà présentes dans ce carnet",
       "Vérifie et corrige les repères en doublon sans modifier les autres liaisons",
       "Complète les repereTenant/repereAboutissant manquants pour les liaisons déjà définies"
@@ -55,6 +56,9 @@
       "regles": null,
       "promptsSuggeres": {
         "creation": [
+          "D'après le contexte de l'affaire, propose les liaisons prévues au devis qui n'apparaissent encore dans aucun carnet",
+          "Complète ce carnet avec les liaisons manquantes, sans reprendre celles des autres carnets de l'affaire",
+          "Liste dans le rapport les liaisons déjà faites ailleurs que ce carnet reprend en double",
           "Décompose ce plan/schéma en liste de liaisons",
           "Génère le carnet de liaisons complet à partir de ce document",
           "Crée un repère unique pour chaque liaison sans doublon"

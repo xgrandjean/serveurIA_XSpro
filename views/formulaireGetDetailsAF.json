@@ -13,15 +13,17 @@
       "SI les colonnes livre, facture, regle ou annule existent, laisser tel quel — champs réservés à la saisie manuelle côté comptabilité",
       "Ne pas inventer de montant précis si il n'est pas déductible du contexte — laisser vide plutôt que d'inventer un chiffre arbitraire"
     ],
-    "texteLibre": "\n    - designation doit être une description claire et actionnable de l'article (ex. \"Câble U1000R2V 3G2.5\", \"Disjoncteur différentiel 10A\").\n    - quantite est un nombre positif représentant la quantité commandée — jamais négative.\n    - montant est le prix unitaire HT, un nombre positif — jamais négatif.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - codeTVA reprend le code applicable (1, 2, 3) s'il est déductible du contexte, sinon laisse vide.\n    - Un article = une ligne homogène ; si une demande couvre plusieurs types d'articles, crée une ligne par article plutôt qu'une ligne fourre-tout.\n    "
+    "texteLibre": "\n    - designation doit être une description claire et actionnable de l'article (ex. \"Câble U1000R2V 3G2.5\", \"Disjoncteur différentiel 10A\").\n    - quantite est un nombre positif représentant la quantité commandée — jamais négative.\n    - montant est le prix unitaire HT, un nombre positif — jamais négatif.\n    - commentaire reste du texte libre, à ne renseigner que si une précision utile existe.\n    - codeTVA reprend le code applicable (1, 2, 3) s'il est déductible du contexte, sinon laisse vide.\n    - Un article = une ligne homogène ; si une demande couvre plusieurs types d'articles, crée une ligne par article plutôt qu'une ligne fourre-tout.\n    - Si un document « Contexte de l'affaire (achats) » est joint (worker_documents sur le canal MCP), lis-le avant d'écrire. Pour ce qui reste à commander, pars des lignes du devis (quantite réelle, prixAchatNet, reference, designation) et retire ce que contiennent déjà les commandes fournisseurs passées : seules leurs lignes non annulées comptent (« annuleeNonComptee » n'est pas commandé). Le rapprochement se fait par référence, sinon par désignation : c'est une proposition, à dire comme telle dans le rapport. quantite = quantité réelle du devis moins déjà commandée ; montant = prixAchatNet du devis, prix unitaire HT.\n    - La commande marquée « courante » est celle de la grille : ne reprends pas ses lignes, complète-la. Son fournisseur est dans son en-tête ; les prévisions d'achats (désignation, fournisseur souvent dans le commentaire) disent quels articles lui reviennent. La sous-traitance du devis n'est pas une fourniture : ne la commande jamais comme article. Une prévision au statut « Commandé » n'est pas une commande passée : seules les commandes fournisseurs le sont.\n    "
   },
   "promptsSuggeres": {
     "creation": [
+      "D'après le contexte de l'affaire, propose les lignes de cette commande pour ce qui reste à commander au devis (quantités réelles moins déjà commandé)",
       "Complète les articles manquants à partir des données déjà présentes dans cette commande",
       "Vérifie et corrige les références en doublon sans modifier les autres articles",
       "Complète les prix unitaires manquants pour les articles déjà définis"
     ],
     "analyse": [
+      "D'après le contexte de l'affaire, qu'est-ce qui reste à commander au devis ?",
       "Fais la synthèse de l'état d'avancement de cette commande fournisseur",
       "Liste les articles non livrés ou non facturés",
       "Quel est le montant total restant à régler ?"
@@ -53,6 +55,9 @@
       "regles": null,
       "promptsSuggeres": {
         "creation": [
+          "D'après le contexte de l'affaire, propose les lignes de cette commande pour ce qui reste à commander au devis (quantités réelles moins déjà commandé)",
+          "Propose les lignes de cette commande pour les prévisions d'achats de ce fournisseur, au prix d'achat net du devis",
+          "Liste dans le rapport les articles du devis déjà commandés, et ceux commandés en double",
           "Décompose ce devis fournisseur en liste d'articles à commander",
           "Génère une commande fournisseur complète à partir de ce document"
         ]
