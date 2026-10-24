@@ -269,6 +269,12 @@ const MANIFEST = {
  *            des cours du chapitre ou depuis des documents joints (PDF, ZIP).
  *            Le LLM ne retranscrit pas les lignes existantes — il crée uniquement
  *            le complément demandé.
+ *
+ * entrainement (2026-10-24) : un panel de questions semblables à celles du parcours
+ *            (joint par XSpro en document de contexte), que le site tire au hasard dans un
+ *            chapitre en mode Entraînement (« Questions tirées »). Correction automatique
+ *            seulement, questions indépendantes. Sa propre famille : les prompts de
+ *            création qu'envoie XSpro ne remplacent pas ses suggestions.
  */
 const MODES = {
 
@@ -368,6 +374,43 @@ const MODES = {
 
     formatReponse: promptConfig.modes.creation.formatReponse,
   },
+
+  // Seulement si le JSON pairé le déclare : un JSON plus ancien (copie de données pas encore
+  // remise à jour, JSON resté en cache dans un Worker en marche) ferait sinon tomber toute la vue,
+  // analyse et création comprises — constaté le 2026-10-24.
+  ...(promptConfig.modes.entrainement && { entrainement: {
+    label: 'Entraînement',
+    description: promptConfig.modes.entrainement.description,
+
+    // Famille propre : resolvePromptsSuggeresForMode (viewResolver.js) ne lui substitue pas les
+    // prompts de création venus de XSpro — ses suggestions sont celles du JSON pairé.
+    famille: 'entrainement',
+
+    // Mêmes colonnes que la création : un panel s'écrit comme de nouvelles questions.
+    surchargesColonnes: {
+      type:                  { width: 90, pinned:     'left'},
+      contenu:               { width: 380 },
+      regle:                 { width: 90 },
+      correction:            { width: 90 },
+      points:                { width: 60 },
+      choix:                 { width: 220 },
+      ordre_choix:           { width: 90 },
+      choixCorrect:          { width: 180 },
+    },
+
+    colonnesUiHidden:  ['ordreQuestion'],
+    colonnesLlmHidden: ['ordreQuestion'],
+
+    systemPrompt: promptConfig.modes.entrainement.systemPrompt,
+
+    regles: null,  // hérite du MANIFEST
+
+    promptsSuggeres: promptConfig.modes.entrainement.promptsSuggeres,
+
+    modele: null,
+
+    formatReponse: promptConfig.modes.entrainement.formatReponse,
+  } }),
 };
 
 // ── SELECT CHOIX ──────────────────────────────────────────────────────────────

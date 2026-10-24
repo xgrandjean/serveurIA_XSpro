@@ -2887,7 +2887,7 @@ function populatePromptSuggestions(promptsSuggeres) {
   if (Array.isArray(promptsSuggeres)) promptsSuggeres = { suggestion: promptsSuggeres };
 
   // Agrégation : ne garde que les catégories portant un tableau NON vide (jamais de groupe vide).
-  const labelParCle = { creation: 'Création', synthese: 'Synthèse', analyse: 'Analyse', suggestion: 'Suggestion' };
+  const labelParCle = { creation: 'Création', synthese: 'Synthèse', analyse: 'Analyse', entrainement: 'Entraînement', suggestion: 'Suggestion' };
   const groupes = [];
   for (const cle of Object.keys(promptsSuggeres)) {
     const list = promptsSuggeres[cle];
